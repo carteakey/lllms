@@ -1,0 +1,23 @@
+{
+  "base_models_dir": "./models",
+  "models": [
+    {
+      "repo_id": "ggml-org/gpt-oss-120b-GGUF",
+      "local_dir": "./models/ggml-org/gpt-oss-120b-GGUF",
+      "allow_patterns": ["*F16*"],
+      "description": "GPT OSS 120B model with F16 quantization"
+    },
+    {
+      "repo_id": "Qwen/Qwen3-32B-GGUF",
+      "local_dir": "./models/qwen/Qwen3-32B-GGUF",
+      "allow_patterns": ["*Q6_K*"],
+      "description": "Qwen3 32B model with Q6_K quantization"
+    },
+    {
+      "repo_id": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF",
+      "local_dir": "./models/qwen/Qwen3-30B-A3B-Instruct-2507-GGUF",
+      "allow_patterns": ["*Q8*"],
+      "description": "Qwen3 30B Instruct with Q8 quantization"
+    }
+  ]
+}
