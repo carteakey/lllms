@@ -1,0 +1,18 @@
+ llama-server \
+-hf unsloth/Qwen3-30B-A3B-GGUF:q4_k_m \
+--n-gpu-layers 0 \
+--jinja \
+--reasoning-format deepseek \
+-fa \
+-sm row \
+--temp 0.6 \
+--top-k 20 \
+--top-p 0.95 \
+--min-p 0 \
+-c 40960 \
+-n 32768 \
+--no-context-shift \
+--port 8080 \
+--host 0.0.0.0 \
+--metrics \
+--alias "Qwen3-30B (CPU Only)"

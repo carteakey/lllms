@@ -1,0 +1,13 @@
+& "C:\llama-cpp\llama-server.exe" `
+--host [127.0.0.1](http://127.0.0.1) --port 9045 `
+--model "C:\llama-cpp\models\Qwen3-30B-A3B.Q8_0.gguf" `
+--n-gpu-layers 99 --flash-attn --slots --metrics `
+--ubatch-size 512 --batch-size 512 `
+--presence-penalty 1.5 `
+--cache-type-k q8_0 --cache-type-v q8_0 `
+--no-context-shift --ctx-size 32768 --n-predict 32768 `
+--temp 0.6 --top-k 20 --top-p 0.95 --min-p 0 `
+--repeat-penalty 1.1 --jinja --reasoning-format deepseek `
+--threads 5 --threads-http 5 --cache-reuse 256 `
+--override-tensor 'blk\.([0-9]*[02468])\.ffn_.*_exps\.=CPU' `
+--no-mmap
