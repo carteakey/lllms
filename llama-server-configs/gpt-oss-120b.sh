@@ -1,0 +1,14 @@
+llama-server \
+    --model /data/models/gpt-oss-120b/gpt-oss-120b-F16.gguf \
+    --alias gpt-oss-120b \
+    --threads 8 \
+    --parallel 2 \
+    --cont-batching \
+    --n-gpu-layers 99 \
+    --n-cpu-moe 28 \
+    --ctx-size 262144 \
+    --flash-attn \
+    --temp 1.0 \
+    --top-p 1.0 \
+    --top-k 0 \
+    --jinja
