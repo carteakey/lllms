@@ -15,4 +15,6 @@
 *.user
 *.sln.docstates
 
+llama.cpp
+
 __pycache__

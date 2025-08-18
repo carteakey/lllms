@@ -5,6 +5,9 @@ export GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
 #this model has 36 MOE blocks. So cpu-moe 36 means all moe are running on the CPU. You can adjust this to move some MOE to the GPU, but it doesn't even make things that much faster.
 #everything else on the GPU, about 8GB
 #max context (128k), flash attention
+    # --n-cpu-moe 31 \
+    # -ot ".ffn_(up|down)_exps.=CPU" \
+    #
 #
 ./llama.cpp/build/bin/llama-server  \
     -m /home/kchauhan/Desktop/repos/lllms/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf \
@@ -15,14 +18,32 @@ export GGML_CUDA_ENABLE_UNIFIED_MEMORY=1
     --min-p 0.0 \
     --top-p 1.0 \
     --cache-type-k q8_0 \
-    --cache-type-v q8_0 \
+    --cache-type-v q4_0 \
     --top-k 0.0 \
     -fa \
     --jinja \
     --reasoning-format none \
     --chat-template-file /home/kchauhan/Desktop/repos/lllms/chat-template.jinja \
-    --chat-template-kwargs '{"reasoning_effort": "high"}' \
+    --chat-template-kwargs "{\"reasoning_effort\": \"high\"}"
     --host 0.0.0.0 --port 8502 --api-key "dummy" \
+
+# ./llama.cpp/build/bin/llama-server  \
+#     -m /home/kchauhan/Desktop/repos/lllms/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf \
+#     --n-cpu-moe 31 \
+#     --ctx-size 16384 \
+#     --n-gpu-layers 99 \
+#     --temp 1.0 \
+#     --min-p 0.0 \
+#     --top-p 1.0 \
+#     --cache-type-k q8_0 \
+#     --cache-type-v q4_0 \
+#     --top-k 0.0 \
+#     -fa \
+#     --jinja \
+#     --reasoning-format none \
+#     --chat-template-file /home/kchauhan/Desktop/repos/lllms/chat-template.jinja \
+#     --chat-template-kwargs "{\"reasoning_effort\": \"high\"}"
+#     --host 0.0.0.0 --port 8502 --api-key "dummy" \
 
 # ./llama.cpp/build/bin/llama-server \
 #     -m models/qwen/Qwen3-30B-A3B-Instruct-2507-GGUF/Qwen3-30B-A3B-Instruct-2507-Q8_0.gguf \

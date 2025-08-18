@@ -14,21 +14,27 @@
       "description": "GPT OSS 120B model with F16 quantization"
     },
     {
-      "repo_id": "Qwen/Qwen3-32B-GGUF",
-      "local_dir": "/home/kchauhan/Desktop/repos/lllms/models/qwen/Qwen3-32B-GGUF",
-      "allow_patterns": ["*Q6_K*"],
-      "description": "Qwen3 32B model with Q6_K quantization"
+      "repo_id": "unsloth/gpt-oss-120b-GGUF",
+      "local_dir": "/home/kchauhan/Desktop/repos/lllms/models/unsloth/gpt-oss-120b-GGUF",
+      "allow_patterns": ["*Q2_K_L*"],
+      "description": "GPT OSS 120B model with Q2 quantization"
     },
+    // {
+    //   "repo_id": "Qwen/Qwen3-32B-GGUF",
+    //   "local_dir": "/home/kchauhan/Desktop/repos/lllms/models/qwen/Qwen3-32B-GGUF",
+    //   "allow_patterns": ["*Q6_K*"],
+    //   "description": "Qwen3 32B model with Q6_K quantization"
+    // },
     {
-      "repo_id": "unsloth/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
-      "local_dir": "/home/kchauhan/Desktop/repos/lllms/models/qwen/unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
-      "allow_patterns": ["*IQ4_NL*", "*Q6_K*"],
+      "repo_id": "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
+      "local_dir": "/home/kchauhan/Desktop/repos/lllms/models/qwen/Qwen3-Coder-30B-A3B-Instruct-GGUF",
+      "allow_patterns": ["*IQ4_NL*"],
       "description": "Qwen3 30B Instruct with Q6_K quantization"
-    }
+    },
     {
       "repo_id": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF",
       "local_dir": "/home/kchauhan/Desktop/repos/lllms/models/qwen/Qwen3-30B-A3B-Instruct-2507-GGUF",
-      "allow_patterns": ["*IQ4_NL*", "*Q8*"],
+      "allow_patterns": ["*IQ4_NL*"],
       "description": "Qwen3 30B Instruct with Q8 quantization"
     }
   ]
