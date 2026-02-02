@@ -11,14 +11,13 @@ export GGML_VK_ALLOW_SYSMEM_FALLBACK=0
 
 ./vendor/llama.cpp/build/bin/llama-bench \
 -m /home/kchauhan/Desktop/repos/lllms/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf \
---n-cpu-moe 31 \
+--n-cpu-moe 29 \
 --n-gpu-layers 99 \
---threads 6 \
+--threads 10 \
 -ub 2048 \
 -b 2048 \
---cache-type-k q8_0 \
---cache-type-v q4_0 \
---mmap 0
+--mmap 0 \
+
 #     --temp 1.0 \
 #     --top-k 100.0 \
 #     --min-p 0.0 \

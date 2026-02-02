@@ -161,7 +161,7 @@ if [ -n "$CUDA_ARCH" ]; then
     log "Configuring llama.cpp with CUDA support (architecture: $CUDA_ARCH)..."
     CMAKE_ARGS+=(
         "-DGGML_CUDA=ON"
-        "-DGGML_CUBLAS=ON"
+        "-DGGML_CUDA_FORCE_CUBLAS=ON"
         "-DGGML_CUDA_FA_ALL_QUANTS=ON"
         "-DCMAKE_CUDA_ARCHITECTURES=$CUDA_ARCH"
     )
