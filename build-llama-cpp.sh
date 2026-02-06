@@ -115,6 +115,8 @@ log "Checking and installing dependencies..."
 install_dependencies
 log_ok "System dependencies"
 
+install_cuda
+
 # Check for CUDA
 if check_cuda; then
     log_ok "CUDA Toolkit"

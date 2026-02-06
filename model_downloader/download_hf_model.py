@@ -40,7 +40,8 @@ class ModelDownloader:
         allow_patterns: List[str] = None,
         ignore_patterns: List[str] = None,
         revision: str = None,
-        force_download: bool = False
+        force_download: bool = False,
+        resume_download: bool = True
     ) -> str:
         """
         Download a model from HuggingFace Hub.
@@ -52,6 +53,7 @@ class ModelDownloader:
             ignore_patterns: List of file patterns to exclude
             revision: Specific revision/branch to download
             force_download: Whether to re-download existing files
+            resume_download: Whether to resume interrupted downloads (default: True)
 
         Returns:
             str: Path to the downloaded model directory
@@ -78,7 +80,9 @@ class ModelDownloader:
                 allow_patterns=allow_patterns,
                 ignore_patterns=ignore_patterns,
                 revision=revision,
-                force_download=force_download
+                force_download=force_download,
+                resume_download=resume_download,
+                local_dir_use_symlinks=False
             )
             print(f"✓ Successfully downloaded to: {downloaded_path}")
             return downloaded_path
@@ -106,20 +110,25 @@ def create_sample_config(config_path: str):
         "base_models_dir": "./models",
         "models": [
             {
+                "enabled": true,
                 "repo_id": "microsoft/DialoGPT-medium",
                 "allow_patterns": ["*.bin", "*.json", "*.txt"],
+                "resume_download": true,
                 "description": "DialoGPT medium model"
             },
             {
+                "enabled": true,
                 "repo_id": "Qwen/Qwen3-32B-GGUF",
                 "allow_patterns": ["*Q6_K*"],
                 "local_dir": "./models/qwen/Qwen3-32B-GGUF",
+                "resume_download": true,
                 "description": "Qwen3 32B model with Q6_K quantization"
             },
             {
+                "enabled": false,
                 "repo_id": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF",
                 "allow_patterns": ["*Q8*"],
-                "description": "Qwen3 30B Instruct with Q8 quantization"
+                "description": "Qwen3 30B Instruct with Q8 quantization (disabled by default)"
             }
         ]
     }
@@ -191,6 +200,11 @@ Examples:
         help="Re-download existing files"
     )
     parser.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="Disable resume for interrupted downloads (default: resume enabled)"
+    )
+    parser.add_argument(
         "--base-models-dir",
         help="Base directory for all models (default: ./models)"
     )
@@ -220,14 +234,23 @@ Examples:
             print("No models found in configuration file")
             return
 
-        print(f"Found {len(models)} models in configuration")
-        for i, model_config in enumerate(models, 1):
+        # Filter enabled models
+        enabled_models = [m for m in models if m.get("enabled", True)]
+        disabled_count = len(models) - len(enabled_models)
+
+        print(f"Found {len(models)} models in configuration ({len(enabled_models)} enabled, {disabled_count} disabled)")
+
+        if not enabled_models:
+            print("No enabled models to download")
+            return
+
+        for i, model_config in enumerate(enabled_models, 1):
             repo_id = model_config.get("repo_id")
             if not repo_id:
                 print(f"Skipping model {i}: no repo_id specified")
                 continue
 
-            print(f"\n[{i}/{len(models)}] Processing {repo_id}")
+            print(f"\n[{i}/{len(enabled_models)}] Processing {repo_id}")
             if "description" in model_config:
                 print(f"  Description: {model_config['description']}")
 
@@ -238,7 +261,8 @@ Examples:
                     allow_patterns=model_config.get("allow_patterns"),
                     ignore_patterns=model_config.get("ignore_patterns"),
                     revision=model_config.get("revision"),
-                    force_download=model_config.get("force_download", False)
+                    force_download=model_config.get("force_download", False),
+                    resume_download=model_config.get("resume_download", True)
                 )
             except Exception as e:
                 print(f"Failed to download {repo_id}: {e}")
@@ -252,7 +276,8 @@ Examples:
             allow_patterns=args.allow_patterns,
             ignore_patterns=args.ignore_patterns,
             revision=args.revision,
-            force_download=args.force_download
+            force_download=args.force_download,
+            resume_download=not args.no_resume
         )
 
     else:

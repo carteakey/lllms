@@ -7,6 +7,7 @@ A flexible and configurable tool for downloading models from HuggingFace Hub wit
 - **Dynamic Configuration**: Use JSON config files or command-line arguments
 - **Pattern Matching**: Include/exclude specific file patterns (e.g., `*Q8*`, `*.bin`)
 - **Batch Downloads**: Download multiple models in one go
+- **Enable/Disable Models**: Toggle models on/off without commenting them out
 - **Auto-directory Generation**: Automatically organize models by repository structure
 - **Fast Downloads**: Uses `hf_transfer` for improved download speeds
 - **Error Handling**: Robust error handling with detailed feedback
@@ -61,16 +62,24 @@ python download_hf_model.py --create-config my_models.json
   "base_models_dir": "./models",
   "models": [
     {
+      "enabled": true,
       "repo_id": "microsoft/DialoGPT-medium",
       "allow_patterns": ["*.bin", "*.json", "*.txt"],
       "description": "DialoGPT medium conversational model"
     },
     {
+      "enabled": true,
       "repo_id": "Qwen/Qwen3-32B-GGUF",
       "local_dir": "./models/qwen/Qwen3-32B-GGUF",
       "allow_patterns": ["*Q6_K*"],
       "ignore_patterns": ["*.md"],
       "description": "Qwen3 32B with Q6_K quantization"
+    },
+    {
+      "enabled": false,
+      "repo_id": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF",
+      "allow_patterns": ["*Q8*"],
+      "description": "Qwen3 30B Instruct - disabled, won't download"
     }
   ]
 }
@@ -96,6 +105,7 @@ python download_hf_model.py --create-config my_models.json
 
 Each model in the configuration can have these properties:
 
+- `enabled` (optional, default: `true`): Set to `false` to skip downloading this model without removing it from the config
 - `repo_id` (required): HuggingFace repository ID
 - `local_dir` (optional): Custom local directory path
 - `allow_patterns` (optional): List of file patterns to include
@@ -153,6 +163,37 @@ python download_hf_model.py --repo-id microsoft/DialoGPT-medium --ignore-pattern
 # Download to specific directory structure
 python download_hf_model.py --repo-id microsoft/DialoGPT-medium --local-dir ./conversations/dialog-medium
 ```
+
+### Enable/Disable Models in Config
+
+You can temporarily disable models in your configuration without deleting or commenting them out:
+
+```json
+{
+  "models": [
+    {
+      "enabled": true,
+      "repo_id": "microsoft/DialoGPT-medium",
+      "description": "This will download"
+    },
+    {
+      "enabled": false,
+      "repo_id": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF",
+      "description": "This will be skipped"
+    },
+    {
+      "repo_id": "Qwen/Qwen3-32B-GGUF",
+      "description": "No 'enabled' field means enabled by default"
+    }
+  ]
+}
+```
+
+This is useful for:
+- Testing with a subset of models
+- Temporarily skipping large downloads
+- Keeping model configurations for future use
+- Managing download priorities
 
 ## Troubleshooting
 
