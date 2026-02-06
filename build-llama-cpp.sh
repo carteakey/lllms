@@ -2,9 +2,9 @@
 #
 # build-llama-cpp.sh
 # ------------------
-# Builds ggerganov/llama.cpp on Ubuntu Linux with CUDA support.
+# Builds ggerganov/llama.cpp on Ubuntu/Arch Linux with CUDA support.
 #
-# • Automatically detects and installs missing dependencies
+# • Automatically detects OS (Ubuntu/Arch) and installs missing dependencies
 # • Detects CUDA installation and architecture
 # • Re-usable: just run the script; it installs only what is missing
 # • Pass CUDA_ARCH=<SM> to target a different GPU architecture
@@ -30,6 +30,31 @@ log_ok() {
 
 check_command() {
     command -v "$1" >/dev/null 2>&1
+}
+
+detect_os() {
+    # Check for Arch-based systems first (many have /etc/os-release)
+    if [ -f /etc/arch-release ] || [ -f /etc/artix-release ]; then
+        echo "arch"
+        return
+    fi
+
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        # Check ID_LIKE for Arch-based distributions
+        if echo "$ID_LIKE" | grep -qi "arch"; then
+            echo "arch"
+        elif echo "$ID" | grep -qi "arch"; then
+            echo "arch"
+        else
+            echo "$ID"
+        fi
+    elif [ -f /etc/lsb-release ]; then
+        . /etc/lsb-release
+        echo "$DISTRIB_ID" | tr '[:upper:]' '[:lower:]'
+    else
+        echo "unknown"
+    fi
 }
 
 check_cuda() {
@@ -61,7 +86,7 @@ detect_cuda_arch() {
     esac
 }
 
-install_dependencies() {
+install_dependencies_ubuntu() {
     local missing_deps=()
 
     # Check for required packages
@@ -85,7 +110,52 @@ install_dependencies() {
     fi
 }
 
-install_cuda() {
+install_dependencies_arch() {
+    local missing_deps=()
+
+    # Check for required packages on Arch
+    local deps=("base-devel" "cmake" "curl" "git")
+
+    for dep in "${deps[@]}"; do
+        if ! pacman -Q "$dep" >/dev/null 2>&1; then
+            missing_deps+=("$dep")
+        fi
+    done
+
+    # Check for optional but useful packages
+    if ! check_command lspci; then
+        if ! pacman -Q pciutils >/dev/null 2>&1; then
+            missing_deps+=("pciutils")
+        fi
+    fi
+
+    if [ ${#missing_deps[@]} -gt 0 ]; then
+        log "Installing missing dependencies: ${missing_deps[*]}"
+        sudo pacman -Sy --noconfirm --needed "${missing_deps[@]}"
+    fi
+}
+
+install_dependencies() {
+    local os_type
+    os_type=$(detect_os)
+
+    log "Detected OS: $os_type"
+
+    case "$os_type" in
+        ubuntu|debian|linuxmint|pop)
+            install_dependencies_ubuntu
+            ;;
+        arch|manjaro|endeavouros|cachyos|garuda|artix)
+            install_dependencies_arch
+            ;;
+        *)
+            log "WARNING: Unsupported OS ($os_type). Attempting Ubuntu-style package installation..."
+            install_dependencies_ubuntu
+            ;;
+    esac
+}
+
+install_cuda_ubuntu() {
     if check_cuda; then
         return 0
     fi
@@ -93,7 +163,10 @@ install_cuda() {
     log "CUDA not found. Installing CUDA toolkit..."
 
     # Add NVIDIA package repository
-    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu$(lsb_release -rs | tr -d .)/x86_64/cuda-keyring_1.0-1_all.deb
+    local ubuntu_version
+    ubuntu_version=$(lsb_release -rs | tr -d .)
+
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${ubuntu_version}/x86_64/cuda-keyring_1.0-1_all.deb
     sudo dpkg -i cuda-keyring_1.0-1_all.deb
     sudo apt-get update
     sudo apt-get -y install cuda-toolkit
@@ -103,6 +176,40 @@ install_cuda() {
     echo 'export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
     export PATH=/usr/local/cuda/bin:$PATH
     export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+}
+
+install_cuda_arch() {
+    if check_cuda; then
+        return 0
+    fi
+
+    log "CUDA not found. Installing CUDA toolkit..."
+
+    # Install CUDA from official repositories
+    sudo pacman -Sy --noconfirm --needed cuda
+
+    # Add to PATH
+    echo 'export PATH=/opt/cuda/bin:$PATH' >> ~/.bashrc
+    echo 'export LD_LIBRARY_PATH=/opt/cuda/lib64:$LD_LIBRARY_PATH' >> ~/.bashrc
+    export PATH=/opt/cuda/bin:$PATH
+    export LD_LIBRARY_PATH=/opt/cuda/lib64:$LD_LIBRARY_PATH
+}
+
+install_cuda() {
+    local os_type
+    os_type=$(detect_os)
+
+    case "$os_type" in
+        ubuntu|debian|linuxmint|pop)
+            install_cuda_ubuntu
+            ;;
+        arch|manjaro|endeavouros|cachyos|garuda|artix)
+            install_cuda_arch
+            ;;
+        *)
+            log "WARNING: Unsupported OS for automatic CUDA installation. Skipping..."
+            ;;
+    esac
 }
 
 # ---------------------------------------------------------------------------
