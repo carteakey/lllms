@@ -6,7 +6,7 @@ import sys
 
 def main() -> None:
     try:
-        from homelab_tui import HomelabTUI
+        from l3ms import L3MSApp
     except ModuleNotFoundError as exc:
         if exc.name == "textual":
             print("Error: textual is not installed.")
@@ -14,7 +14,7 @@ def main() -> None:
             raise SystemExit(1)
         raise
 
-    app = HomelabTUI()
+    app = L3MSApp()
     app.run()
 
 

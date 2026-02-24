@@ -404,8 +404,8 @@ class MainScreen(Screen):
         yield Footer()
 
 
-class HomelabTUI(App[None]):
-    TITLE = "Homelab LLM Toolkit"
+class L3MSApp(App[None]):
+    TITLE = "L3MS"
     CSS_PATH = "app.tcss"
     BINDINGS = [
         ("q", "quit", "Quit"),

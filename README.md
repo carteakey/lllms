@@ -5,7 +5,7 @@ model downloads and llama.cpp workflows for run, bench, and maintenance tasks.
 
 ## TUI
 
-A terminal UI is now available for backend-first workflows.
+`L3MS` is the terminal UI for backend-first workflows.
 
 Install:
 
@@ -16,7 +16,7 @@ python3 -m pip install -r requirements-tui.txt
 Start:
 
 ```bash
-python3 homelab_toolkit_tui.py
+python3 l3ms.py
 ```
 
 Current TUI scope in this feature:
