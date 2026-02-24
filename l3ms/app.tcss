@@ -64,3 +64,15 @@ Checkbox {
     height: 14;
     border: round $accent;
 }
+
+#run_selected_path {
+    margin-bottom: 1;
+    padding: 0 1;
+    border: round $accent;
+}
+
+#run_editor {
+    height: 1fr;
+    min-height: 16;
+    border: round $accent;
+}

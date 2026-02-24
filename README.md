@@ -25,8 +25,10 @@ Current TUI scope in this feature:
 - Model config editor (add/apply/delete)
 - Config validation and save with versioned backups in `.toolkit/download_config_versions/`
 - Download actions for selected model or all enabled models
+- Keyboard-first shortcuts for Download workflow (`F1`, `Alt+T`, `Alt+I`, `Alt+O`, `Alt+W`, `Alt+V`, `Alt+D`, `Alt+E`)
 - Run Models tab with run/bench script inventory, filter, start/stop, live output, and extra args
-- Keyboard-first shortcuts for Run workflow (`F2`, `Ctrl+F`, `Ctrl+J`, `Ctrl+M`, `Ctrl+R`, `Ctrl+S`, `Ctrl+L`)
+- Run Models script editor with per-script version snapshots in `.toolkit/script_versions/`
+- Keyboard-first shortcuts for Run workflow (`F2`, `Ctrl+F`, `Ctrl+J`, `Ctrl+U`, `Ctrl+M`, `Ctrl+R`, `Ctrl+S`, `Ctrl+P`)
 - Placeholder tabs for `Maintenance`, `Settings`, and `Jobs`
 
 Roadmap note:
