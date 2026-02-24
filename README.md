@@ -27,6 +27,11 @@ Current TUI scope in this feature:
 - Download actions for selected model or all enabled models
 - Placeholder tabs for `Run Models`, `Maintenance`, `Settings`, and `Jobs`
 
+Roadmap note:
+
+- `L3MS` is intentionally Python-first for fast iteration.
+- Plan: port `L3MS` to Rust after feature scope stabilizes.
+
 ## Project Layout
 
 - `model_downloader/`: Hugging Face downloader + model config
