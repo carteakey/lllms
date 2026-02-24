@@ -36,6 +36,12 @@ TabbedContent {
     margin-bottom: 1;
 }
 
+#run_scripts_table {
+    height: 1fr;
+    min-height: 14;
+    margin-bottom: 1;
+}
+
 Input {
     width: 1fr;
     min-width: 20;
@@ -51,5 +57,10 @@ Checkbox {
 
 #activity_log {
     height: 12;
+    border: round $accent;
+}
+
+#run_log {
+    height: 14;
     border: round $accent;
 }

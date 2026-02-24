@@ -25,7 +25,9 @@ Current TUI scope in this feature:
 - Model config editor (add/apply/delete)
 - Config validation and save with versioned backups in `.toolkit/download_config_versions/`
 - Download actions for selected model or all enabled models
-- Placeholder tabs for `Run Models`, `Maintenance`, `Settings`, and `Jobs`
+- Run Models tab with run/bench script inventory, filter, start/stop, live output, and extra args
+- Keyboard-first shortcuts for Run workflow (`F2`, `Ctrl+F`, `Ctrl+J`, `Ctrl+M`, `Ctrl+R`, `Ctrl+S`, `Ctrl+L`)
+- Placeholder tabs for `Maintenance`, `Settings`, and `Jobs`
 
 Roadmap note:
 

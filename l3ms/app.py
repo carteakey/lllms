@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import shlex
-import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -38,6 +37,24 @@ from .config_store import (
 
 ROOT = Path(__file__).resolve().parents[1]
 DOWNLOAD_SCRIPT = ROOT / "model_downloader" / "download_hf_model.py"
+RUN_SCRIPT_GLOB = "run-models/run-llama-cpp-*.sh"
+BENCH_SCRIPT_GLOB = "bench-models/bench-llama-cpp-*.sh"
+
+
+def collect_scripts(pattern: str) -> List[Path]:
+    return sorted([path for path in ROOT.glob(pattern) if path.is_file()])
+
+
+def command_for_script(path: Path, extra_args: List[str]) -> List[str]:
+    suffix = path.suffix.lower()
+    if suffix == ".sh":
+        return ["bash", str(path), *extra_args]
+    if suffix == ".ps1":
+        return ["pwsh", "-File", str(path), *extra_args]
+    if suffix in {".bat", ".cmd"}:
+        # Windows cmd does not support mixed args reliably cross-platform in this TUI.
+        return ["cmd", "/c", str(path), *extra_args]
+    return ["bash", str(path), *extra_args]
 
 
 class DownloadPanel(Static):
@@ -377,6 +394,188 @@ class DownloadPanel(Static):
             self.set_status(f"Download command failed: {exc}")
 
 
+class RunPanel(Static):
+    def __init__(self) -> None:
+        super().__init__(id="run_panel")
+        self.mode = "run"
+        self.run_scripts: List[Path] = []
+        self.bench_scripts: List[Path] = []
+        self.filtered: List[Path] = []
+        self.selected_script: Optional[Path] = None
+        self.running_proc: Optional[asyncio.subprocess.Process] = None
+        self.running_task: Optional[asyncio.Task[None]] = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="panel"):
+            with Horizontal(classes="row"):
+                yield Label("Mode")
+                yield Select([("Run", "run"), ("Bench", "bench")], value="run", id="run_mode")
+                yield Button("Refresh", id="run_refresh")
+                yield Button("Start (Ctrl+R)", id="run_start", variant="success")
+                yield Button("Stop (Ctrl+S)", id="run_stop", variant="error")
+
+            with Horizontal(classes="row"):
+                yield Input(placeholder="filter scripts (Ctrl+F)", id="run_filter")
+                yield Input(placeholder="extra args appended to script", id="run_extra_args")
+
+            yield DataTable(id="run_scripts_table")
+            yield Label("Keys: Ctrl+F filter, Ctrl+J table, Ctrl+M toggle mode, Ctrl+R start, Ctrl+S stop, Ctrl+L clear log")
+            yield RichLog(id="run_log", wrap=True, markup=False)
+
+    def on_mount(self) -> None:
+        table = self.query_one("#run_scripts_table", DataTable)
+        table.cursor_type = "row"
+        table.add_columns("#", "script")
+        self.refresh_script_inventory()
+        self.focus_table()
+
+    def set_status(self, message: str) -> None:
+        self.query_one("#run_log", RichLog).write(message)
+
+    def focus_filter(self) -> None:
+        self.query_one("#run_filter", Input).focus()
+
+    def focus_table(self) -> None:
+        self.query_one("#run_scripts_table", DataTable).focus()
+
+    def clear_log(self) -> None:
+        self.query_one("#run_log", RichLog).clear()
+        self.set_status("Run log cleared")
+
+    def refresh_script_inventory(self) -> None:
+        self.run_scripts = collect_scripts(RUN_SCRIPT_GLOB)
+        self.bench_scripts = collect_scripts(BENCH_SCRIPT_GLOB)
+        self.refresh_table()
+
+    def current_scripts(self) -> List[Path]:
+        return self.bench_scripts if self.mode == "bench" else self.run_scripts
+
+    def refresh_table(self) -> None:
+        table = self.query_one("#run_scripts_table", DataTable)
+        filter_text = self.query_one("#run_filter", Input).value.strip().lower()
+        scripts = self.current_scripts()
+        self.filtered = []
+
+        table.clear()
+        for i, script in enumerate(scripts):
+            rel = script.relative_to(ROOT).as_posix()
+            if filter_text and filter_text not in rel.lower():
+                continue
+            self.filtered.append(script)
+            table.add_row(str(len(self.filtered) - 1), rel, key=str(len(self.filtered) - 1))
+
+        if self.filtered:
+            self.selected_script = self.filtered[0]
+            table.move_cursor(row=0, column=0)
+            self.set_status(
+                f"Loaded {len(self.filtered)} {self.mode} script(s) "
+                f"({len(scripts)} total before filter)"
+            )
+        else:
+            self.selected_script = None
+            self.set_status(f"No {self.mode} scripts match current filter")
+
+    def toggle_mode(self) -> None:
+        select = self.query_one("#run_mode", Select)
+        self.mode = "bench" if self.mode == "run" else "run"
+        select.value = self.mode
+        self.refresh_table()
+
+    async def run_script(self) -> None:
+        if self.running_task and not self.running_task.done():
+            self.set_status("A run/bench process is already active")
+            return
+        table = self.query_one("#run_scripts_table", DataTable)
+        if self.filtered and 0 <= table.cursor_row < len(self.filtered):
+            self.selected_script = self.filtered[table.cursor_row]
+
+        if self.selected_script is None:
+            self.set_status("No script selected")
+            return
+
+        extra_args_raw = self.query_one("#run_extra_args", Input).value.strip()
+        try:
+            extra_args = shlex.split(extra_args_raw) if extra_args_raw else []
+        except ValueError as exc:
+            self.set_status(f"Invalid extra args: {exc}")
+            return
+
+        cmd = command_for_script(self.selected_script, extra_args)
+        self.running_task = asyncio.create_task(self._stream_command(cmd))
+        await self.running_task
+
+    async def _stream_command(self, cmd: List[str]) -> None:
+        self.set_status(f"$ {' '.join(shlex.quote(part) for part in cmd)}")
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(ROOT),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+        self.running_proc = proc
+        assert proc.stdout is not None
+
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            self.set_status(line.decode("utf-8", errors="replace").rstrip())
+
+        rc = await proc.wait()
+        self.running_proc = None
+        self.set_status(f"Process exited with code {rc}")
+
+    async def stop_script(self) -> None:
+        proc = self.running_proc
+        if proc is None:
+            self.set_status("No active run/bench process")
+            return
+
+        self.set_status("Stopping process...")
+        try:
+            proc.terminate()
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+        finally:
+            self.running_proc = None
+        self.set_status("Process stopped")
+
+    @on(DataTable.RowSelected, "#run_scripts_table")
+    def on_script_selected(self, event: DataTable.RowSelected) -> None:
+        try:
+            idx = int(str(event.row_key.value))
+        except (TypeError, ValueError, AttributeError):
+            return
+        if 0 <= idx < len(self.filtered):
+            self.selected_script = self.filtered[idx]
+
+    @on(Select.Changed, "#run_mode")
+    def on_mode_changed(self, event: Select.Changed) -> None:
+        value = str(event.value or "run")
+        if value not in {"run", "bench"}:
+            return
+        self.mode = value
+        self.refresh_table()
+
+    @on(Input.Changed, "#run_filter")
+    def on_filter_changed(self, _: Input.Changed) -> None:
+        self.refresh_table()
+
+    @on(Button.Pressed, "#run_refresh")
+    def on_refresh(self) -> None:
+        self.refresh_script_inventory()
+
+    @on(Button.Pressed, "#run_start")
+    async def on_start(self) -> None:
+        await self.run_script()
+
+    @on(Button.Pressed, "#run_stop")
+    async def on_stop(self) -> None:
+        await self.stop_script()
+
+
 class PlaceholderPanel(Static):
     def __init__(self, title: str) -> None:
         super().__init__()
@@ -390,11 +589,11 @@ class PlaceholderPanel(Static):
 class MainScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with TabbedContent(initial="download"):
+        with TabbedContent(initial="download", id="main_tabs"):
             with TabPane("Download", id="download"):
                 yield DownloadPanel()
             with TabPane("Run Models", id="run"):
-                yield PlaceholderPanel("Run/bench scripts")
+                yield RunPanel()
             with TabPane("Maintenance", id="maintenance"):
                 yield PlaceholderPanel("Maintenance scripts")
             with TabPane("Settings", id="settings"):
@@ -409,7 +608,86 @@ class L3MSApp(App[None]):
     CSS_PATH = "app.tcss"
     BINDINGS = [
         ("q", "quit", "Quit"),
+        ("f1", "tab_download", "Download Tab"),
+        ("f2", "tab_run", "Run Tab"),
+        ("f3", "tab_maintenance", "Maintenance Tab"),
+        ("f4", "tab_settings", "Settings Tab"),
+        ("f5", "tab_jobs", "Jobs Tab"),
+        ("ctrl+r", "run_start", "Run Script"),
+        ("ctrl+s", "run_stop", "Stop Script"),
+        ("ctrl+f", "run_focus_filter", "Run Filter"),
+        ("ctrl+j", "run_focus_table", "Run Table"),
+        ("ctrl+l", "run_clear_log", "Run Log Clear"),
+        ("ctrl+m", "run_toggle_mode", "Run Mode"),
     ]
 
     def on_mount(self) -> None:
         self.push_screen(MainScreen())
+
+    def get_run_panel(self) -> Optional[RunPanel]:
+        if not self.screen:
+            return None
+        try:
+            return self.screen.query_one("#run_panel", RunPanel)
+        except Exception:
+            return None
+
+    def activate_tab(self, tab_id: str) -> None:
+        if not self.screen:
+            return
+        try:
+            tabs = self.screen.query_one("#main_tabs", TabbedContent)
+        except Exception:
+            return
+        tabs.active = tab_id
+
+    def action_tab_download(self) -> None:
+        self.activate_tab("download")
+
+    def action_tab_run(self) -> None:
+        self.activate_tab("run")
+
+    def action_tab_maintenance(self) -> None:
+        self.activate_tab("maintenance")
+
+    def action_tab_settings(self) -> None:
+        self.activate_tab("settings")
+
+    def action_tab_jobs(self) -> None:
+        self.activate_tab("jobs")
+
+    async def action_run_start(self) -> None:
+        self.activate_tab("run")
+        panel = self.get_run_panel()
+        if panel:
+            await panel.run_script()
+
+    async def action_run_stop(self) -> None:
+        self.activate_tab("run")
+        panel = self.get_run_panel()
+        if panel:
+            await panel.stop_script()
+
+    def action_run_focus_filter(self) -> None:
+        self.activate_tab("run")
+        panel = self.get_run_panel()
+        if panel:
+            panel.focus_filter()
+
+    def action_run_focus_table(self) -> None:
+        self.activate_tab("run")
+        panel = self.get_run_panel()
+        if panel:
+            panel.focus_table()
+
+    def action_run_clear_log(self) -> None:
+        self.activate_tab("run")
+        panel = self.get_run_panel()
+        if panel:
+            panel.clear_log()
+
+    def action_run_toggle_mode(self) -> None:
+        self.activate_tab("run")
+        panel = self.get_run_panel()
+        if panel:
+            panel.toggle_mode()
