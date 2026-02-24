@@ -71,6 +71,13 @@ Checkbox {
     border: round $accent;
 }
 
+#run_current_model,
+#run_resources {
+    width: 1fr;
+    padding: 0 1;
+    border: round $accent;
+}
+
 #run_editor {
     height: 1fr;
     min-height: 16;

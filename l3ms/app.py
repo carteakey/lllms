@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import shlex
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -483,6 +484,8 @@ class RunPanel(Static):
         self.selected_script: Optional[Path] = None
         self.running_proc: Optional[asyncio.subprocess.Process] = None
         self.running_task: Optional[asyncio.Task[None]] = None
+        self.resource_task: Optional[asyncio.Task[None]] = None
+        self.running_started_at: Optional[float] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel"):
@@ -492,6 +495,9 @@ class RunPanel(Static):
                 yield Button("Refresh", id="run_refresh")
                 yield Button("Start (Ctrl+R)", id="run_start", variant="success")
                 yield Button("Stop (Ctrl+S)", id="run_stop", variant="error")
+            with Horizontal(classes="row"):
+                yield Static("Current: idle", id="run_current_model")
+                yield Static("Resources: idle", id="run_resources")
 
             with Horizontal(classes="row"):
                 yield Input(placeholder="filter scripts (Ctrl+F)", id="run_filter")
@@ -541,6 +547,10 @@ class RunPanel(Static):
         self.query_one("#run_log", RichLog).clear()
         self.set_status("Run log cleared")
 
+    def set_runtime_state(self, model: str, resources: str) -> None:
+        self.query_one("#run_current_model", Static).update(model)
+        self.query_one("#run_resources", Static).update(resources)
+
     def refresh_script_inventory(self) -> None:
         self.run_scripts = collect_scripts(RUN_SCRIPT_GLOB)
         self.bench_scripts = collect_scripts(BENCH_SCRIPT_GLOB)
@@ -584,6 +594,15 @@ class RunPanel(Static):
         self.mode = "bench" if self.mode == "run" else "run"
         select.value = self.mode
         self.refresh_table()
+
+    def selected_model_name(self) -> str:
+        if self.selected_script is None:
+            return "idle"
+        name = self.selected_script.stem
+        for prefix in ("run-llama-cpp-", "bench-llama-cpp-"):
+            if name.startswith(prefix):
+                name = name[len(prefix) :]
+        return name
 
     def _sync_selected_from_cursor(self) -> None:
         table = self.query_one("#run_scripts_table", DataTable)
@@ -662,8 +681,94 @@ class RunPanel(Static):
             return
 
         cmd = command_for_script(self.selected_script, extra_args)
+        model_name = self.selected_model_name()
+        self.running_started_at = asyncio.get_running_loop().time()
+        self.set_runtime_state(f"Current: {model_name} ({self.mode})", "Resources: starting...")
         self.running_task = asyncio.create_task(self._stream_command(cmd))
         await self.running_task
+
+    async def _resource_snapshot_for_group(self, pgid: int) -> str:
+        proc = await asyncio.create_subprocess_exec(
+            "ps",
+            "-g",
+            str(pgid),
+            "-o",
+            "pid=,pcpu=,rss=",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await proc.communicate()
+        rows = [line.strip() for line in out.decode("utf-8", errors="replace").splitlines() if line.strip()]
+
+        pids: List[int] = []
+        cpu_total = 0.0
+        rss_kib_total = 0
+        for row in rows:
+            parts = row.split()
+            if len(parts) < 3:
+                continue
+            try:
+                pid = int(parts[0])
+                cpu = float(parts[1])
+                rss = int(parts[2])
+            except ValueError:
+                continue
+            pids.append(pid)
+            cpu_total += cpu
+            rss_kib_total += rss
+
+        gpu_mem_mib: Optional[int] = None
+        if pids and shutil.which("nvidia-smi"):
+            gpu = await asyncio.create_subprocess_exec(
+                "nvidia-smi",
+                "--query-compute-apps=pid,used_memory",
+                "--format=csv,noheader,nounits",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            gpu_out, _ = await gpu.communicate()
+            gpu_mem_mib = 0
+            for row in gpu_out.decode("utf-8", errors="replace").splitlines():
+                parts = [p.strip() for p in row.split(",")]
+                if len(parts) < 2:
+                    continue
+                try:
+                    pid = int(parts[0])
+                    mem = int(parts[1])
+                except ValueError:
+                    continue
+                if pid in pids:
+                    gpu_mem_mib += mem
+
+        elapsed = 0
+        if self.running_started_at is not None:
+            elapsed = int(asyncio.get_running_loop().time() - self.running_started_at)
+        mins, secs = divmod(max(0, elapsed), 60)
+        rss_mib = rss_kib_total / 1024.0
+        gpu_text = f"{gpu_mem_mib} MiB" if gpu_mem_mib is not None else "n/a"
+        return (
+            f"Resources: procs={len(pids)} cpu={cpu_total:.1f}% "
+            f"ram={rss_mib:.1f} MiB gpu={gpu_text} elapsed={mins:02d}:{secs:02d}"
+        )
+
+    async def _resource_loop(self, pgid: int) -> None:
+        while self.running_proc is not None:
+            try:
+                snapshot = await self._resource_snapshot_for_group(pgid)
+                self.query_one("#run_resources", Static).update(snapshot)
+            except Exception:
+                # keep resource loop non-fatal for process execution
+                pass
+            await asyncio.sleep(1)
+
+    async def _stop_resource_loop(self) -> None:
+        if self.resource_task and not self.resource_task.done():
+            self.resource_task.cancel()
+            try:
+                await self.resource_task
+            except asyncio.CancelledError:
+                pass
+        self.resource_task = None
 
     async def _stream_command(self, cmd: List[str]) -> None:
         self.set_status(f"$ {' '.join(shlex.quote(part) for part in cmd)}")
@@ -672,8 +777,10 @@ class RunPanel(Static):
             cwd=str(ROOT),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            start_new_session=True,
         )
         self.running_proc = proc
+        self.resource_task = asyncio.create_task(self._resource_loop(proc.pid))
         assert proc.stdout is not None
 
         while True:
@@ -683,7 +790,10 @@ class RunPanel(Static):
             self.set_status(line.decode("utf-8", errors="replace").rstrip())
 
         rc = await proc.wait()
+        await self._stop_resource_loop()
         self.running_proc = None
+        self.running_started_at = None
+        self.set_runtime_state("Current: idle", f"Resources: exited (code {rc})")
         self.set_status(f"Process exited with code {rc}")
 
     async def stop_script(self) -> None:
@@ -701,6 +811,9 @@ class RunPanel(Static):
             await proc.wait()
         finally:
             self.running_proc = None
+            await self._stop_resource_loop()
+            self.running_started_at = None
+            self.set_runtime_state("Current: idle", "Resources: stopped")
         self.set_status("Process stopped")
 
     @on(DataTable.RowHighlighted, "#run_scripts_table")
@@ -777,7 +890,7 @@ class MainScreen(Screen):
         with TabbedContent(initial="download", id="main_tabs"):
             with TabPane("Download", id="download"):
                 yield DownloadPanel()
-            with TabPane("Run Models", id="run"):
+            with TabPane("Model Ops", id="run"):
                 yield RunPanel()
             with TabPane("Maintenance", id="maintenance"):
                 yield PlaceholderPanel("Maintenance scripts")
@@ -839,6 +952,15 @@ class L3MSApp(App[None]):
         except Exception:
             return None
 
+    def active_tab(self) -> Optional[str]:
+        if not self.screen:
+            return None
+        try:
+            tabs = self.screen.query_one("#main_tabs", TabbedContent)
+        except Exception:
+            return None
+        return str(tabs.active) if tabs.active else None
+
     def get_download_panel(self) -> Optional[DownloadPanel]:
         if not self.screen:
             return None
@@ -863,115 +985,134 @@ class L3MSApp(App[None]):
         self.activate_tab("jobs")
 
     async def action_run_start(self) -> None:
-        self.activate_tab("run")
+        if self.active_tab() != "run":
+            return
         panel = self.get_run_panel()
         if panel:
             await panel.run_script()
 
     async def action_run_stop(self) -> None:
-        self.activate_tab("run")
+        if self.active_tab() != "run":
+            return
         panel = self.get_run_panel()
         if panel:
             await panel.stop_script()
 
     def action_run_focus_filter(self) -> None:
-        self.activate_tab("run")
+        if self.active_tab() != "run":
+            return
         panel = self.get_run_panel()
         if panel:
             panel.focus_filter()
 
     def action_run_focus_table(self) -> None:
-        self.activate_tab("run")
+        if self.active_tab() != "run":
+            return
         panel = self.get_run_panel()
         if panel:
             panel.focus_table()
 
     def action_run_focus_editor(self) -> None:
-        self.activate_tab("run")
+        if self.active_tab() != "run":
+            return
         panel = self.get_run_panel()
         if panel:
             panel.focus_editor()
 
     def action_run_clear_log(self) -> None:
-        self.activate_tab("run")
+        if self.active_tab() != "run":
+            return
         panel = self.get_run_panel()
         if panel:
             panel.clear_log()
 
     def action_run_toggle_mode(self) -> None:
-        self.activate_tab("run")
+        if self.active_tab() != "run":
+            return
         panel = self.get_run_panel()
         if panel:
             panel.toggle_mode()
 
     def action_run_save_script(self) -> None:
-        self.activate_tab("run")
+        if self.active_tab() != "run":
+            return
         panel = self.get_run_panel()
         if panel:
             panel.save_editor_script()
 
     def action_download_focus_table(self) -> None:
-        self.activate_tab("download")
+        if self.active_tab() != "download":
+            return
         panel = self.get_download_panel()
         if panel:
             panel.focus_table()
 
     def action_download_focus_editor(self) -> None:
-        self.activate_tab("download")
+        if self.active_tab() != "download":
+            return
         panel = self.get_download_panel()
         if panel:
             panel.focus_editor()
 
     def action_download_clear_log(self) -> None:
-        self.activate_tab("download")
+        if self.active_tab() != "download":
+            return
         panel = self.get_download_panel()
         if panel:
             panel.clear_log()
 
     def action_download_load(self) -> None:
-        self.activate_tab("download")
+        if self.active_tab() != "download":
+            return
         panel = self.get_download_panel()
         if panel:
             panel.load_current_config()
 
     def action_download_save(self) -> None:
-        self.activate_tab("download")
+        if self.active_tab() != "download":
+            return
         panel = self.get_download_panel()
         if panel:
             panel.save_current_config()
 
     def action_download_validate(self) -> None:
-        self.activate_tab("download")
+        if self.active_tab() != "download":
+            return
         panel = self.get_download_panel()
         if panel:
             panel.validate_current_config()
 
     def action_download_add(self) -> None:
-        self.activate_tab("download")
+        if self.active_tab() != "download":
+            return
         panel = self.get_download_panel()
         if panel:
             panel.add_model()
 
     def action_download_apply(self) -> None:
-        self.activate_tab("download")
+        if self.active_tab() != "download":
+            return
         panel = self.get_download_panel()
         if panel:
             panel.apply_model_edit()
 
     def action_download_delete(self) -> None:
-        self.activate_tab("download")
+        if self.active_tab() != "download":
+            return
         panel = self.get_download_panel()
         if panel:
             panel.delete_selected_model()
 
     async def action_download_selected(self) -> None:
-        self.activate_tab("download")
+        if self.active_tab() != "download":
+            return
         panel = self.get_download_panel()
         if panel:
             await panel.download_selected_model()
 
     async def action_download_enabled(self) -> None:
-        self.activate_tab("download")
+        if self.active_tab() != "download":
+            return
         panel = self.get_download_panel()
         if panel:
             await panel.download_enabled_models()
