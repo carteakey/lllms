@@ -1,91 +1,124 @@
-# Local LLMS (lllms)
+# L3MS
 
-Script-first tooling for running local large language models (LLMs), including
-model downloads and llama.cpp workflows for run, bench, and maintenance tasks.
+`L3MS` (Local Large Language Model System) is a keyboard-first terminal toolkit for homelab LLM workflows.
 
-## TUI
+## App Description
 
-`L3MS` is the terminal UI for backend-first workflows.
+L3MS is built for developers who want script-first control with better ergonomics:
 
-Install:
+- Manage model download configs with validation and version history
+- Run and bench llama.cpp models from curated script folders
+- Edit run/bench scripts in-place with snapshot restore
+- Track live process output and runtime resource usage while a model is running
+- Use either a full TUI or interactive CLI commands (`--run`, `--bench`)
+
+## Install
 
 ```bash
 python3 -m pip install -r requirements-tui.txt
 ```
 
-Start:
+## Start TUI
 
 ```bash
 python3 l3ms.py
 ```
 
-Current TUI scope in this feature:
+## Interactive CLI Modes
 
-- Download tab with config path loader
-- Model config editor (add/apply/delete)
-- Config validation and save with versioned backups in `.toolkit/download_config_versions/`
-- Download actions for selected model or all enabled models
-- Keyboard-first shortcuts for Download workflow (`F1`, `Alt+T`, `Alt+I`, `Alt+O`, `Alt+W`, `Alt+V`, `Alt+D`, `Alt+E`)
-- Run Models tab with run/bench script inventory, filter, start/stop, live output, and extra args
-- Run Models script editor with per-script version snapshots in `.toolkit/script_versions/`
-- Keyboard-first shortcuts for Run workflow (`F2`, `Ctrl+F`, `Ctrl+J`, `Ctrl+U`, `Ctrl+M`, `Ctrl+R`, `Ctrl+S`, `Ctrl+P`)
-- Placeholder tabs for `Maintenance`, `Settings`, and `Jobs`
+List available scripts:
 
-Roadmap note:
+```bash
+python3 l3ms.py --list all
+```
 
-- `L3MS` is intentionally Python-first for fast iteration.
-- Plan: port `L3MS` to Rust after feature scope stabilizes.
+Interactively run a model script:
+
+```bash
+python3 l3ms.py --run
+```
+
+Interactively run a bench script:
+
+```bash
+python3 l3ms.py --bench
+```
+
+Filter script picker and pass extra args:
+
+```bash
+python3 l3ms.py --run qwen --extra "--ctx-size 32768"
+```
+
+## TUI Scope
+
+- `Download` tab:
+  - config load/save/validate/restore
+  - model row add/apply/delete
+  - download selected or enabled models
+  - config snapshots in `.toolkit/download_config_versions/`
+- `Model Ops` tab:
+  - run/bench script inventory and filtering
+  - live run logs + start/stop
+  - current running model + resource telemetry (CPU/RAM/GPU when available)
+  - script editor and per-script snapshots in `.toolkit/script_versions/`
+- Placeholder tabs: `Maintenance`, `Settings`, `Jobs`
+
+## Keyboard-first Controls
+
+Global:
+
+- `F1`: Download tab
+- `F2`: Model Ops tab
+- `F3`: Maintenance tab
+- `F4`: Settings tab
+- `F5`: Jobs tab
+
+Download (active only on Download tab):
+
+- `Alt+T`: focus models table
+- `Alt+I`: focus model editor
+- `Alt+O`: load config
+- `Alt+W`: save config
+- `Alt+V`: validate config
+- `Alt+N`: add model
+- `Alt+A`: apply model edit
+- `Alt+K`: delete selected model
+- `Alt+D`: download selected model
+- `Alt+E`: download enabled models
+- `Alt+Y`: clear download log
+
+Model Ops (active only on Model Ops tab):
+
+- `Ctrl+F`: focus script filter
+- `Ctrl+J`: focus script table
+- `Ctrl+U`: focus script editor
+- `Ctrl+M`: toggle run/bench mode
+- `Ctrl+R`: run selected script
+- `Ctrl+S`: stop running script
+- `Ctrl+P`: save edited script snapshot
+- `Ctrl+L`: clear run log
 
 ## Project Layout
 
 - `model_downloader/`: Hugging Face downloader + model config
-- `run-models/`: one `run-llama-cpp-*.sh` server script per model
-- `bench-models/`: one `bench-llama-cpp-*.sh` benchmark script per model
-- `maintenance/`: system/build scripts (`install-cuda.sh`, `build-llama-cpp*.sh`)
-- `vendor/llama.cpp/`: llama.cpp source checkout/build target
+- `run-models/`: one `run-llama-cpp-*.sh` script per model
+- `bench-models/`: one `bench-llama-cpp-*.sh` script per model
+- `maintenance/`: system/build scripts
+- `l3ms/`: TUI app + stores
+- `l3ms.py`: launcher (TUI and CLI modes)
 
-## Downloader CLI
-
-Use the downloader directly with config file support, safe resume behavior, and
-worker throttling.
+## Downloader CLI (direct)
 
 ```bash
 python3 model_downloader/download_hf_model.py --config model_downloader/models_config.json --slow
 ```
 
-Download a single model with explicit throttling:
+## Versioning
 
-```bash
-python3 model_downloader/download_hf_model.py \
-  --repo-id ggml-org/gpt-oss-20b-GGUF \
-  --allow-patterns '*Q8_0*' \
-  --max-workers 2
-```
+This project uses semantic versioning. See [CHANGELOG.md](CHANGELOG.md).
 
-## Run And Bench
+## Roadmap Note
 
-Run a model server:
-
-```bash
-bash run-models/run-llama-cpp-gpt-oss-20b.sh
-```
-
-Run a benchmark:
-
-```bash
-bash bench-models/bench-llama-cpp-gpt-oss-20b.sh
-```
-
-## Maintenance
-
-Build llama.cpp with CUDA:
-
-```bash
-bash maintenance/build-llama-cpp.sh
-```
-
-Install CUDA dependencies:
-
-```bash
-bash maintenance/install-cuda.sh
-```
+L3MS is intentionally Python-first for fast iteration.
+Plan: port L3MS to Rust once feature scope stabilizes.
