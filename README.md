@@ -3,6 +3,30 @@
 Script-first tooling for running local large language models (LLMs), including
 model downloads and llama.cpp workflows for run, bench, and maintenance tasks.
 
+## TUI
+
+A terminal UI is now available for backend-first workflows.
+
+Install:
+
+```bash
+python3 -m pip install -r requirements-tui.txt
+```
+
+Start:
+
+```bash
+python3 homelab_toolkit_tui.py
+```
+
+Current TUI scope in this feature:
+
+- Download tab with config path loader
+- Model config editor (add/apply/delete)
+- Config validation and save with versioned backups in `.toolkit/download_config_versions/`
+- Download actions for selected model or all enabled models
+- Placeholder tabs for `Run Models`, `Maintenance`, `Settings`, and `Jobs`
+
 ## Project Layout
 
 - `model_downloader/`: Hugging Face downloader + model config

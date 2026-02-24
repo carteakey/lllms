@@ -1,0 +1,55 @@
+Screen {
+    layout: vertical;
+}
+
+TabbedContent {
+    height: 1fr;
+}
+
+.panel {
+    height: 1fr;
+    padding: 1;
+}
+
+.row {
+    height: auto;
+    margin-bottom: 1;
+}
+
+.main {
+    height: 1fr;
+}
+
+.left {
+    width: 1fr;
+    min-width: 70;
+    margin-right: 1;
+}
+
+.right {
+    width: 1fr;
+}
+
+#models_table {
+    height: 1fr;
+    min-height: 12;
+    margin-bottom: 1;
+}
+
+Input {
+    width: 1fr;
+    min-width: 20;
+}
+
+Select {
+    width: 35;
+}
+
+Checkbox {
+    width: auto;
+}
+
+#activity_log {
+    height: 12;
+    border: round $accent;
+}
