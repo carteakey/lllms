@@ -12,7 +12,7 @@
 
 set -e  # Exit on any error
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 CUDA_ARCH="${CUDA_ARCH:-}"
 SKIP_BUILD="${SKIP_BUILD:-false}"
 
@@ -275,10 +275,9 @@ if [ -n "$CUDA_ARCH" ]; then
 	"-DGGML_OPENMP=ON"
 	"-DGGML_CUDA_GRAPHS=ON"
         "-DGGML_CUDA_FA_ALL_QUANTS=ON"
+        #"-DGGML_CUDA_FORCE_CUBLAS=ON"
         "-DCMAKE_CUDA_ARCHITECTURES=$CUDA_ARCH"
     )
-
-        #"-DGGML_CUDA_FORCE_CUBLAS=ON"
 else
     log "Configuring llama.cpp for CPU-only build..."
 fi

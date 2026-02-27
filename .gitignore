@@ -19,3 +19,6 @@ llama.cpp
 
 __pycache__
 cuda-keyring_1.1-1_all.deb
+
+# Toolkit runtime state
+.toolkit/

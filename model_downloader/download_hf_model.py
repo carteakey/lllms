@@ -10,6 +10,7 @@ import os
 import sys
 import json
 import argparse
+import shutil
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -41,7 +42,8 @@ class ModelDownloader:
         ignore_patterns: List[str] = None,
         revision: str = None,
         force_download: bool = False,
-        resume_download: bool = True
+        max_workers: Optional[int] = None,
+        preserve_existing: bool = True
     ) -> str:
         """
         Download a model from HuggingFace Hub.
@@ -53,10 +55,14 @@ class ModelDownloader:
             ignore_patterns: List of file patterns to exclude
             revision: Specific revision/branch to download
             force_download: Whether to re-download existing files
-            resume_download: Whether to resume interrupted downloads (default: True)
+            max_workers: Maximum concurrent download workers (lower = slower/less bandwidth)
+            preserve_existing: Keep existing files in local_dir and do not delete extras
 
         Returns:
             str: Path to the downloaded model directory
+
+        Note:
+            Resume functionality is handled automatically by huggingface_hub library.
         """
         if local_dir is None:
             # Auto-generate local directory based on repo_id
@@ -72,23 +78,66 @@ class ModelDownloader:
             print(f"  Including patterns: {allow_patterns}")
         if ignore_patterns:
             print(f"  Excluding patterns: {ignore_patterns}")
+        if max_workers is not None:
+            print(f"  Max download workers: {max_workers}")
+        if preserve_existing:
+            print("  Preserve existing files: enabled")
 
         try:
-            downloaded_path = snapshot_download(
+            snapshot_kwargs = dict(
                 repo_id=repo_id,
-                local_dir=local_dir,
                 allow_patterns=allow_patterns,
                 ignore_patterns=ignore_patterns,
                 revision=revision,
                 force_download=force_download,
-                resume_download=resume_download,
-                local_dir_use_symlinks=False
+                max_workers=max_workers
+            )
+
+            if preserve_existing:
+                snapshot_path = snapshot_download(**snapshot_kwargs)
+                self._sync_snapshot_to_local(snapshot_path, local_dir)
+                print(f"✓ Successfully synced snapshot to: {local_dir}")
+                return local_dir
+
+            downloaded_path = snapshot_download(
+                local_dir=local_dir,
+                local_dir_use_symlinks=False,
+                **snapshot_kwargs
             )
             print(f"✓ Successfully downloaded to: {downloaded_path}")
             return downloaded_path
         except Exception as e:
             print(f"✗ Error downloading {repo_id}: {e}")
             raise
+
+    def _sync_snapshot_to_local(self, snapshot_path: str, local_dir: str) -> None:
+        """Copy snapshot contents into local_dir without deleting existing files."""
+        source_root = Path(snapshot_path)
+        target_root = Path(local_dir)
+        target_root.mkdir(parents=True, exist_ok=True)
+
+        copied = 0
+        skipped = 0
+
+        for source in source_root.rglob("*"):
+            if source.is_dir():
+                continue
+
+            relative = source.relative_to(source_root)
+            target = target_root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+
+            if target.exists():
+                source_stat = source.stat()
+                target_stat = target.stat()
+                if source_stat.st_size == target_stat.st_size and int(source_stat.st_mtime) == int(target_stat.st_mtime):
+                    skipped += 1
+                    continue
+
+            shutil.copy2(source, target)
+            copied += 1
+
+        print(f"  Sync complete: copied {copied}, reused {skipped}")
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
@@ -110,24 +159,28 @@ def create_sample_config(config_path: str):
         "base_models_dir": "./models",
         "models": [
             {
-                "enabled": true,
+                "enabled": True,
                 "repo_id": "microsoft/DialoGPT-medium",
                 "allow_patterns": ["*.bin", "*.json", "*.txt"],
-                "resume_download": true,
+                "max_workers": 2,
+                "preserve_existing": True,
                 "description": "DialoGPT medium model"
             },
             {
-                "enabled": true,
+                "enabled": True,
                 "repo_id": "Qwen/Qwen3-32B-GGUF",
                 "allow_patterns": ["*Q6_K*"],
                 "local_dir": "./models/qwen/Qwen3-32B-GGUF",
-                "resume_download": true,
+                "max_workers": 2,
+                "preserve_existing": True,
                 "description": "Qwen3 32B model with Q6_K quantization"
             },
             {
-                "enabled": false,
+                "enabled": False,
                 "repo_id": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF",
                 "allow_patterns": ["*Q8*"],
+                "max_workers": 2,
+                "preserve_existing": True,
                 "description": "Qwen3 30B Instruct with Q8 quantization (disabled by default)"
             }
         ]
@@ -149,6 +202,12 @@ Examples:
 
   # Download with specific patterns
   python download_hf_model.py --repo-id Qwen/Qwen3-32B-GGUF --allow-patterns "*Q6_K*"
+
+  # Use slower preset (sets max workers to 4)
+  python download_hf_model.py --repo-id Qwen/Qwen3-32B-GGUF --slow
+
+  # Throttle download concurrency
+  python download_hf_model.py --repo-id Qwen/Qwen3-32B-GGUF --max-workers 2
 
   # Download to specific directory
   python download_hf_model.py --repo-id microsoft/DialoGPT-medium --local-dir ./my_models/dialogs
@@ -200,16 +259,30 @@ Examples:
         help="Re-download existing files"
     )
     parser.add_argument(
-        "--no-resume",
-        action="store_true",
-        help="Disable resume for interrupted downloads (default: resume enabled)"
+        "--max-workers",
+        type=int,
+        default=None,
+        help="Maximum concurrent download workers (lower this to throttle downloads)"
     )
+    parser.add_argument(
+        "--slow",
+        action="store_true",
+        help="Slow preset: use max_workers=4 unless --max-workers is explicitly set"
+    )
+    parser.add_argument(
+        "--no-preserve-existing",
+        action="store_true",
+        help="Use direct local_dir download mode instead of safe non-deleting local sync"
+    )
+    # Note: resume_download parameter removed as it's now automatic in huggingface_hub
     parser.add_argument(
         "--base-models-dir",
         help="Base directory for all models (default: ./models)"
     )
 
     args = parser.parse_args()
+    default_max_workers = 4 if args.slow else None
+    effective_max_workers = args.max_workers if args.max_workers is not None else default_max_workers
 
     # Create sample config and exit
     if args.create_config:
@@ -262,7 +335,8 @@ Examples:
                     ignore_patterns=model_config.get("ignore_patterns"),
                     revision=model_config.get("revision"),
                     force_download=model_config.get("force_download", False),
-                    resume_download=model_config.get("resume_download", True)
+                    max_workers=model_config.get("max_workers", effective_max_workers),
+                    preserve_existing=model_config.get("preserve_existing", True)
                 )
             except Exception as e:
                 print(f"Failed to download {repo_id}: {e}")
@@ -277,7 +351,8 @@ Examples:
             ignore_patterns=args.ignore_patterns,
             revision=args.revision,
             force_download=args.force_download,
-            resume_download=not args.no_resume
+            max_workers=effective_max_workers,
+            preserve_existing=not args.no_preserve_existing
         )
 
     else:

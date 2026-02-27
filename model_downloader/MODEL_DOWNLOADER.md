@@ -11,6 +11,8 @@ A flexible and configurable tool for downloading models from HuggingFace Hub wit
 - **Auto-directory Generation**: Automatically organize models by repository structure
 - **Fast Downloads**: Uses `hf_transfer` for improved download speeds
 - **Error Handling**: Robust error handling with detailed feedback
+- **Download Throttling**: Control concurrency with `max_workers`
+- **Safe Local Sync**: Preserves existing files in target folders by default
 
 ## Installation
 
@@ -38,6 +40,12 @@ python download_hf_model.py --repo-id microsoft/DialoGPT-medium --local-dir ./my
 
 # Download specific revision/branch
 python download_hf_model.py --repo-id microsoft/DialoGPT-medium --revision main
+
+# Slow preset (equivalent to --max-workers 4)
+python download_hf_model.py --repo-id microsoft/DialoGPT-medium --slow
+
+# Throttle bandwidth/parallelism by lowering workers
+python download_hf_model.py --repo-id microsoft/DialoGPT-medium --max-workers 2
 
 # Force re-download existing files
 python download_hf_model.py --repo-id microsoft/DialoGPT-medium --force-download
@@ -73,6 +81,8 @@ python download_hf_model.py --create-config my_models.json
       "local_dir": "./models/qwen/Qwen3-32B-GGUF",
       "allow_patterns": ["*Q6_K*"],
       "ignore_patterns": ["*.md"],
+      "max_workers": 2,
+      "preserve_existing": true,
       "description": "Qwen3 32B with Q6_K quantization"
     },
     {
@@ -97,6 +107,9 @@ python download_hf_model.py --create-config my_models.json
 | `--create-config` | | Create sample configuration file |
 | `--revision` | | Specific revision/branch to download |
 | `--force-download` | | Re-download existing files |
+| `--max-workers` | | Max concurrent download workers (throttling) |
+| `--slow` | | Slow preset (`max_workers=4`, unless `--max-workers` is set) |
+| `--no-preserve-existing` | | Use direct local_dir mode instead of safe preserving sync |
 | `--base-models-dir` | | Base directory for all models |
 
 ## Configuration Options
@@ -112,6 +125,8 @@ Each model in the configuration can have these properties:
 - `ignore_patterns` (optional): List of file patterns to exclude
 - `revision` (optional): Specific git revision/branch/tag
 - `force_download` (optional): Whether to re-download existing files
+- `max_workers` (optional): Max concurrent file downloads for throttling
+- `preserve_existing` (optional, default: `true`): Keep unrelated/existing local files instead of pruning
 - `description` (optional): Human-readable description
 
 ### Pattern Examples

@@ -12,6 +12,7 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - Model Ops runtime status with current model and resource telemetry
 - Keyboard-first action scoping to active tab to prevent unwanted tab switching
 - Project docs set: `TODO.md`, `AGENTS.md`, and app description updates
+- New Qwen3.5 run config scripts for four modes: thinking-general, thinking-coding, instruct-general, instruct-reasoning
 
 ### Changed
 
