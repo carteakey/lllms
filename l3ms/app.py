@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import shlex
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import httpx
 from textual import on
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -874,6 +877,245 @@ class RunPanel(Static):
         self.restore_editor_script()
 
 
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def parse_port_from_script(content: str) -> Optional[int]:
+    """Extract --port N from a shell script string."""
+    m = re.search(r"--port\s+(\d+)", content)
+    return int(m.group(1)) if m else None
+
+
+async def detect_llama_port() -> Optional[int]:
+    """Probe running llama-server processes for their port via pgrep."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pgrep", "-fa", "llama-server",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await proc.communicate()
+        text = out.decode("utf-8", errors="replace")
+        m = re.search(r"--port\s+(\d+)", text)
+        if m:
+            return int(m.group(1))
+    except Exception:
+        pass
+    # Fallback: probe common ports
+    for port in (8080, 8001, 8000, 8888):
+        try:
+            async with httpx.AsyncClient(timeout=0.5) as client:
+                r = await client.get(f"http://localhost:{port}/v1/models")
+                if r.status_code == 200:
+                    return port
+        except Exception:
+            pass
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Chat Panel
+# ---------------------------------------------------------------------------
+
+class ChatPanel(Static):
+    DEFAULT_PORT = 8080
+
+    def __init__(self) -> None:
+        super().__init__(id="chat_panel")
+        self._history: List[Dict[str, str]] = []
+        self._active_task: Optional[asyncio.Task[None]] = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="panel"):
+            # Status bar
+            with Horizontal(classes="row"):
+                yield Static("◉ disconnected", id="chat_status")
+                yield Static("", id="chat_model_label")
+                yield Input(value=str(self.DEFAULT_PORT), placeholder="port", id="chat_port", classes="chat_port_input")
+                yield Button("Detect", id="chat_detect")
+                yield Button("Connect", id="chat_connect", variant="primary")
+                yield Button("Clear (Ctrl+X)", id="chat_clear")
+
+            # Conversation history
+            yield RichLog(id="chat_log", wrap=True, markup=True)
+
+            # Input row
+            with Horizontal(classes="row chat_input_row"):
+                yield Input(placeholder="Message… (Enter to send)", id="chat_input")
+                yield Button("Send ↵", id="chat_send", variant="success")
+
+            yield Label(
+                "Keys: Enter send · Ctrl+X clear · Ctrl+G connect · Ctrl+B detect port",
+                classes="key_hint",
+            )
+
+    def on_mount(self) -> None:
+        self.run_worker(self._auto_connect(), exclusive=False)
+
+    async def _auto_connect(self) -> None:
+        port_input = self.query_one("#chat_port", Input)
+        port_str = port_input.value.strip()
+        try:
+            port = int(port_str) if port_str else self.DEFAULT_PORT
+        except ValueError:
+            port = self.DEFAULT_PORT
+
+        model = await self._probe_model(port)
+        if model:
+            self._set_connected(port, model)
+        else:
+            self._set_disconnected()
+
+    async def _probe_model(self, port: int) -> Optional[str]:
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                r = await client.get(f"http://localhost:{port}/v1/models")
+                if r.status_code == 200:
+                    data = r.json()
+                    models = data.get("data", [])
+                    return models[0].get("id", "unknown") if models else "unknown"
+        except Exception:
+            pass
+        return None
+
+    def _set_connected(self, port: int, model: str) -> None:
+        self.query_one("#chat_status", Static).update(f"[green]◉ localhost:{port}[/green]")
+        self.query_one("#chat_model_label", Static).update(f"[dim]{model}[/dim]")
+        self.query_one("#chat_port", Input).value = str(port)
+
+    def _set_disconnected(self) -> None:
+        self.query_one("#chat_status", Static).update("[red]◉ disconnected[/red]")
+        self.query_one("#chat_model_label", Static).update("")
+
+    def _current_port(self) -> int:
+        try:
+            return int(self.query_one("#chat_port", Input).value.strip())
+        except ValueError:
+            return self.DEFAULT_PORT
+
+    def _log(self, text: str) -> None:
+        self.query_one("#chat_log", RichLog).write(text)
+
+    def focus_input(self) -> None:
+        self.query_one("#chat_input", Input).focus()
+
+    def clear_chat(self) -> None:
+        self._history.clear()
+        self.query_one("#chat_log", RichLog).clear()
+        self._log("[dim]Chat cleared[/dim]")
+
+    async def send_message(self) -> None:
+        if self._active_task and not self._active_task.done():
+            self._log("[yellow]⚠ Response in progress — please wait[/yellow]")
+            return
+
+        inp = self.query_one("#chat_input", Input)
+        user_text = inp.value.strip()
+        if not user_text:
+            return
+        inp.value = ""
+
+        self._history.append({"role": "user", "content": user_text})
+        self._log(f"[bold cyan]You:[/bold cyan] {user_text}")
+
+        self._active_task = asyncio.create_task(self._stream_response())
+
+    async def _stream_response(self) -> None:
+        port = self._current_port()
+        url = f"http://localhost:{port}/v1/chat/completions"
+        payload = {
+            "model": "default",
+            "messages": self._history,
+            "stream": True,
+        }
+        log = self.query_one("#chat_log", RichLog)
+        full_reply = ""
+        first_chunk = True
+
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream("POST", url, json=payload,
+                                         headers={"Accept": "text/event-stream"}) as resp:
+                    if resp.status_code != 200:
+                        self._log(f"[red]Server error {resp.status_code}[/red]")
+                        return
+
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        data_str = line[5:].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        token = delta.get("content", "")
+                        if not token:
+                            continue
+                        if first_chunk:
+                            log.write("[bold green]Assistant:[/bold green] ", end=True)
+                            first_chunk = False
+                        log.write(token, end=True, markup=False)
+                        full_reply += token
+
+        except httpx.ConnectError:
+            self._log(f"[red]Cannot connect to localhost:{port} — is the server running?[/red]")
+            self._history.pop()  # remove the unanswered user message
+            return
+        except Exception as exc:
+            self._log(f"[red]Error: {exc}[/red]")
+            return
+
+        log.write("")  # newline after streamed response
+        if full_reply:
+            self._history.append({"role": "assistant", "content": full_reply})
+
+    async def do_detect(self) -> None:
+        self._log("[dim]Detecting running llama-server…[/dim]")
+        port = await detect_llama_port()
+        if port:
+            model = await self._probe_model(port)
+            self._set_connected(port, model or "unknown")
+            self._log(f"[green]Detected server on port {port}[/green]")
+        else:
+            self._set_disconnected()
+            self._log("[yellow]No running llama-server found[/yellow]")
+
+    async def do_connect(self) -> None:
+        port = self._current_port()
+        model = await self._probe_model(port)
+        if model:
+            self._set_connected(port, model)
+            self._log(f"[green]Connected to localhost:{port} — model: {model}[/green]")
+        else:
+            self._set_disconnected()
+            self._log(f"[red]Could not connect to localhost:{port}[/red]")
+
+    @on(Button.Pressed, "#chat_send")
+    async def on_send(self) -> None:
+        await self.send_message()
+
+    @on(Button.Pressed, "#chat_detect")
+    async def on_detect(self) -> None:
+        await self.do_detect()
+
+    @on(Button.Pressed, "#chat_connect")
+    async def on_connect(self) -> None:
+        await self.do_connect()
+
+    @on(Button.Pressed, "#chat_clear")
+    def on_clear(self) -> None:
+        self.clear_chat()
+
+    @on(Input.Submitted, "#chat_input")
+    async def on_input_submitted(self, _: Input.Submitted) -> None:
+        await self.send_message()
+
+
 class PlaceholderPanel(Static):
     def __init__(self, title: str) -> None:
         super().__init__()
@@ -892,6 +1134,8 @@ class MainScreen(Screen):
                 yield DownloadPanel()
             with TabPane("Model Ops", id="run"):
                 yield RunPanel()
+            with TabPane("Chat", id="chat"):
+                yield ChatPanel()
             with TabPane("Maintenance", id="maintenance"):
                 yield PlaceholderPanel("Maintenance scripts")
             with TabPane("Settings", id="settings"):
@@ -906,11 +1150,12 @@ class L3MSApp(App[None]):
     CSS_PATH = "app.tcss"
     BINDINGS = [
         ("q", "quit", "Quit"),
-        ("f1", "tab_download", "Download Tab"),
-        ("f2", "tab_run", "Run Tab"),
-        ("f3", "tab_maintenance", "Maintenance Tab"),
-        ("f4", "tab_settings", "Settings Tab"),
-        ("f5", "tab_jobs", "Jobs Tab"),
+        ("f1", "tab_download", "Download"),
+        ("f2", "tab_run", "Run"),
+        ("f3", "tab_chat", "Chat"),
+        ("f4", "tab_maintenance", "Maintenance"),
+        ("f5", "tab_settings", "Settings"),
+        ("f6", "tab_jobs", "Jobs"),
         ("ctrl+r", "run_start", "Run Script"),
         ("ctrl+s", "run_stop", "Stop Script"),
         ("ctrl+f", "run_focus_filter", "Run Filter"),
@@ -919,6 +1164,9 @@ class L3MSApp(App[None]):
         ("ctrl+l", "run_clear_log", "Run Log Clear"),
         ("ctrl+m", "run_toggle_mode", "Run Mode"),
         ("ctrl+p", "run_save_script", "Run Save Script"),
+        ("ctrl+g", "chat_connect", "Chat Connect"),
+        ("ctrl+b", "chat_detect", "Chat Detect"),
+        ("ctrl+x", "chat_clear", "Chat Clear"),
         ("alt+t", "download_focus_table", "Download Table"),
         ("alt+i", "download_focus_editor", "Download Editor"),
         ("alt+y", "download_clear_log", "Download Log Clear"),
@@ -969,11 +1217,25 @@ class L3MSApp(App[None]):
         except Exception:
             return None
 
-    def action_tab_download(self) -> None:
+    def get_chat_panel(self) -> Optional[ChatPanel]:
+        if not self.screen:
+            return None
+        try:
+            return self.screen.query_one("#chat_panel", ChatPanel)
+        except Exception:
+            return None
+
+
         self.activate_tab("download")
 
     def action_tab_run(self) -> None:
         self.activate_tab("run")
+
+    def action_tab_chat(self) -> None:
+        self.activate_tab("chat")
+        panel = self.get_chat_panel()
+        if panel:
+            panel.focus_input()
 
     def action_tab_maintenance(self) -> None:
         self.activate_tab("maintenance")
@@ -1116,3 +1378,28 @@ class L3MSApp(App[None]):
         panel = self.get_download_panel()
         if panel:
             await panel.download_enabled_models()
+
+    # ------------------------------------------------------------------
+    # Chat actions
+    # ------------------------------------------------------------------
+
+    async def action_chat_connect(self) -> None:
+        if self.active_tab() != "chat":
+            return
+        panel = self.get_chat_panel()
+        if panel:
+            await panel.do_connect()
+
+    async def action_chat_detect(self) -> None:
+        if self.active_tab() != "chat":
+            return
+        panel = self.get_chat_panel()
+        if panel:
+            await panel.do_detect()
+
+    def action_chat_clear(self) -> None:
+        if self.active_tab() != "chat":
+            return
+        panel = self.get_chat_panel()
+        if panel:
+            panel.clear_chat()

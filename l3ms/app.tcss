@@ -83,3 +83,48 @@ Checkbox {
     min-height: 16;
     border: round $accent;
 }
+
+/* ---- Chat Panel ---- */
+
+#chat_panel {
+    height: 1fr;
+}
+
+#chat_log {
+    height: 1fr;
+    min-height: 10;
+    border: round $accent;
+    margin-bottom: 1;
+}
+
+#chat_status {
+    width: auto;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+#chat_model_label {
+    width: 1fr;
+    padding: 0 1;
+}
+
+.chat_port_input {
+    width: 10;
+    min-width: 6;
+}
+
+.chat_input_row {
+    height: auto;
+    margin-top: 0;
+}
+
+#chat_input {
+    width: 1fr;
+}
+
+.key_hint {
+    color: $text-disabled;
+    text-style: dim;
+    height: auto;
+    margin-top: 1;
+}
