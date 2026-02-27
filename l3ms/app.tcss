@@ -128,3 +128,55 @@ Checkbox {
     height: auto;
     margin-top: 1;
 }
+
+/* Maintenance Panel */
+#maint_table {
+    height: 1fr;
+    min-height: 8;
+    margin-bottom: 1;
+}
+#maint_log {
+    height: 10;
+    border: round $accent;
+}
+#maint_editor {
+    height: 1fr;
+    min-height: 16;
+    border: round $accent;
+}
+#maint_selected_path {
+    margin-bottom: 1;
+    padding: 0 1;
+    border: round $accent;
+}
+#maint_status {
+    width: 1fr;
+    padding: 0 1;
+}
+
+/* Chat streaming preview */
+#chat_stream_preview {
+    height: auto;
+    min-height: 2;
+    max-height: 20;
+    border: round $warning;
+    padding: 0 1;
+    margin-bottom: 1;
+    display: none;
+}
+
+.chat_small_input {
+    width: 10;
+    min-width: 6;
+}
+
+.chat_params_row {
+    height: auto;
+    margin-bottom: 1;
+}
+
+/* Jobs Panel */
+#jobs_table {
+    height: 1fr;
+    min-height: 10;
+}
