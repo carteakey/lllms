@@ -35,7 +35,6 @@ cmd=(
   --jinja
   -ctk q8_0
   -ctv q8_0
-  --reasoning-format deepseek
   --flash-attn on
   --ctx-size 65536
   --fit on

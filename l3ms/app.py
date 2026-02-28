@@ -120,7 +120,6 @@ class DownloadPanel(Static):
                     yield Input(placeholder="allow_patterns (comma separated)", id="m_allow")
                     yield Input(placeholder="ignore_patterns (comma separated)", id="m_ignore")
                     yield Checkbox("force_download", id="m_force", value=False)
-                    yield Checkbox("preserve_existing", id="m_preserve", value=True)
                     yield Input(placeholder="max_workers (blank = null)", id="m_workers")
 
             yield Label("Activity Log")
@@ -167,7 +166,6 @@ class DownloadPanel(Static):
         if not (0 <= idx < len(self.config.get("models", []))):
             return
         self.selected_index = idx
-        self.load_model_into_editor(idx)
 
     def _sync_selection_from_cursor(self) -> None:
         table = self.query_one("#models_table", DataTable)
@@ -228,7 +226,6 @@ class DownloadPanel(Static):
                 "allow_patterns": csv_to_list(self.query_one("#m_allow", Input).value),
                 "ignore_patterns": csv_to_list(self.query_one("#m_ignore", Input).value),
                 "force_download": self.query_one("#m_force", Checkbox).value,
-                "preserve_existing": self.query_one("#m_preserve", Checkbox).value,
                 "max_workers": workers,
             }
         )
@@ -246,7 +243,6 @@ class DownloadPanel(Static):
         self.query_one("#m_allow", Input).value = ", ".join(model.get("allow_patterns") or [])
         self.query_one("#m_ignore", Input).value = ", ".join(model.get("ignore_patterns") or [])
         self.query_one("#m_force", Checkbox).value = bool(model.get("force_download", False))
-        self.query_one("#m_preserve", Checkbox).value = bool(model.get("preserve_existing", True))
         self.query_one("#m_workers", Input).value = str(model.get("max_workers") or "")
 
     def apply_editor_to_selected(self) -> None:
@@ -311,7 +307,6 @@ class DownloadPanel(Static):
                 "ignore_patterns": [],
                 "revision": "",
                 "force_download": False,
-                "preserve_existing": True,
                 "max_workers": None,
                 "description": "",
             }
@@ -405,8 +400,6 @@ class DownloadPanel(Static):
 
             if model.get("force_download", False):
                 cmd.append("--force-download")
-            if not model.get("preserve_existing", True):
-                cmd.append("--no-preserve-existing")
 
             cmd.extend(self.parse_speed_args())
             self.active_download = asyncio.create_task(self.run_download_command(cmd))
@@ -434,6 +427,7 @@ class DownloadPanel(Static):
         except (TypeError, ValueError, AttributeError):
             return
         self._set_selected_index(idx)
+        self.load_model_into_editor(idx)
 
     @on(DataTable.RowSelected, "#models_table")
     def on_model_row(self, event: DataTable.RowSelected) -> None:
@@ -442,6 +436,7 @@ class DownloadPanel(Static):
         except (TypeError, ValueError, AttributeError):
             return
         self._set_selected_index(idx)
+        self.load_model_into_editor(idx)
 
     @on(Button.Pressed, "#btn_load")
     def on_load(self) -> None:

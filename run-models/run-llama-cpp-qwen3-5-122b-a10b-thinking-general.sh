@@ -37,7 +37,6 @@ cmd=(
   --host 0.0.0.0
   --port 8003
   --jinja
-  --reasoning-format deepseek
   --ctx-size 65536
   --fit on
   --fit-ctx 65536
@@ -50,7 +49,6 @@ cmd=(
   --batch-size 1024
   --ubatch-size 512
   --prio 2
-  --no-warmup
 )
 
 if command -v taskset >/dev/null 2>&1 && [ -n "${CPU_RANGE}" ]; then
