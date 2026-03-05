@@ -4,110 +4,120 @@
     {
       "enabled": false,
       "repo_id": "unsloth/GLM-4.7-Flash-GGUF",
-      "local_dir": "/home/kchauhan/models/unsloth/GLM-4.7-Flash-GGUF",
-      "allow_patterns": ["*Flash-Q6_K*"],
+      "local_dir": "/run/media/kchauhan/Windows/models/unsloth/GLM-4.7-Flash-GGUF",
+      "allow_patterns": [
+        "*Flash-Q6_K*"
+      ],
       "ignore_patterns": [],
       "force_download": false,
-      "preserve_existing": true,
       "max_workers": null,
       "description": "GLM"
     },
     {
       "enabled": true,
       "repo_id": "unsloth/Qwen3.5-35B-A3B-GGUF",
-      "local_dir": "/home/kchauhan/models/unsloth/Qwen3.5-35B-A3B-GGUF",
-      "allow_patterns": ["*Q4_K_L*"],
+      "local_dir": "/run/media/kchauhan/Windows/models/unsloth/Qwen3.5-35B-A3B-GGUF",
+      "allow_patterns": [
+        "*Q4_K_L*"
+      ],
       "ignore_patterns": [],
       "force_download": false,
-      "preserve_existing": true,
       "max_workers": null,
-      "description": "Qwen3.5 35B-A3B Q4_K_M (smaller sibling for testing, avoids UD-Q4 MXFP4 bug)"
+      "description": "Qwen3.5 35B-A3B Q4_K_L"
     },
     {
-      "enabled": false,
+      "enabled": true,
       "repo_id": "unsloth/Qwen3.5-122B-A10B-GGUF",
-      "local_dir": "/home/kchauhan/models/unsloth/Qwen3.5-122B-A10B-GGUF",
-      "allow_patterns": ["*Q4_K_L*"],
+      "local_dir": "/run/media/kchauhan/Windows/models/unsloth/Qwen3.5-122B-A10B-GGUF",
+      "allow_patterns": [
+        "*Q4_K_L*"
+      ],
       "ignore_patterns": [],
-      "force_download": true,
-      "preserve_existing": false,
+      "force_download": false,
       "max_workers": null,
       "description": "Qwen3.5"
     },
     {
       "enabled": true,
       "repo_id": "unsloth/Qwen3-Coder-Next-GGUF",
-      "local_dir": "/home/kchauhan/models/unsloth/Qwen3-Coder-Next-GGUF",
-      "allow_patterns": ["*UD*Q4*XL*"],
+      "local_dir": "/run/media/kchauhan/Windows/models/unsloth/Qwen3-Coder-Next-GGUF",
+      "allow_patterns": [
+        "*UD*Q4*XL*"
+      ],
       "ignore_patterns": [],
-      "force_download": true,
-      "preserve_existing": false,
+      "force_download": false,
       "max_workers": null,
       "description": "Qwen"
     },
     {
       "enabled": false,
       "repo_id": "ggml-org/gpt-oss-20b-GGUF",
-      "local_dir": "/home/kchauhan/models/ggml-org/gpt-oss-20b-GGUF",
-      "allow_patterns": ["*F16*"],
+      "local_dir": "/run/media/kchauhan/Windows/models/ggml-org/gpt-oss-20b-GGUF",
+      "allow_patterns": [
+        "*F16*"
+      ],
       "ignore_patterns": [],
       "force_download": false,
-      "preserve_existing": true,
       "max_workers": null,
       "description": "GPT OSS 20B model with F16 quantization"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "ggml-org/gpt-oss-120b-GGUF",
-      "local_dir": "/home/kchauhan/models/ggml-org/gpt-oss-120b-GGUF",
-      "allow_patterns": ["*mxfp4*"],
+      "local_dir": "/run/media/kchauhan/Windows/models/ggml-org/gpt-oss-120b-GGUF",
+      "allow_patterns": [
+        "*mxfp4*"
+      ],
       "ignore_patterns": [],
       "force_download": false,
-      "preserve_existing": true,
       "max_workers": null,
       "description": "GPT OSS 120B model with F16 quantization"
     },
     {
       "enabled": false,
       "repo_id": "unsloth/gpt-oss-120b-GGUF",
-      "local_dir": "/home/kchauhan/models/unsloth/gpt-oss-120b-GGUF",
-      "allow_patterns": ["*Q2_K_L*"],
+      "local_dir": "/run/media/kchauhan/Windows/models/unsloth/gpt-oss-120b-GGUF",
+      "allow_patterns": [
+        "*Q2_K_L*"
+      ],
       "ignore_patterns": [],
       "force_download": false,
-      "preserve_existing": true,
       "max_workers": null,
       "description": "GPT OSS 120B model with Q2 quantization"
     },
     {
       "enabled": false,
       "repo_id": "Qwen/Qwen3-32B-GGUF",
-      "local_dir": "/home/kchauhan/models/qwen/Qwen3-32B-GGUF",
-      "allow_patterns": ["*Q6_K*"],
+      "local_dir": "/run/media/kchauhan/Windows/models/qwen/Qwen3-32B-GGUF",
+      "allow_patterns": [
+        "*Q6_K*"
+      ],
       "ignore_patterns": [],
       "force_download": false,
-      "preserve_existing": true,
       "max_workers": null,
       "description": "Qwen3 32B model with Q6_K quantization"
     },
     {
       "enabled": false,
       "repo_id": "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
-      "local_dir": "/home/kchauhan/models/qwen/Qwen3-Coder-30B-A3B-Instruct-GGUF",
-      "allow_patterns": ["*IQ4_NL*"],
+      "local_dir": "/run/media/kchauhan/Windows/models/qwen/Qwen3-Coder-30B-A3B-Instruct-GGUF",
+      "allow_patterns": [
+        "*IQ4_NL*"
+      ],
       "ignore_patterns": [],
       "force_download": false,
-      "preserve_existing": true,
       "max_workers": null,
       "description": "Qwen3 30B Instruct with Q6_K quantization"
     },
     {
       "enabled": false,
       "repo_id": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF",
-      "local_dir": "/home/kchauhan/models/qwen/Qwen3-30B-A3B-Instruct-2507-GGUF",
-      "allow_patterns": ["*IQ4_NL*"],
+      "local_dir": "/run/media/kchauhan/Windows/models/qwen/Qwen3-30B-A3B-Instruct-2507-GGUF",
+      "allow_patterns": [
+        "*IQ4_NL*"
+      ],
       "ignore_patterns": [],
       "force_download": false,
-      "preserve_existing": true,
       "max_workers": null,
       "description": "Qwen3 30B Instruct with Q8 quantization"
     }

@@ -110,9 +110,46 @@ Model Ops (active only on Model Ops tab):
 
 ## Downloader CLI (direct)
 
+Run with config file (downloads all enabled models):
+
 ```bash
-python3 model_downloader/download_hf_model.py --config model_downloader/models_config.json --slow
+./model_downloader/download_hf_model.py --config model_downloader/models_config.json
 ```
+
+Pull updates for already-downloaded models (skips models with no local files):
+
+```bash
+./model_downloader/download_hf_model.py --config model_downloader/models_config.json --update
+```
+
+Single model with pattern filter:
+
+```bash
+./model_downloader/download_hf_model.py --repo-id Qwen/Qwen3-32B-GGUF --allow-patterns "*Q6_K*"
+```
+
+Throttle concurrency (useful on metered connections):
+
+```bash
+./model_downloader/download_hf_model.py --config model_downloader/models_config.json --slow
+./model_downloader/download_hf_model.py --config model_downloader/models_config.json --max-workers 2
+```
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--config` | `-c` | Path to JSON config file |
+| `--repo-id` | `-r` | Single repo to download |
+| `--allow-patterns` | `-a` | File glob patterns to include |
+| `--ignore-patterns` | `-i` | File glob patterns to exclude |
+| `--local-dir` | `-d` | Override local destination directory |
+| `--revision` | | Specific branch/tag/commit to pin |
+| `--update` | `-u` | Sync updates for models already on disk (skips new ones) |
+| `--force-download` | | Re-download all files even if already present |
+| `--slow` | | Throttle to `max_workers=4` |
+| `--max-workers` | | Explicit worker count |
+| `--base-models-dir` | | Override base directory for auto-organized downloads |
+
+> **Note**: Run the script directly (`./model_downloader/download_hf_model.py`) rather than via `python3` to ensure the correct venv Python is used.
 
 ## Versioning
 

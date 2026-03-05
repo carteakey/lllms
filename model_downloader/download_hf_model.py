@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/kchauhan/repos/l3ms/.venv/bin/python3
 """
 HuggingFace Model Downloader
 
@@ -32,64 +32,83 @@ except ImportError:
     sys.exit(1)
 
 
-class ModelDownloader:
-    def __init__(self, base_models_dir: str = None):
-        self.base_models_dir = base_models_dir or os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), "models"
+def has_local_files(local_dir: str) -> bool:
+    """Return True if the local directory contains at least one non-hidden file."""
+    local = Path(local_dir)
+    return local.exists() and any(
+        f for f in local.rglob("*") if f.is_file() and not f.name.startswith(".")
+    )
+
+
+def clear_download_metadata(local_dir: str) -> None:
+    """Remove cached etag/metadata files so snapshot_download re-checks the remote.
+
+    huggingface_hub writes .cache/huggingface/download/*.metadata.json alongside
+    each downloaded file. When present, snapshot_download uses the cached etag to
+    skip the remote HEAD request entirely — meaning genuinely updated remote files
+    won't be detected. Removing these forces a real freshness check per file.
+    """
+    meta_dir = Path(local_dir) / ".cache" / "huggingface" / "download"
+    if not meta_dir.exists():
+        return
+    removed = 0
+    for f in meta_dir.glob("*.metadata.json"):
+        f.unlink()
+        removed += 1
+    if removed:
+        print(f"  Cleared {removed} cached etag(s) — will re-check remote freshness")
+
+
+def download_model(
+    repo_id: str,
+    local_dir: str,
+    allow_patterns: List[str] = None,
+    ignore_patterns: List[str] = None,
+    revision: str = None,
+    force_download: bool = False,
+    max_workers: Optional[int] = None,
+    update_only: bool = False,
+) -> str:
+    if update_only:
+        if not has_local_files(local_dir):
+            print(f"  No local files found — skipping (run without --update to download fresh)")
+            return local_dir
+        print(f"  ↻ Syncing {repo_id} — re-checking remote for changed/new files")
+        clear_download_metadata(local_dir)
+
+    print(f"Downloading {repo_id} to {local_dir}")
+    if allow_patterns:
+        print(f"  Including patterns: {allow_patterns}")
+    if ignore_patterns:
+        print(f"  Excluding patterns: {ignore_patterns}")
+    if max_workers is not None:
+        print(f"  Max download workers: {max_workers}")
+
+    try:
+        downloaded_path = snapshot_download(
+            repo_id=repo_id,
+            local_dir=local_dir,
+            allow_patterns=allow_patterns,
+            ignore_patterns=ignore_patterns,
+            revision=revision,
+            force_download=force_download,
+            max_workers=max_workers,
         )
-        Path(self.base_models_dir).mkdir(parents=True, exist_ok=True)
-
-    def download_model(
-        self,
-        repo_id: str,
-        local_dir: str = None,
-        allow_patterns: List[str] = None,
-        ignore_patterns: List[str] = None,
-        revision: str = None,
-        force_download: bool = False,
-        max_workers: Optional[int] = None,
-    ) -> str:
-        if local_dir is None:
-            repo_parts = repo_id.split("/")
-            if len(repo_parts) == 2:
-                org, model = repo_parts
-                local_dir = os.path.join(self.base_models_dir, org, model)
-            else:
-                local_dir = os.path.join(self.base_models_dir, repo_id.replace("/", "_"))
-
-        print(f"Downloading {repo_id} to {local_dir}")
-        if allow_patterns:
-            print(f"  Including patterns: {allow_patterns}")
-        if ignore_patterns:
-            print(f"  Excluding patterns: {ignore_patterns}")
-        if max_workers is not None:
-            print(f"  Max download workers: {max_workers}")
-
-        try:
-            downloaded_path = snapshot_download(
-                repo_id=repo_id,
-                local_dir=local_dir,
-                allow_patterns=allow_patterns,
-                ignore_patterns=ignore_patterns,
-                revision=revision or None,
-                force_download=force_download,
-                max_workers=max_workers,
-            )
-            print(f"✓ Successfully downloaded to: {downloaded_path}")
-            return downloaded_path
-        except Exception as hub_err:
-            local = Path(local_dir)
-            if local.exists() and any(f for f in local.iterdir() if f.is_file()):
-                print(f"  Hub unreachable, keeping existing files in {local_dir}")
-                print(f"  (Reason: {hub_err})")
-                return local_dir
-            print(f"✗ Error downloading {repo_id}: {hub_err}")
-            raise
+        print(f"✓ Successfully downloaded to: {downloaded_path}")
+        return downloaded_path
+    except Exception as hub_err:
+        local = Path(local_dir)
+        if local.exists() and any(f for f in local.iterdir() if f.is_file()):
+            print(f"  Hub unreachable, keeping existing files in {local_dir}")
+            print(f"  (Reason: {hub_err})")
+            return local_dir
+        print(f"✗ Error downloading {repo_id}: {hub_err}")
+        raise
 
 
 def load_config(config_path: str) -> Dict[str, Any]:
     try:
-        with open(config_path, 'r') as f:
+        with open(config_path, "r") as f:
             return json.load(f)
     except FileNotFoundError:
         print(f"Config file not found: {config_path}")
@@ -99,16 +118,27 @@ def load_config(config_path: str) -> Dict[str, Any]:
         return {}
 
 
+def resolve_local_dir(repo_id: str, base_models_dir: str, local_dir: str = None) -> str:
+    if local_dir:
+        return local_dir
+    parts = repo_id.split("/")
+    if len(parts) == 2:
+        org, model = parts
+        return os.path.join(base_models_dir, org, model)
+    return os.path.join(base_models_dir, repo_id.replace("/", "_"))
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Download models from HuggingFace Hub",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python download_hf_model.py --repo-id Qwen/Qwen3-32B-GGUF --allow-patterns "*Q6_K*"
-  python download_hf_model.py --repo-id Qwen/Qwen3-32B-GGUF --max-workers 2
-  python download_hf_model.py --config models_config.json
-  python download_hf_model.py --config models_config.json --slow
+  ./download_hf_model.py --repo-id Qwen/Qwen3-32B-GGUF --allow-patterns "*Q6_K*"
+  ./download_hf_model.py --repo-id Qwen/Qwen3-32B-GGUF --max-workers 2
+  ./download_hf_model.py --config models_config.json
+  ./download_hf_model.py --config models_config.json --slow
+  ./download_hf_model.py --config models_config.json --update
         """
     )
 
@@ -121,21 +151,20 @@ Examples:
     parser.add_argument("--force-download", action="store_true", help="Re-download existing files")
     parser.add_argument("--max-workers", type=int, default=None, help="Max concurrent download workers")
     parser.add_argument("--slow", action="store_true", help="Slow preset: max_workers=4")
+    parser.add_argument("--update", "-u", action="store_true",
+                        help="Sync updates for models already on disk; skip models with no local files")
     parser.add_argument("--base-models-dir", help="Base directory for all models")
 
     args = parser.parse_args()
     effective_max_workers = args.max_workers if args.max_workers is not None else (4 if args.slow else None)
-
-    downloader = ModelDownloader(args.base_models_dir)
+    base_models_dir = args.base_models_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 
     if args.config:
         config = load_config(args.config)
         if not config:
             return
 
-        if "base_models_dir" in config:
-            downloader.base_models_dir = config["base_models_dir"]
-
+        base_models_dir = config.get("base_models_dir", base_models_dir)
         models = config.get("models", [])
         enabled_models = [m for m in models if m.get("enabled", True)]
         disabled_count = len(models) - len(enabled_models)
@@ -146,39 +175,44 @@ Examples:
             print("No enabled models to download")
             return
 
-        for i, model_config in enumerate(enabled_models, 1):
-            repo_id = model_config.get("repo_id")
+        for i, m in enumerate(enabled_models, 1):
+            repo_id = m.get("repo_id")
             if not repo_id:
                 print(f"Skipping model {i}: no repo_id specified")
                 continue
 
             print(f"\n[{i}/{len(enabled_models)}] Processing {repo_id}")
-            if model_config.get("description"):
-                print(f"  Description: {model_config['description']}")
+            if m.get("description"):
+                print(f"  Description: {m['description']}")
+
+            local_dir = resolve_local_dir(repo_id, base_models_dir, m.get("local_dir"))
 
             try:
-                downloader.download_model(
+                download_model(
                     repo_id=repo_id,
-                    local_dir=model_config.get("local_dir"),
-                    allow_patterns=model_config.get("allow_patterns"),
-                    ignore_patterns=model_config.get("ignore_patterns"),
-                    revision=model_config.get("revision"),
-                    force_download=model_config.get("force_download", False),
-                    max_workers=model_config.get("max_workers", effective_max_workers),
+                    local_dir=local_dir,
+                    allow_patterns=m.get("allow_patterns"),
+                    ignore_patterns=m.get("ignore_patterns"),
+                    revision=m.get("revision"),
+                    force_download=m.get("force_download", False),
+                    max_workers=m.get("max_workers", effective_max_workers),
+                    update_only=args.update,
                 )
             except Exception as e:
                 print(f"Failed to download {repo_id}: {e}")
                 continue
 
     elif args.repo_id:
-        downloader.download_model(
+        local_dir = resolve_local_dir(args.repo_id, base_models_dir, args.local_dir)
+        download_model(
             repo_id=args.repo_id,
-            local_dir=args.local_dir,
+            local_dir=local_dir,
             allow_patterns=args.allow_patterns,
             ignore_patterns=args.ignore_patterns,
             revision=args.revision,
             force_download=args.force_download,
             max_workers=effective_max_workers,
+            update_only=args.update,
         )
 
     else:

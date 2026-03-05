@@ -19,6 +19,7 @@
 
 - Rename GitHub repository to `l3ms` (external GitHub action required)
 - Keep TUI stable while preparing Rust port plan
+- **Shipping**: fix Python interpreter resolution — `download_hf_model.py` shebang is currently hardcoded to a local venv path; shipping should use `#!/usr/bin/env python3` with a proper install step (`pip install -e .` or a setup script) so the right interpreter is always on `$PATH`
 
 ## Long-term
 
