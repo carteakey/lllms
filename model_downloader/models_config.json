@@ -30,7 +30,7 @@
       "repo_id": "unsloth/Qwen3.5-122B-A10B-GGUF",
       "local_dir": "/run/media/kchauhan/Windows/models/unsloth/Qwen3.5-122B-A10B-GGUF",
       "allow_patterns": [
-        "*Q4_K_L*"
+        "*UD-Q4_K_XL*"
       ],
       "ignore_patterns": [],
       "force_download": false,

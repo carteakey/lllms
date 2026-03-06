@@ -40,25 +40,6 @@ def has_local_files(local_dir: str) -> bool:
     )
 
 
-def clear_download_metadata(local_dir: str) -> None:
-    """Remove cached etag/metadata files so snapshot_download re-checks the remote.
-
-    huggingface_hub writes .cache/huggingface/download/*.metadata.json alongside
-    each downloaded file. When present, snapshot_download uses the cached etag to
-    skip the remote HEAD request entirely — meaning genuinely updated remote files
-    won't be detected. Removing these forces a real freshness check per file.
-    """
-    meta_dir = Path(local_dir) / ".cache" / "huggingface" / "download"
-    if not meta_dir.exists():
-        return
-    removed = 0
-    for f in meta_dir.glob("*.metadata.json"):
-        f.unlink()
-        removed += 1
-    if removed:
-        print(f"  Cleared {removed} cached etag(s) — will re-check remote freshness")
-
-
 def download_model(
     repo_id: str,
     local_dir: str,
@@ -73,8 +54,7 @@ def download_model(
         if not has_local_files(local_dir):
             print(f"  No local files found — skipping (run without --update to download fresh)")
             return local_dir
-        print(f"  ↻ Syncing {repo_id} — re-checking remote for changed/new files")
-        clear_download_metadata(local_dir)
+        print(f"  ↻ Syncing {repo_id} — pulling only changed/new files")
 
     print(f"Downloading {repo_id} to {local_dir}")
     if allow_patterns:
