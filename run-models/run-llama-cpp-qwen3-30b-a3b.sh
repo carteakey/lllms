@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 LLAMA_SERVER="${LLAMA_SERVER:-${REPO_DIR}/vendor/llama.cpp/build/bin/llama-server}"
-MODEL="${MODEL:-/home/kchauhan/models/qwen/Qwen3-30B-A3B-Instruct-2507-GGUF/Qwen3-30B-A3B-Instruct-2507-Q8_0.gguf}"
+MODEL="${MODEL:-/run/media/kchauhan/Windows/models/qwen/Qwen3-30B-A3B-Instruct-2507-GGUF/Qwen3-30B-A3B-Instruct-2507-Q8_0.gguf}"
 
 if [ ! -x "${LLAMA_SERVER}" ]; then
   echo "llama-server not found/executable: ${LLAMA_SERVER}" >&2
@@ -19,7 +19,7 @@ fi
 
 exec "${LLAMA_SERVER}" \
   --host 127.0.0.1 \
-  --port 9045 \
+  --port 8081 \
   --model "${MODEL}" \
   --n-gpu-layers 99 \
   --flash-attn \

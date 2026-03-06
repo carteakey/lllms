@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
 import json
+import os
 import re
 import shlex
 import shutil
@@ -51,6 +53,7 @@ from .script_store import (
 ROOT = Path(__file__).resolve().parents[1]
 DOWNLOAD_SCRIPT = ROOT / "model_downloader" / "download_hf_model.py"
 RUN_SCRIPT_GLOB = "run-models/run-llama-cpp-*.sh"
+IK_RUN_SCRIPT_GLOB = "run-models/run-ik-llama-cpp-*.sh"
 BENCH_SCRIPT_GLOB = "bench-models/bench-llama-cpp-*.sh"
 MAINTENANCE_SCRIPT_GLOB = "maintenance/*.sh"
 
@@ -68,6 +71,16 @@ def command_for_script(path: Path, extra_args: List[str]) -> List[str]:
     if suffix in {".bat", ".cmd"}:
         return ["cmd", "/c", str(path), *extra_args]
     return ["bash", str(path), *extra_args]
+
+
+def collect_llama_binaries() -> List[tuple]:
+    """Find all llama-server binaries under vendor/*/build/bin/."""
+    options: List[tuple] = [("auto (script default)", "")]
+    for binary in sorted(ROOT.glob("vendor/*/build/bin/llama-server")):
+        if binary.is_file() and os.access(str(binary), os.X_OK):
+            vendor_name = binary.relative_to(ROOT).parts[1]
+            options.append((vendor_name, str(binary)))
+    return options
 
 
 class DownloadPanel(Static):
@@ -93,6 +106,7 @@ class DownloadPanel(Static):
                 yield Checkbox("slow preset (4 workers)", value=True, id="slow_flag")
                 yield Input(placeholder="max workers override", id="max_workers")
                 yield Input(placeholder="save note", id="save_note")
+                yield Static("💾 —", id="disk_space_label")
 
             with Horizontal(classes="row main"):
                 with Vertical(classes="left"):
@@ -131,6 +145,54 @@ class DownloadPanel(Static):
         table.add_columns("#", "enabled", "repo_id", "pattern", "local_dir")
         self.load_current_config()
         self.focus_table()
+        self.run_worker(self.refresh_disk_space(), exclusive=False)
+
+    async def refresh_disk_space(self) -> None:
+        """Update the disk space label for the target drive."""
+        label = self.query_one("#disk_space_label", Static)
+        target = self.query_one("#base_models_dir", Input).value.strip()
+        # Walk up to find first existing ancestor (drive may be partially mounted)
+        path = Path(target) if target else None
+        if path:
+            check = path
+            while check and not check.exists():
+                check = check.parent if check.parent != check else None
+        else:
+            check = None
+        if not check:
+            label.update("💾 —")
+            return
+        try:
+            usage = shutil.disk_usage(check)
+            free_gb = usage.free / 1_073_741_824
+            total_gb = usage.total / 1_073_741_824
+            label.update(f"💾 {free_gb:.0f} / {total_gb:.0f} GB free  [{check}]")
+        except OSError:
+            label.update(f"⚠ drive not mounted  [{target}]")
+
+    async def _estimate_download_size(self, repo_id: str, allow_patterns: List[str],
+                                      ignore_patterns: List[str]) -> Optional[int]:
+        """Return total bytes of remote files matching patterns, or None on error."""
+        try:
+            from huggingface_hub import HfApi
+            api = HfApi()
+            total = 0
+            for f in api.list_repo_tree(repo_id, recursive=True):
+                name = getattr(f, "path", "") or getattr(f, "rfilename", "")
+                size = getattr(f, "size", None)
+                if size is None:
+                    continue
+                # Apply allow_patterns filter
+                if allow_patterns and not any(fnmatch.fnmatch(name, p) for p in allow_patterns):
+                    continue
+                # Apply ignore_patterns filter
+                if ignore_patterns and any(fnmatch.fnmatch(name, p) for p in ignore_patterns):
+                    continue
+                total += size
+            return total if total > 0 else None
+        except Exception:
+            return None
+
 
     def set_status(self, message: str) -> None:
         self.query_one("#activity_log", RichLog).write(message)
@@ -184,6 +246,7 @@ class DownloadPanel(Static):
         self.load_model_into_editor(self.selected_index)
         self._update_version_select()
         self.set_status(f"Loaded config: {self.config_path}")
+        self.run_worker(self.refresh_disk_space(), exclusive=False)
 
     def refresh_models_table(self) -> None:
         table = self.query_one("#models_table", DataTable)
@@ -359,6 +422,7 @@ class DownloadPanel(Static):
             self.set_status(line.decode("utf-8", errors="replace").rstrip())
         code = await proc.wait()
         self.set_status(f"Download exited with code {code}")
+        await self.refresh_disk_space()
 
     async def download_selected_model(self) -> None:
         if self.active_download and not self.active_download.done():
@@ -379,17 +443,28 @@ class DownloadPanel(Static):
                 self.set_status("Selected model has no repo_id")
                 return
 
+            allow = model.get("allow_patterns") or []
+            ignore = model.get("ignore_patterns") or []
+
+            # Show size estimate before starting
+            self.set_status(f"Checking remote file sizes for {repo_id}…")
+            est = await self._estimate_download_size(repo_id, allow, ignore)
+            if est is not None:
+                est_gb = est / 1_073_741_824
+                usage_val = self.query_one("#disk_space_label", Static).renderable
+                self.set_status(f"  ~{est_gb:.1f} GB to pull  ·  {usage_val}")
+            else:
+                self.set_status("  (could not estimate remote size)")
+
             cmd = ["python3", str(DOWNLOAD_SCRIPT), "--repo-id", str(repo_id)]
             local_dir = str(model.get("local_dir", "")).strip()
             if local_dir:
                 cmd.extend(["--local-dir", local_dir])
 
-            allow = model.get("allow_patterns") or []
             if allow:
                 cmd.append("--allow-patterns")
                 cmd.extend([str(x) for x in allow])
 
-            ignore = model.get("ignore_patterns") or []
             if ignore:
                 cmd.append("--ignore-patterns")
                 cmd.extend([str(x) for x in ignore])
@@ -477,17 +552,19 @@ class DownloadPanel(Static):
 
 class RunPanel(Static):
     class JobStarted(Message):
-        def __init__(self, name: str, started: str) -> None:
+        def __init__(self, name: str, started: str, mode: str) -> None:
             super().__init__()
             self.name = name
             self.started = started
+            self.mode = mode
 
     class JobFinished(Message):
-        def __init__(self, name: str, elapsed: str, exit_code: int) -> None:
+        def __init__(self, name: str, elapsed: str, exit_code: int, mode: str) -> None:
             super().__init__()
             self.name = name
             self.elapsed = elapsed
             self.exit_code = exit_code
+            self.mode = mode
 
     def __init__(self) -> None:
         super().__init__(id="run_panel")
@@ -510,6 +587,10 @@ class RunPanel(Static):
                 yield Button("Refresh", id="run_refresh")
                 yield Button("Start (Ctrl+R)", id="run_start", variant="success")
                 yield Button("Stop (Ctrl+S)", id="run_stop", variant="error")
+            with Horizontal(classes="row"):
+                yield Label("Binary")
+                yield Select([], id="run_binary_select", prompt="auto (script default)")
+                yield Button("Scan", id="run_binary_scan")
             with Horizontal(classes="row"):
                 yield Static("Current: idle", id="run_current_model")
                 yield Static("Resources: idle", id="run_resources")
@@ -544,6 +625,7 @@ class RunPanel(Static):
         table.cursor_type = "row"
         table.add_columns("#", "script")
         self.refresh_script_inventory()
+        self.refresh_binary_selector()
         self.focus_table()
 
     def set_status(self, message: str) -> None:
@@ -566,8 +648,16 @@ class RunPanel(Static):
         self.query_one("#run_current_model", Static).update(model)
         self.query_one("#run_resources", Static).update(resources)
 
+    def refresh_binary_selector(self) -> None:
+        binaries = collect_llama_binaries()
+        select = self.query_one("#run_binary_select", Select)
+        select.set_options(binaries)
+        self.set_status(f"Found {len(binaries) - 1} llama-server binary/binaries in vendor/")
+
     def refresh_script_inventory(self) -> None:
-        self.run_scripts = collect_scripts(RUN_SCRIPT_GLOB)
+        self.run_scripts = sorted(
+            collect_scripts(RUN_SCRIPT_GLOB) + collect_scripts(IK_RUN_SCRIPT_GLOB)
+        )
         self.bench_scripts = collect_scripts(BENCH_SCRIPT_GLOB)
         self.refresh_table()
 
@@ -614,9 +704,10 @@ class RunPanel(Static):
         if self.selected_script is None:
             return "idle"
         name = self.selected_script.stem
-        for prefix in ("run-llama-cpp-", "bench-llama-cpp-"):
+        for prefix in ("run-ik-llama-cpp-", "bench-ik-llama-cpp-", "run-llama-cpp-", "bench-llama-cpp-"):
             if name.startswith(prefix):
-                name = name[len(prefix) :]
+                name = name[len(prefix):]
+                break
         return name
 
     def _sync_selected_from_cursor(self) -> None:
@@ -695,13 +786,20 @@ class RunPanel(Static):
             self.set_status(f"Invalid extra args: {exc}")
             return
 
+        env: Optional[Dict[str, str]] = None
+        binary_select = self.query_one("#run_binary_select", Select)
+        selected_binary = binary_select.value
+        if isinstance(selected_binary, str) and selected_binary:
+            env = {**os.environ, "LLAMA_SERVER": selected_binary}
+            self.set_status(f"Binary override: LLAMA_SERVER={selected_binary}")
+
         cmd = command_for_script(self.selected_script, extra_args)
         model_name = self.selected_model_name()
         self._current_job_name = model_name
         self.running_started_at = asyncio.get_running_loop().time()
         self.set_runtime_state(f"Current: {model_name} ({self.mode})", "Resources: starting...")
-        self.post_message(RunPanel.JobStarted(model_name, datetime.now().strftime("%H:%M:%S")))
-        self.running_task = asyncio.create_task(self._stream_command(cmd))
+        self.post_message(RunPanel.JobStarted(model_name, datetime.now().strftime("%H:%M:%S"), self.mode))
+        self.running_task = asyncio.create_task(self._stream_command(cmd, env=env))
         await self.running_task
 
     async def _resource_snapshot_for_group(self, pgid: int) -> str:
@@ -787,7 +885,7 @@ class RunPanel(Static):
                 pass
         self.resource_task = None
 
-    async def _stream_command(self, cmd: List[str]) -> None:
+    async def _stream_command(self, cmd: List[str], env: Optional[Dict[str, str]] = None) -> None:
         self.set_status(f"$ {' '.join(shlex.quote(part) for part in cmd)}")
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -795,6 +893,7 @@ class RunPanel(Static):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
+            env=env,
         )
         self.running_proc = proc
         self.resource_task = asyncio.create_task(self._resource_loop(proc.pid))
@@ -813,11 +912,9 @@ class RunPanel(Static):
         if self.running_started_at is not None:
             elapsed_secs = asyncio.get_running_loop().time() - self.running_started_at
         self.running_started_at = None
-        mins, secs = divmod(int(elapsed_secs), 60)
-        elapsed_str = f"{mins:02d}:{secs:02d}"
         self.set_runtime_state("Current: idle", f"Resources: exited (code {rc})")
-        self.set_status(f"Process exited with code {rc}")
-        self.post_message(RunPanel.JobFinished(self._current_job_name, elapsed_str, rc))
+        elapsed_str = f"{elapsed_secs:.0f}s" if elapsed_secs < 120 else f"{elapsed_secs/60:.1f}m"
+        self.post_message(RunPanel.JobFinished(self._current_job_name, elapsed_str, rc, self.mode))
 
     async def stop_script(self) -> None:
         proc = self.running_proc
@@ -874,6 +971,10 @@ class RunPanel(Static):
     @on(Button.Pressed, "#run_refresh")
     def on_refresh(self) -> None:
         self.refresh_script_inventory()
+
+    @on(Button.Pressed, "#run_binary_scan")
+    def on_binary_scan(self) -> None:
+        self.refresh_binary_selector()
 
     @on(Button.Pressed, "#run_start")
     async def on_start(self) -> None:
@@ -1393,6 +1494,10 @@ class MaintenancePanel(Static):
             self._load_script_into_editor(self.selected_script)
 
 
+JOBS_FILE = Path.home() / ".l3ms" / "jobs.json"
+JOBS_MAX = 200
+
+
 class JobsPanel(Static):
     def __init__(self) -> None:
         super().__init__(id="jobs_panel")
@@ -1408,30 +1513,57 @@ class JobsPanel(Static):
     def on_mount(self) -> None:
         table = self.query_one("#jobs_table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("#", "script", "started", "elapsed", "exit")
+        table.add_columns("#", "script", "mode", "started", "elapsed", "exit")
+        self.load_jobs()
 
-    def add_job_started(self, name: str, started: str) -> None:
-        self._jobs.append({"name": name, "started": started, "elapsed": "-", "exit": "…"})
+    def load_jobs(self) -> None:
+        """Load persisted job history from disk."""
+        try:
+            if JOBS_FILE.exists():
+                self._jobs = json.loads(JOBS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            self._jobs = []
         self._refresh_table()
 
-    def update_job_finished(self, name: str, elapsed: str, exit_code: int) -> None:
+    def save_jobs(self) -> None:
+        """Persist job history to disk, capped at JOBS_MAX entries."""
+        try:
+            JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            data = self._jobs[-JOBS_MAX:]
+            JOBS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def add_job_started(self, name: str, started: str, mode: str = "") -> None:
+        self._jobs.append({"name": name, "started": started, "elapsed": "-", "exit": "…", "mode": mode})
+        self._refresh_table()
+        self.save_jobs()
+
+    def update_job_finished(self, name: str, elapsed: str, exit_code: int, mode: str = "") -> None:
         for job in reversed(self._jobs):
             if job["name"] == name and job["exit"] == "…":
                 job["elapsed"] = elapsed
                 job["exit"] = str(exit_code)
+                job["mode"] = mode
                 break
         self._refresh_table()
+        self.save_jobs()
 
     def _refresh_table(self) -> None:
         table = self.query_one("#jobs_table", DataTable)
         table.clear()
         for i, job in enumerate(self._jobs):
-            table.add_row(str(i), job["name"], job["started"], job["elapsed"], job["exit"], key=str(i))
+            table.add_row(
+                str(i), job["name"], job.get("mode", ""),
+                job["started"], job["elapsed"], job["exit"],
+                key=str(i)
+            )
 
     @on(Button.Pressed, "#jobs_clear")
     def on_clear(self) -> None:
         self._jobs.clear()
         self.query_one("#jobs_table", DataTable).clear()
+        self.save_jobs()
 
 
 class PlaceholderPanel(Static):

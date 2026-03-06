@@ -9,7 +9,7 @@ export GGML_CUDA_GRAPH_OPT="${GGML_CUDA_GRAPH_OPT:-1}"
 
 LLAMA_SERVER="${LLAMA_SERVER:-${REPO_DIR}/vendor/llama.cpp/build/bin/llama-server}"
 CPU_RANGE="${CPU_RANGE:-0-11}"
-MODEL="${MODEL:-/home/kchauhan/models/unsloth/Qwen3.5-35B-A3B-GGUF/Q4_K_M/Qwen3.5-35B-A3B-Q4_K_M.gguf}"
+MODEL="${MODEL:-/run/media/kchauhan/Windows/models/unsloth/Qwen3.5-35B-A3B-GGUF/Qwen3.5-35B-A3B-UD-Q4_K_L.gguf}"
 
 if [ ! -x "${LLAMA_SERVER}" ]; then
   echo "llama-server not found/executable: ${LLAMA_SERVER}" >&2
@@ -24,16 +24,16 @@ fi
 cmd=(
   "${LLAMA_SERVER}"
   -m "${MODEL}"
-  --alias "unsloth/Qwen3.5-35B-A3B (Q4_K_M)"
+  --alias "unsloth/Qwen3.5-35B-A3B (UD-Q4_K_L)"
   --seed 3407
-  --temp 0.7
-  --top-p 0.8
+  --temp 0.6
+  --top-p 0.95
   --top-k 20
-  --min-p 0.0
+  --min-p 0.00
   --presence-penalty 1.5
   --repeat-penalty 1.0
   --host 0.0.0.0
-  --port 8004
+  --port 8001
   --jinja
   --ctx-size 65536
   --fit on
@@ -48,6 +48,8 @@ cmd=(
   --ubatch-size 512
   --prio 2
 )
+
+ # --chat-template-kwargs '{"enable_thinking":false}'
 
 if command -v taskset >/dev/null 2>&1 && [ -n "${CPU_RANGE}" ]; then
   exec taskset -c "${CPU_RANGE}" "${cmd[@]}"

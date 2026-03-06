@@ -6,7 +6,7 @@ REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 LLAMA_SERVER="${LLAMA_SERVER:-${REPO_DIR}/vendor/llama.cpp/build/bin/llama-server}"
 CHAT_TEMPLATE="${CHAT_TEMPLATE:-${REPO_DIR}/chat-template.jinja}"
-MODEL="${MODEL:-/home/kchauhan/models/ggml-org/gpt-oss-20b-GGUF/gpt-oss-20b-mxfp4.gguf}"
+MODEL="${MODEL:-/run/media/kchauhan/Windows/models/ggml-org/gpt-oss-20b-GGUF/gpt-oss-20b-mxfp4.gguf}"
 
 if [ ! -x "${LLAMA_SERVER}" ]; then
   echo "llama-server not found/executable: ${LLAMA_SERVER}" >&2
@@ -33,5 +33,4 @@ exec "${LLAMA_SERVER}" \
   --chat-template-file "${CHAT_TEMPLATE}" \
   --chat-template-kwargs '{"reasoning_effort": "high"}' \
   --host 0.0.0.0 \
-  --port 8502 \
-  --api-key "dummy"
+  --port 8081 \
