@@ -1,15 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+import fnmatch
+import json
+import os
+import re
 import shlex
 import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import httpx
+from rich.markup import escape as markup_escape
 from textual import on
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.screen import Screen
+from textual.message import Message
+from textual.screen import ModalScreen, Screen
 from textual.widgets import (
     Button,
     Checkbox,
@@ -46,7 +55,9 @@ from .script_store import (
 ROOT = Path(__file__).resolve().parents[1]
 DOWNLOAD_SCRIPT = ROOT / "model_downloader" / "download_hf_model.py"
 RUN_SCRIPT_GLOB = "run-models/run-llama-cpp-*.sh"
+IK_RUN_SCRIPT_GLOB = "run-models/run-ik-llama-cpp-*.sh"
 BENCH_SCRIPT_GLOB = "bench-models/bench-llama-cpp-*.sh"
+MAINTENANCE_SCRIPT_GLOB = "maintenance/*.sh"
 
 
 def collect_scripts(pattern: str) -> List[Path]:
@@ -62,6 +73,16 @@ def command_for_script(path: Path, extra_args: List[str]) -> List[str]:
     if suffix in {".bat", ".cmd"}:
         return ["cmd", "/c", str(path), *extra_args]
     return ["bash", str(path), *extra_args]
+
+
+def collect_llama_binaries() -> List[tuple]:
+    """Find all llama-server binaries under vendor/*/build/bin/."""
+    options: List[tuple] = [("auto (script default)", "")]
+    for binary in sorted(ROOT.glob("vendor/*/build/bin/llama-server")):
+        if binary.is_file() and os.access(str(binary), os.X_OK):
+            vendor_name = binary.relative_to(ROOT).parts[1]
+            options.append((vendor_name, str(binary)))
+    return options
 
 
 class DownloadPanel(Static):
@@ -87,6 +108,7 @@ class DownloadPanel(Static):
                 yield Checkbox("slow preset (4 workers)", value=True, id="slow_flag")
                 yield Input(placeholder="max workers override", id="max_workers")
                 yield Input(placeholder="save note", id="save_note")
+                yield Static("💾 —", id="disk_space_label")
 
             with Horizontal(classes="row main"):
                 with Vertical(classes="left"):
@@ -111,11 +133,16 @@ class DownloadPanel(Static):
                     yield Input(placeholder="description", id="m_description")
                     yield Input(placeholder="local_dir", id="m_local_dir")
                     yield Input(placeholder="revision", id="m_revision")
-                    yield Input(placeholder="allow_patterns (comma separated)", id="m_allow")
-                    yield Input(placeholder="ignore_patterns (comma separated)", id="m_ignore")
+                    yield Input(
+                        placeholder="allow_patterns (comma separated)", id="m_allow"
+                    )
+                    yield Input(
+                        placeholder="ignore_patterns (comma separated)", id="m_ignore"
+                    )
                     yield Checkbox("force_download", id="m_force", value=False)
-                    yield Checkbox("preserve_existing", id="m_preserve", value=True)
-                    yield Input(placeholder="max_workers (blank = null)", id="m_workers")
+                    yield Input(
+                        placeholder="max_workers (blank = null)", id="m_workers"
+                    )
 
             yield Label("Activity Log")
             yield RichLog(id="activity_log", wrap=True, markup=False)
@@ -126,6 +153,61 @@ class DownloadPanel(Static):
         table.add_columns("#", "enabled", "repo_id", "pattern", "local_dir")
         self.load_current_config()
         self.focus_table()
+        self.run_worker(self.refresh_disk_space(), exclusive=False)
+
+    async def refresh_disk_space(self) -> None:
+        """Update the disk space label for the target drive."""
+        label = self.query_one("#disk_space_label", Static)
+        target = self.query_one("#base_models_dir", Input).value.strip()
+        # Walk up to find first existing ancestor (drive may be partially mounted)
+        path = Path(target) if target else None
+        if path:
+            check = path
+            while check and not check.exists():
+                check = check.parent if check.parent != check else None
+        else:
+            check = None
+        if not check:
+            label.update("💾 —")
+            return
+        try:
+            usage = shutil.disk_usage(check)
+            free_gb = usage.free / 1_073_741_824
+            total_gb = usage.total / 1_073_741_824
+            label.update(
+                f"💾 {free_gb:.0f} / {total_gb:.0f} GB free  {markup_escape(f'[{check}]')}"
+            )
+        except OSError:
+            label.update(f"⚠ drive not mounted  {markup_escape(f'[{target}]')}")
+
+    async def _estimate_download_size(
+        self, repo_id: str, allow_patterns: List[str], ignore_patterns: List[str]
+    ) -> Optional[int]:
+        """Return total bytes of remote files matching patterns, or None on error."""
+        try:
+            from huggingface_hub import HfApi
+
+            api = HfApi()
+            total = 0
+            for f in api.list_repo_tree(repo_id, recursive=True):
+                name = getattr(f, "path", "") or getattr(f, "rfilename", "")
+                size = getattr(f, "size", None)
+                if size is None:
+                    continue
+                # Apply allow_patterns filter
+                if allow_patterns and not any(
+                    fnmatch.fnmatch(name, p) for p in allow_patterns
+                ):
+                    continue
+                # Apply ignore_patterns filter
+                if ignore_patterns and any(
+                    fnmatch.fnmatch(name, p) for p in ignore_patterns
+                ):
+                    continue
+                total += size
+            return total if total > 0 else None
+        except Exception:
+            return None
 
     def set_status(self, message: str) -> None:
         self.query_one("#activity_log", RichLog).write(message)
@@ -161,11 +243,12 @@ class DownloadPanel(Static):
         if not (0 <= idx < len(self.config.get("models", []))):
             return
         self.selected_index = idx
-        self.load_model_into_editor(idx)
 
     def _sync_selection_from_cursor(self) -> None:
         table = self.query_one("#models_table", DataTable)
-        if self.config.get("models") and 0 <= table.cursor_row < len(self.config["models"]):
+        if self.config.get("models") and 0 <= table.cursor_row < len(
+            self.config["models"]
+        ):
             self._set_selected_index(table.cursor_row)
 
     def load_current_config(self) -> None:
@@ -174,12 +257,15 @@ class DownloadPanel(Static):
             self.config_path = Path(path_value).expanduser()
 
         self.config = load_config(self.config_path)
-        self.query_one("#base_models_dir", Input).value = self.config.get("base_models_dir", "")
+        self.query_one("#base_models_dir", Input).value = self.config.get(
+            "base_models_dir", ""
+        )
         self.selected_index = 0 if self.config.get("models") else None
         self.refresh_models_table()
         self.load_model_into_editor(self.selected_index)
         self._update_version_select()
         self.set_status(f"Loaded config: {self.config_path}")
+        self.run_worker(self.refresh_disk_space(), exclusive=False)
 
     def refresh_models_table(self) -> None:
         table = self.query_one("#models_table", DataTable)
@@ -209,7 +295,9 @@ class DownloadPanel(Static):
         workers = None
         if workers_raw:
             if not workers_raw.isdigit() or int(workers_raw) <= 0:
-                raise ValueError("model max_workers must be a positive integer or blank")
+                raise ValueError(
+                    "model max_workers must be a positive integer or blank"
+                )
             workers = int(workers_raw)
 
         return normalize_model(
@@ -220,9 +308,10 @@ class DownloadPanel(Static):
                 "local_dir": self.query_one("#m_local_dir", Input).value,
                 "revision": self.query_one("#m_revision", Input).value,
                 "allow_patterns": csv_to_list(self.query_one("#m_allow", Input).value),
-                "ignore_patterns": csv_to_list(self.query_one("#m_ignore", Input).value),
+                "ignore_patterns": csv_to_list(
+                    self.query_one("#m_ignore", Input).value
+                ),
                 "force_download": self.query_one("#m_force", Checkbox).value,
-                "preserve_existing": self.query_one("#m_preserve", Checkbox).value,
                 "max_workers": workers,
             }
         )
@@ -234,13 +323,20 @@ class DownloadPanel(Static):
 
         self.query_one("#m_enabled", Checkbox).value = bool(model.get("enabled", True))
         self.query_one("#m_repo_id", Input).value = str(model.get("repo_id", ""))
-        self.query_one("#m_description", Input).value = str(model.get("description", ""))
+        self.query_one("#m_description", Input).value = str(
+            model.get("description", "")
+        )
         self.query_one("#m_local_dir", Input).value = str(model.get("local_dir", ""))
         self.query_one("#m_revision", Input).value = str(model.get("revision", ""))
-        self.query_one("#m_allow", Input).value = ", ".join(model.get("allow_patterns") or [])
-        self.query_one("#m_ignore", Input).value = ", ".join(model.get("ignore_patterns") or [])
-        self.query_one("#m_force", Checkbox).value = bool(model.get("force_download", False))
-        self.query_one("#m_preserve", Checkbox).value = bool(model.get("preserve_existing", True))
+        self.query_one("#m_allow", Input).value = ", ".join(
+            model.get("allow_patterns") or []
+        )
+        self.query_one("#m_ignore", Input).value = ", ".join(
+            model.get("ignore_patterns") or []
+        )
+        self.query_one("#m_force", Checkbox).value = bool(
+            model.get("force_download", False)
+        )
         self.query_one("#m_workers", Input).value = str(model.get("max_workers") or "")
 
     def apply_editor_to_selected(self) -> None:
@@ -258,7 +354,9 @@ class DownloadPanel(Static):
             self.set_status(f"Validation error: {exc}")
             return False
 
-        self.config["base_models_dir"] = self.query_one("#base_models_dir", Input).value.strip()
+        self.config["base_models_dir"] = self.query_one(
+            "#base_models_dir", Input
+        ).value.strip()
         errors = validate_config(self.config)
         if errors:
             self.set_status("Validation failed:")
@@ -273,7 +371,9 @@ class DownloadPanel(Static):
             self._sync_selection_from_cursor()
             if self.selected_index is not None:
                 self.apply_editor_to_selected()
-            self.config["base_models_dir"] = self.query_one("#base_models_dir", Input).value.strip()
+            self.config["base_models_dir"] = self.query_one(
+                "#base_models_dir", Input
+            ).value.strip()
             note = self.query_one("#save_note", Input).value.strip() or "manual-save"
             save_config(self.config_path, self.config, note=note)
             self._update_version_select()
@@ -305,7 +405,6 @@ class DownloadPanel(Static):
                 "ignore_patterns": [],
                 "revision": "",
                 "force_download": False,
-                "preserve_existing": True,
                 "max_workers": None,
                 "description": "",
             }
@@ -358,6 +457,7 @@ class DownloadPanel(Static):
             self.set_status(line.decode("utf-8", errors="replace").rstrip())
         code = await proc.wait()
         self.set_status(f"Download exited with code {code}")
+        await self.refresh_disk_space()
 
     async def download_selected_model(self) -> None:
         if self.active_download and not self.active_download.done():
@@ -378,17 +478,28 @@ class DownloadPanel(Static):
                 self.set_status("Selected model has no repo_id")
                 return
 
+            allow = model.get("allow_patterns") or []
+            ignore = model.get("ignore_patterns") or []
+
+            # Show size estimate before starting
+            self.set_status(f"Checking remote file sizes for {repo_id}…")
+            est = await self._estimate_download_size(repo_id, allow, ignore)
+            if est is not None:
+                est_gb = est / 1_073_741_824
+                usage_val = self.query_one("#disk_space_label", Static).renderable
+                self.set_status(f"  ~{est_gb:.1f} GB to pull  ·  {usage_val}")
+            else:
+                self.set_status("  (could not estimate remote size)")
+
             cmd = ["python3", str(DOWNLOAD_SCRIPT), "--repo-id", str(repo_id)]
             local_dir = str(model.get("local_dir", "")).strip()
             if local_dir:
                 cmd.extend(["--local-dir", local_dir])
 
-            allow = model.get("allow_patterns") or []
             if allow:
                 cmd.append("--allow-patterns")
                 cmd.extend([str(x) for x in allow])
 
-            ignore = model.get("ignore_patterns") or []
             if ignore:
                 cmd.append("--ignore-patterns")
                 cmd.extend([str(x) for x in ignore])
@@ -399,8 +510,6 @@ class DownloadPanel(Static):
 
             if model.get("force_download", False):
                 cmd.append("--force-download")
-            if not model.get("preserve_existing", True):
-                cmd.append("--no-preserve-existing")
 
             cmd.extend(self.parse_speed_args())
             self.active_download = asyncio.create_task(self.run_download_command(cmd))
@@ -428,6 +537,7 @@ class DownloadPanel(Static):
         except (TypeError, ValueError, AttributeError):
             return
         self._set_selected_index(idx)
+        self.load_model_into_editor(idx)
 
     @on(DataTable.RowSelected, "#models_table")
     def on_model_row(self, event: DataTable.RowSelected) -> None:
@@ -436,6 +546,7 @@ class DownloadPanel(Static):
         except (TypeError, ValueError, AttributeError):
             return
         self._set_selected_index(idx)
+        self.load_model_into_editor(idx)
 
     @on(Button.Pressed, "#btn_load")
     def on_load(self) -> None:
@@ -475,6 +586,24 @@ class DownloadPanel(Static):
 
 
 class RunPanel(Static):
+    class JobStarted(Message):
+        def __init__(
+            self, name: str, started: str, mode: str, script_path: str = ""
+        ) -> None:
+            super().__init__()
+            self.name = name
+            self.started = started
+            self.mode = mode
+            self.script_path = script_path
+
+    class JobFinished(Message):
+        def __init__(self, name: str, elapsed: str, exit_code: int, mode: str) -> None:
+            super().__init__()
+            self.name = name
+            self.elapsed = elapsed
+            self.exit_code = exit_code
+            self.mode = mode
+
     def __init__(self) -> None:
         super().__init__(id="run_panel")
         self.mode = "run"
@@ -486,22 +615,31 @@ class RunPanel(Static):
         self.running_task: Optional[asyncio.Task[None]] = None
         self.resource_task: Optional[asyncio.Task[None]] = None
         self.running_started_at: Optional[float] = None
+        self._current_job_name: str = "idle"
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel"):
             with Horizontal(classes="row"):
                 yield Label("Mode")
-                yield Select([("Run", "run"), ("Bench", "bench")], value="run", id="run_mode")
+                yield Select(
+                    [("Run", "run"), ("Bench", "bench")], value="run", id="run_mode"
+                )
                 yield Button("Refresh", id="run_refresh")
                 yield Button("Start (Ctrl+R)", id="run_start", variant="success")
                 yield Button("Stop (Ctrl+S)", id="run_stop", variant="error")
+            with Horizontal(classes="row"):
+                yield Label("Binary")
+                yield Select([], id="run_binary_select", prompt="auto (script default)")
+                yield Button("Scan", id="run_binary_scan")
             with Horizontal(classes="row"):
                 yield Static("Current: idle", id="run_current_model")
                 yield Static("Resources: idle", id="run_resources")
 
             with Horizontal(classes="row"):
                 yield Input(placeholder="filter scripts (Ctrl+F)", id="run_filter")
-                yield Input(placeholder="extra args appended to script", id="run_extra_args")
+                yield Input(
+                    placeholder="extra args appended to script", id="run_extra_args"
+                )
 
             with Horizontal(classes="row main"):
                 with Vertical(classes="left"):
@@ -516,7 +654,9 @@ class RunPanel(Static):
                     yield Label("Script Editor")
                     yield Static("No script selected", id="run_selected_path")
                     with Horizontal(classes="row"):
-                        yield Select([], id="run_version_select", prompt="Script versions")
+                        yield Select(
+                            [], id="run_version_select", prompt="Script versions"
+                        )
                         yield Input(placeholder="save note", id="run_save_note")
                     with Horizontal(classes="row"):
                         yield Button("Reload", id="run_edit_reload")
@@ -529,6 +669,7 @@ class RunPanel(Static):
         table.cursor_type = "row"
         table.add_columns("#", "script")
         self.refresh_script_inventory()
+        self.refresh_binary_selector()
         self.focus_table()
 
     def set_status(self, message: str) -> None:
@@ -551,8 +692,18 @@ class RunPanel(Static):
         self.query_one("#run_current_model", Static).update(model)
         self.query_one("#run_resources", Static).update(resources)
 
+    def refresh_binary_selector(self) -> None:
+        binaries = collect_llama_binaries()
+        select = self.query_one("#run_binary_select", Select)
+        select.set_options(binaries)
+        self.set_status(
+            f"Found {len(binaries) - 1} llama-server binary/binaries in vendor/"
+        )
+
     def refresh_script_inventory(self) -> None:
-        self.run_scripts = collect_scripts(RUN_SCRIPT_GLOB)
+        self.run_scripts = sorted(
+            collect_scripts(RUN_SCRIPT_GLOB) + collect_scripts(IK_RUN_SCRIPT_GLOB)
+        )
         self.bench_scripts = collect_scripts(BENCH_SCRIPT_GLOB)
         self.refresh_table()
 
@@ -599,9 +750,15 @@ class RunPanel(Static):
         if self.selected_script is None:
             return "idle"
         name = self.selected_script.stem
-        for prefix in ("run-llama-cpp-", "bench-llama-cpp-"):
+        for prefix in (
+            "run-ik-llama-cpp-",
+            "bench-ik-llama-cpp-",
+            "run-llama-cpp-",
+            "bench-llama-cpp-",
+        ):
             if name.startswith(prefix):
                 name = name[len(prefix) :]
+                break
         return name
 
     def _sync_selected_from_cursor(self) -> None:
@@ -680,12 +837,53 @@ class RunPanel(Static):
             self.set_status(f"Invalid extra args: {exc}")
             return
 
+        env: Optional[Dict[str, str]] = None
+        binary_select = self.query_one("#run_binary_select", Select)
+        selected_binary = binary_select.value
+        if isinstance(selected_binary, str) and selected_binary:
+            env = {**os.environ, "LLAMA_SERVER": selected_binary}
+            self.set_status(f"Binary override: LLAMA_SERVER={selected_binary}")
+
         cmd = command_for_script(self.selected_script, extra_args)
         model_name = self.selected_model_name()
+        self._current_job_name = model_name
         self.running_started_at = asyncio.get_running_loop().time()
-        self.set_runtime_state(f"Current: {model_name} ({self.mode})", "Resources: starting...")
-        self.running_task = asyncio.create_task(self._stream_command(cmd))
+        self.set_runtime_state(
+            f"Current: {model_name} ({self.mode})", "Resources: starting..."
+        )
+        self.post_message(
+            RunPanel.JobStarted(
+                model_name,
+                datetime.now().strftime("%H:%M:%S"),
+                self.mode,
+                script_path=str(self.selected_script) if self.selected_script else "",
+            )
+        )
+        self.running_task = asyncio.create_task(self._stream_command(cmd, env=env))
         await self.running_task
+
+    async def run_script_by_path(self, script_path: str, mode: str) -> None:
+        """Select a script by full path and run it. Used by Jobs tab retry."""
+        target = Path(script_path)
+        if not target.exists():
+            self.set_status(f"Script not found for retry: {script_path}")
+            return
+        if mode in {"run", "bench"}:
+            self.mode = mode
+            self.refresh_table()
+        # Try to find it in the visible filtered list and move cursor
+        for i, s in enumerate(self.filtered):
+            if s == target:
+                self.selected_script = s
+                table = self.query_one("#run_scripts_table", DataTable)
+                table.move_cursor(row=i)
+                self.load_selected_script_into_editor()
+                break
+        else:
+            # Not visible (different mode or filter) — set directly
+            self.selected_script = target
+            self.load_selected_script_into_editor()
+        await self.run_script()
 
     async def _resource_snapshot_for_group(self, pgid: int) -> str:
         proc = await asyncio.create_subprocess_exec(
@@ -698,7 +896,11 @@ class RunPanel(Static):
             stderr=asyncio.subprocess.DEVNULL,
         )
         out, _ = await proc.communicate()
-        rows = [line.strip() for line in out.decode("utf-8", errors="replace").splitlines() if line.strip()]
+        rows = [
+            line.strip()
+            for line in out.decode("utf-8", errors="replace").splitlines()
+            if line.strip()
+        ]
 
         pids: List[int] = []
         cpu_total = 0.0
@@ -770,7 +972,9 @@ class RunPanel(Static):
                 pass
         self.resource_task = None
 
-    async def _stream_command(self, cmd: List[str]) -> None:
+    async def _stream_command(
+        self, cmd: List[str], env: Optional[Dict[str, str]] = None
+    ) -> None:
         self.set_status(f"$ {' '.join(shlex.quote(part) for part in cmd)}")
         proc = await asyncio.create_subprocess_exec(
             *cmd,
@@ -778,6 +982,7 @@ class RunPanel(Static):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             start_new_session=True,
+            env=env,
         )
         self.running_proc = proc
         self.resource_task = asyncio.create_task(self._resource_loop(proc.pid))
@@ -792,9 +997,19 @@ class RunPanel(Static):
         rc = await proc.wait()
         await self._stop_resource_loop()
         self.running_proc = None
+        elapsed_secs = 0.0
+        if self.running_started_at is not None:
+            elapsed_secs = asyncio.get_running_loop().time() - self.running_started_at
         self.running_started_at = None
         self.set_runtime_state("Current: idle", f"Resources: exited (code {rc})")
-        self.set_status(f"Process exited with code {rc}")
+        elapsed_str = (
+            f"{elapsed_secs:.0f}s"
+            if elapsed_secs < 120
+            else f"{elapsed_secs / 60:.1f}m"
+        )
+        self.post_message(
+            RunPanel.JobFinished(self._current_job_name, elapsed_str, rc, self.mode)
+        )
 
     async def stop_script(self) -> None:
         proc = self.running_proc
@@ -852,6 +1067,10 @@ class RunPanel(Static):
     def on_refresh(self) -> None:
         self.refresh_script_inventory()
 
+    @on(Button.Pressed, "#run_binary_scan")
+    def on_binary_scan(self) -> None:
+        self.refresh_binary_selector()
+
     @on(Button.Pressed, "#run_start")
     async def on_start(self) -> None:
         await self.run_script()
@@ -874,6 +1093,741 @@ class RunPanel(Static):
         self.restore_editor_script()
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def parse_port_from_script(content: str) -> Optional[int]:
+    """Extract --port N from a shell script string."""
+    m = re.search(r"--port\s+(\d+)", content)
+    return int(m.group(1)) if m else None
+
+
+async def detect_llama_port() -> Optional[int]:
+    """Probe running llama-server processes for their port via pgrep."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pgrep",
+            "-fa",
+            "llama-server",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await proc.communicate()
+        text = out.decode("utf-8", errors="replace")
+        m = re.search(r"--port\s+(\d+)", text)
+        if m:
+            return int(m.group(1))
+    except Exception:
+        pass
+    # Fallback: probe common ports
+    for port in (8080, 8001, 8000, 8888):
+        try:
+            async with httpx.AsyncClient(timeout=0.5) as client:
+                r = await client.get(f"http://localhost:{port}/v1/models")
+                if r.status_code == 200:
+                    return port
+        except Exception:
+            pass
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Chat Panel
+# ---------------------------------------------------------------------------
+
+
+class ChatPanel(Static):
+    DEFAULT_PORT = 8080
+
+    def __init__(self) -> None:
+        super().__init__(id="chat_panel")
+        self._history: List[Dict[str, str]] = []
+        self._active_task: Optional[asyncio.Task[None]] = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="panel"):
+            # Status bar
+            with Horizontal(classes="row"):
+                yield Static("◉ disconnected", id="chat_status")
+                yield Static("", id="chat_model_label")
+                yield Input(
+                    value=str(self.DEFAULT_PORT),
+                    placeholder="port",
+                    id="chat_port",
+                    classes="chat_port_input",
+                )
+                yield Button("Detect", id="chat_detect")
+                yield Button("Connect", id="chat_connect", variant="primary")
+                yield Button("Clear (Ctrl+X)", id="chat_clear")
+                yield Button("Sessions", id="chat_sessions")
+
+            # Params row
+            with Horizontal(classes="row chat_params_row"):
+                yield Input(placeholder="System prompt…", id="chat_system_prompt")
+                yield Input(value="0.8", id="chat_temp", classes="chat_small_input")
+                yield Label("Temp")
+                yield Input(
+                    value="2048", id="chat_max_tokens", classes="chat_small_input"
+                )
+                yield Label("Max Tokens")
+                yield Checkbox("Thinking /think", id="chat_thinking", value=False)
+                yield Button("Save", id="chat_save")
+                yield Button("Load", id="chat_load")
+
+            # Conversation history
+            yield RichLog(id="chat_log", wrap=True, markup=True)
+
+            # Streaming preview (hidden while not streaming)
+            yield Static("", id="chat_stream_preview")
+
+            # Input row
+            with Horizontal(classes="row chat_input_row"):
+                yield Input(placeholder="Message… (Enter to send)", id="chat_input")
+                yield Button("Send ↵", id="chat_send", variant="success")
+
+            yield Label(
+                "Enter send · Ctrl+X clear · Ctrl+G connect · Ctrl+B detect · Alt+S save chat · Thinking=Qwen3",
+                classes="key_hint",
+            )
+
+    def on_mount(self) -> None:
+        self.query_one("#chat_stream_preview", Static).display = False
+        self.run_worker(self._auto_connect(), exclusive=False)
+
+    async def _auto_connect(self) -> None:
+        port_input = self.query_one("#chat_port", Input)
+        port_str = port_input.value.strip()
+        try:
+            port = int(port_str) if port_str else self.DEFAULT_PORT
+        except ValueError:
+            port = self.DEFAULT_PORT
+
+        model = await self._probe_model(port)
+        if model:
+            self._set_connected(port, model)
+        else:
+            self._set_disconnected()
+
+    async def _probe_model(self, port: int) -> Optional[str]:
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                r = await client.get(f"http://localhost:{port}/v1/models")
+                if r.status_code == 200:
+                    data = r.json()
+                    models = data.get("data", [])
+                    return models[0].get("id", "unknown") if models else "unknown"
+        except Exception:
+            pass
+        return None
+
+    def _set_connected(self, port: int, model: str) -> None:
+        self.query_one("#chat_status", Static).update(
+            f"[green]◉ localhost:{port}[/green]"
+        )
+        self.query_one("#chat_model_label", Static).update(f"[dim]{model}[/dim]")
+        self.query_one("#chat_port", Input).value = str(port)
+
+    def _set_disconnected(self) -> None:
+        self.query_one("#chat_status", Static).update("[red]◉ disconnected[/red]")
+        self.query_one("#chat_model_label", Static).update("")
+
+    def _current_port(self) -> int:
+        try:
+            return int(self.query_one("#chat_port", Input).value.strip())
+        except ValueError:
+            return self.DEFAULT_PORT
+
+    def _log(self, text: str) -> None:
+        self.query_one("#chat_log", RichLog).write(text)
+
+    def focus_input(self) -> None:
+        self.query_one("#chat_input", Input).focus()
+
+    def clear_chat(self) -> None:
+        self._history.clear()
+        self.query_one("#chat_log", RichLog).clear()
+        self._log("[dim]Chat cleared[/dim]")
+
+    async def send_message(self) -> None:
+        if self._active_task and not self._active_task.done():
+            self._log("[yellow]⚠ Response in progress — please wait[/yellow]")
+            return
+
+        inp = self.query_one("#chat_input", Input)
+        user_text = inp.value.strip()
+        if not user_text:
+            return
+        inp.value = ""
+
+        self._history.append({"role": "user", "content": user_text})
+        self._log(f"[bold cyan]You:[/bold cyan] {user_text}")
+
+        self._active_task = asyncio.create_task(self._stream_response())
+
+    async def _stream_response(self) -> None:
+        port = self._current_port()
+        url = f"http://localhost:{port}/v1/chat/completions"
+
+        # Build messages list with optional system prompt
+        messages: List[Dict[str, str]] = []
+        system_prompt = self.query_one("#chat_system_prompt", Input).value.strip()
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.extend(self._history)
+
+        # Apply /think prefix if thinking checkbox is checked
+        if self.query_one("#chat_thinking", Checkbox).value and messages:
+            last = messages[-1]
+            if last["role"] == "user":
+                messages[-1] = {"role": "user", "content": f"/think\n{last['content']}"}
+
+        # Read params
+        try:
+            temperature = float(self.query_one("#chat_temp", Input).value.strip())
+        except ValueError:
+            temperature = 0.8
+        try:
+            max_tokens = int(self.query_one("#chat_max_tokens", Input).value.strip())
+        except ValueError:
+            max_tokens = 2048
+
+        payload = {
+            "model": "default",
+            "messages": messages,
+            "stream": True,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream_options": {"include_usage": True},
+        }
+
+        log = self.query_one("#chat_log", RichLog)
+        preview = self.query_one("#chat_stream_preview", Static)
+        full_reply = ""
+        usage_info: Optional[Dict[str, Any]] = None
+        start_time = asyncio.get_event_loop().time()
+
+        preview.display = True
+        preview.update("…")
+
+        try:
+            async with httpx.AsyncClient(timeout=None) as client:
+                async with client.stream(
+                    "POST", url, json=payload, headers={"Accept": "text/event-stream"}
+                ) as resp:
+                    if resp.status_code != 200:
+                        self._log(f"[red]Server error {resp.status_code}[/red]")
+                        preview.display = False
+                        return
+
+                    async for line in resp.aiter_lines():
+                        if not line.startswith("data:"):
+                            continue
+                        data_str = line[5:].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        # Capture usage from final chunk
+                        if "usage" in chunk and chunk["usage"]:
+                            usage_info = chunk["usage"]
+                        delta = chunk.get("choices", [{}])[0].get("delta", {})
+                        token = delta.get("content", "")
+                        if not token:
+                            continue
+                        full_reply += token
+                        preview.update(full_reply)
+
+        except httpx.ConnectError:
+            self._log(
+                f"[red]Cannot connect to localhost:{port} — is the server running?[/red]"
+            )
+            self._history.pop()  # remove the unanswered user message
+            preview.display = False
+            return
+        except Exception as exc:
+            self._log(f"[red]Error: {exc}[/red]")
+            preview.display = False
+            return
+
+        preview.display = False
+
+        if full_reply:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            log.write(f"[bold green]Assistant:[/bold green] {full_reply}")
+            if usage_info:
+                comp_tokens = usage_info.get("completion_tokens", 0)
+                tps = comp_tokens / elapsed if elapsed > 0 else 0.0
+                log.write(
+                    f"[dim]  ↳ {comp_tokens} tokens · {tps:.1f} tok/s · {elapsed:.1f}s[/dim]"
+                )
+            self._history.append({"role": "assistant", "content": full_reply})
+
+    def save_chat(self) -> None:
+        if not self._history:
+            self._log("[yellow]Nothing to save — chat is empty[/yellow]")
+            return
+        chats_dir = Path.home() / ".l3ms" / "chats"
+        chats_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Save human-readable markdown
+        md_path = chats_dir / f"{timestamp}.md"
+        lines = [f"# Chat - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"]
+        for msg in self._history:
+            role = "You" if msg["role"] == "user" else "Assistant"
+            lines.append(f"\n## {role}\n{msg['content']}\n")
+        md_path.write_text("\n".join(lines), encoding="utf-8")
+        # Save machine-readable JSON for session restore
+        json_path = chats_dir / f"{timestamp}.json"
+        json_path.write_text(
+            json.dumps({"saved": timestamp, "history": self._history}, indent=2),
+            encoding="utf-8",
+        )
+        self._log(f"[green]Chat saved → {md_path.name}[/green]")
+
+    def load_chat_session(self, json_path: Path) -> None:
+        """Restore a saved chat session from a JSON file."""
+        try:
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+            history = data.get("history", [])
+            if not isinstance(history, list):
+                raise ValueError("invalid history format")
+        except Exception as exc:
+            self._log(f"[red]Failed to load session: {exc}[/red]")
+            return
+        self._history = history
+        log = self.query_one("#chat_log", RichLog)
+        log.clear()
+        log.write(f"[dim]── Loaded session: {json_path.stem} ──[/dim]")
+        for msg in self._history:
+            if msg.get("role") == "user":
+                log.write(f"[bold cyan]You:[/bold cyan] {msg.get('content', '')}")
+            else:
+                log.write(
+                    f"[bold green]Assistant:[/bold green] {msg.get('content', '')}"
+                )
+        self._log(f"[dim]── {len(self._history)} messages restored ──[/dim]")
+
+    def open_sessions_browser(self) -> None:
+        chats_dir = Path.home() / ".l3ms" / "chats"
+        sessions = (
+            sorted(chats_dir.glob("*.json"), reverse=True) if chats_dir.exists() else []
+        )
+
+        def on_result(path: Optional[Path]) -> None:
+            if path:
+                self.load_chat_session(path)
+
+        self.app.push_screen(ChatHistoryScreen(sessions), callback=on_result)
+
+    async def do_detect(self) -> None:
+        self._log("[dim]Detecting running llama-server…[/dim]")
+        port = await detect_llama_port()
+        if port:
+            model = await self._probe_model(port)
+            self._set_connected(port, model or "unknown")
+            self._log(f"[green]Detected server on port {port}[/green]")
+        else:
+            self._set_disconnected()
+            self._log("[yellow]No running llama-server found[/yellow]")
+
+    async def do_connect(self) -> None:
+        port = self._current_port()
+        model = await self._probe_model(port)
+        if model:
+            self._set_connected(port, model)
+            self._log(f"[green]Connected to localhost:{port} — model: {model}[/green]")
+        else:
+            self._set_disconnected()
+            self._log(f"[red]Could not connect to localhost:{port}[/red]")
+
+    @on(Button.Pressed, "#chat_send")
+    async def on_send(self) -> None:
+        await self.send_message()
+
+    @on(Button.Pressed, "#chat_detect")
+    async def on_detect(self) -> None:
+        await self.do_detect()
+
+    @on(Button.Pressed, "#chat_connect")
+    async def on_connect(self) -> None:
+        await self.do_connect()
+
+    @on(Button.Pressed, "#chat_clear")
+    def on_clear(self) -> None:
+        self.clear_chat()
+
+    @on(Button.Pressed, "#chat_save")
+    def on_save_chat(self) -> None:
+        self.save_chat()
+
+    @on(Button.Pressed, "#chat_sessions")
+    def on_sessions(self) -> None:
+        self.open_sessions_browser()
+
+    @on(Button.Pressed, "#chat_load")
+    def on_load_chat(self) -> None:
+        self.open_sessions_browser()
+
+    @on(Input.Submitted, "#chat_input")
+    async def on_input_submitted(self, _: Input.Submitted) -> None:
+        await self.send_message()
+
+
+class MaintenancePanel(Static):
+    def __init__(self) -> None:
+        super().__init__(id="maintenance_panel")
+        self.scripts: List[Path] = []
+        self.filtered: List[Path] = []
+        self.selected_script: Optional[Path] = None
+        self.running_proc: Optional[asyncio.subprocess.Process] = None
+        self.running_task: Optional[asyncio.Task[None]] = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="panel"):
+            with Horizontal(classes="row"):
+                yield Button("Refresh", id="maint_refresh")
+                yield Button("▶ Run (Ctrl+R)", id="maint_start", variant="success")
+                yield Button("■ Stop (Ctrl+S)", id="maint_stop", variant="error")
+                yield Static("idle", id="maint_status")
+            with Horizontal(classes="row"):
+                yield Input(placeholder="filter", id="maint_filter")
+            with Horizontal(classes="row main"):
+                with Vertical(classes="left"):
+                    yield DataTable(id="maint_table")
+                    yield RichLog(id="maint_log", wrap=True, markup=False)
+                with Vertical(classes="right"):
+                    yield Label("Script Editor")
+                    yield Static("No script selected", id="maint_selected_path")
+                    with Horizontal(classes="row"):
+                        yield Button("Save", id="maint_edit_save", variant="success")
+                        yield Button("Reload", id="maint_edit_reload")
+                    yield TextArea("", id="maint_editor")
+            yield Label(
+                "Keys: Ctrl+R run · Ctrl+S stop · Ctrl+L clear log", classes="key_hint"
+            )
+
+    def on_mount(self) -> None:
+        table = self.query_one("#maint_table", DataTable)
+        table.cursor_type = "row"
+        table.add_columns("#", "script")
+        self.refresh_scripts()
+        self.focus_table()
+
+    def set_status(self, message: str) -> None:
+        self.query_one("#maint_log", RichLog).write(message)
+
+    def focus_table(self) -> None:
+        self.query_one("#maint_table", DataTable).focus()
+
+    def clear_log(self) -> None:
+        self.query_one("#maint_log", RichLog).clear()
+        self.set_status("Maintenance log cleared")
+
+    def set_status_label(self, text: str) -> None:
+        self.query_one("#maint_status", Static).update(text)
+
+    def refresh_scripts(self) -> None:
+        self.scripts = sorted(
+            [p for p in ROOT.glob(MAINTENANCE_SCRIPT_GLOB) if p.is_file()]
+        )
+        filter_text = self.query_one("#maint_filter", Input).value.strip().lower()
+        table = self.query_one("#maint_table", DataTable)
+        table.clear()
+        self.filtered = []
+        for script in self.scripts:
+            rel = script.relative_to(ROOT).as_posix()
+            if filter_text and filter_text not in rel.lower():
+                continue
+            self.filtered.append(script)
+            idx = len(self.filtered) - 1
+            table.add_row(str(idx), rel, key=str(idx))
+
+        if self.filtered:
+            self.selected_script = self.filtered[0]
+            table.move_cursor(row=0, column=0)
+            self._load_script_into_editor(self.selected_script)
+        else:
+            self.selected_script = None
+            self.query_one("#maint_selected_path", Static).update("No script selected")
+            self.query_one("#maint_editor", TextArea).text = ""
+
+    def _load_script_into_editor(self, path: Path) -> None:
+        try:
+            content = path.read_text(encoding="utf-8")
+        except Exception as exc:
+            self.set_status(f"Failed to load: {exc}")
+            return
+        rel = path.relative_to(ROOT).as_posix()
+        self.query_one("#maint_selected_path", Static).update(rel)
+        self.query_one("#maint_editor", TextArea).text = content
+
+    def _save_editor_script(self) -> None:
+        if self.selected_script is None:
+            self.set_status("No script selected")
+            return
+        content = self.query_one("#maint_editor", TextArea).text
+        try:
+            self.selected_script.write_text(content, encoding="utf-8")
+            self.set_status(f"Saved {self.selected_script.name}")
+        except Exception as exc:
+            self.set_status(f"Save failed: {exc}")
+
+    async def run_script(self) -> None:
+        if self.running_task and not self.running_task.done():
+            self.set_status("A maintenance script is already running")
+            return
+        if self.selected_script is None:
+            self.set_status("No script selected")
+            return
+        cmd = ["bash", str(self.selected_script)]
+        self.set_status_label(f"running: {self.selected_script.name}")
+        self.running_task = asyncio.create_task(self._stream_command(cmd))
+
+    async def _stream_command(self, cmd: List[str]) -> None:
+        self.set_status(f"$ {' '.join(shlex.quote(p) for p in cmd)}")
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            cwd=str(ROOT),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            start_new_session=True,
+        )
+        self.running_proc = proc
+        assert proc.stdout is not None
+        while True:
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            self.set_status(line.decode("utf-8", errors="replace").rstrip())
+        rc = await proc.wait()
+        self.running_proc = None
+        self.set_status_label("idle")
+        self.set_status(f"Script exited with code {rc}")
+
+    async def stop_script(self) -> None:
+        proc = self.running_proc
+        if proc is None:
+            self.set_status("No active script")
+            return
+        self.set_status("Stopping script…")
+        try:
+            proc.terminate()
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+        finally:
+            self.running_proc = None
+            self.set_status_label("idle")
+        self.set_status("Script stopped")
+
+    @on(DataTable.RowHighlighted, "#maint_table")
+    def on_script_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        try:
+            idx = int(str(event.row_key.value))
+        except (TypeError, ValueError, AttributeError):
+            return
+        if 0 <= idx < len(self.filtered):
+            self.selected_script = self.filtered[idx]
+            self._load_script_into_editor(self.selected_script)
+
+    @on(Input.Changed, "#maint_filter")
+    def on_filter_changed(self, _: Input.Changed) -> None:
+        self.refresh_scripts()
+
+    @on(Button.Pressed, "#maint_refresh")
+    def on_refresh(self) -> None:
+        self.refresh_scripts()
+
+    @on(Button.Pressed, "#maint_start")
+    async def on_start(self) -> None:
+        await self.run_script()
+
+    @on(Button.Pressed, "#maint_stop")
+    async def on_stop(self) -> None:
+        await self.stop_script()
+
+    @on(Button.Pressed, "#maint_edit_save")
+    def on_edit_save(self) -> None:
+        self._save_editor_script()
+
+    @on(Button.Pressed, "#maint_edit_reload")
+    def on_edit_reload(self) -> None:
+        if self.selected_script:
+            self._load_script_into_editor(self.selected_script)
+
+
+JOBS_FILE = Path.home() / ".l3ms" / "jobs.json"
+JOBS_MAX = 200
+
+
+class JobsPanel(Static):
+    class StopRequest(Message):
+        """Posted when the user asks to stop the currently running job."""
+
+    class RetryRequest(Message):
+        """Posted when the user asks to retry a selected finished job."""
+
+        def __init__(self, script_path: str, mode: str) -> None:
+            super().__init__()
+            self.script_path = script_path
+            self.mode = mode
+
+    def __init__(self) -> None:
+        super().__init__(id="jobs_panel")
+        self._jobs: List[Dict[str, Any]] = []
+        self._selected_idx: Optional[int] = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="panel"):
+            with Horizontal(classes="row"):
+                yield Label("Job History")
+                yield Button("■ Stop Running", id="jobs_stop", variant="error")
+                yield Button("↺ Retry Selected", id="jobs_retry", variant="primary")
+                yield Button("Clear", id="jobs_clear")
+            yield DataTable(id="jobs_table")
+            yield Label(
+                "s stop running · r retry selected · Del clear history",
+                classes="key_hint",
+            )
+
+    def on_mount(self) -> None:
+        table = self.query_one("#jobs_table", DataTable)
+        table.cursor_type = "row"
+        table.add_columns("#", "●", "script", "mode", "started", "elapsed", "exit")
+        self.load_jobs()
+        self._update_buttons()
+
+    def load_jobs(self) -> None:
+        """Load persisted job history from disk."""
+        try:
+            if JOBS_FILE.exists():
+                self._jobs = json.loads(JOBS_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            self._jobs = []
+        self._refresh_table()
+
+    def save_jobs(self) -> None:
+        """Persist job history to disk, capped at JOBS_MAX entries."""
+        try:
+            JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            data = self._jobs[-JOBS_MAX:]
+            JOBS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
+    def add_job_started(
+        self, name: str, started: str, mode: str = "", script_path: str = ""
+    ) -> None:
+        self._jobs.append(
+            {
+                "name": name,
+                "started": started,
+                "elapsed": "-",
+                "exit": "…",
+                "mode": mode,
+                "script_path": script_path,
+            }
+        )
+        self._selected_idx = len(self._jobs) - 1
+        self._refresh_table()
+        self._update_buttons()
+        self.save_jobs()
+
+    def update_job_finished(
+        self, name: str, elapsed: str, exit_code: int, mode: str = ""
+    ) -> None:
+        for job in reversed(self._jobs):
+            if job["name"] == name and job["exit"] == "…":
+                job["elapsed"] = elapsed
+                job["exit"] = str(exit_code)
+                job["mode"] = mode
+                break
+        self._refresh_table()
+        self._update_buttons()
+        self.save_jobs()
+
+    def _running_job_index(self) -> Optional[int]:
+        """Return index of the currently running job (exit == '…'), or None."""
+        for i, job in enumerate(self._jobs):
+            if job.get("exit") == "…":
+                return i
+        return None
+
+    def _update_buttons(self) -> None:
+        running = self._running_job_index() is not None
+        try:
+            self.query_one("#jobs_stop", Button).disabled = not running
+        except Exception:
+            pass
+        # Retry is available when a finished job with a known script_path is selected
+        can_retry = False
+        if self._selected_idx is not None and 0 <= self._selected_idx < len(self._jobs):
+            job = self._jobs[self._selected_idx]
+            can_retry = bool(job.get("script_path")) and job.get("exit") != "…"
+        try:
+            self.query_one("#jobs_retry", Button).disabled = not can_retry
+        except Exception:
+            pass
+
+    def _refresh_table(self) -> None:
+        table = self.query_one("#jobs_table", DataTable)
+        table.clear()
+        for i, job in enumerate(self._jobs):
+            is_running = job.get("exit") == "…"
+            indicator = "[green]▶[/green]" if is_running else ""
+            table.add_row(
+                str(i),
+                indicator,
+                job["name"],
+                job.get("mode", ""),
+                job["started"],
+                job["elapsed"],
+                job["exit"],
+                key=str(i),
+            )
+        # Restore cursor
+        if self._selected_idx is not None and self._selected_idx < len(self._jobs):
+            try:
+                table.move_cursor(row=self._selected_idx)
+            except Exception:
+                pass
+
+    @on(DataTable.RowHighlighted, "#jobs_table")
+    def on_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        try:
+            self._selected_idx = int(str(event.row_key.value))
+        except (TypeError, ValueError, AttributeError):
+            pass
+        self._update_buttons()
+
+    @on(Button.Pressed, "#jobs_stop")
+    def on_stop_btn(self) -> None:
+        self.post_message(JobsPanel.StopRequest())
+
+    @on(Button.Pressed, "#jobs_retry")
+    def on_retry_btn(self) -> None:
+        if self._selected_idx is None or self._selected_idx >= len(self._jobs):
+            return
+        job = self._jobs[self._selected_idx]
+        script_path = job.get("script_path", "")
+        mode = job.get("mode", "run")
+        if script_path:
+            self.post_message(JobsPanel.RetryRequest(script_path, mode))
+
+    @on(Button.Pressed, "#jobs_clear")
+    def on_clear(self) -> None:
+        self._jobs.clear()
+        self._selected_idx = None
+        self.query_one("#jobs_table", DataTable).clear()
+        self._update_buttons()
+        self.save_jobs()
+
+
 class PlaceholderPanel(Static):
     def __init__(self, title: str) -> None:
         super().__init__()
@@ -884,6 +1838,239 @@ class PlaceholderPanel(Static):
         yield Static("Planned for next feature commit.")
 
 
+# ---------------------------------------------------------------------------
+# Help overlay
+# ---------------------------------------------------------------------------
+
+
+def _build_help_content() -> str:
+    sections: list[tuple[str, list[tuple[str, str]]]] = [
+        (
+            "GLOBAL",
+            [
+                ("q", "Quit"),
+                ("?", "This help screen"),
+                ("Ctrl+P", "Command palette (all actions)"),
+                ("F1", "→ Download tab"),
+                ("F2", "→ Run / Model Ops tab"),
+                ("F3", "→ Chat tab"),
+                ("F4", "→ Maintenance tab"),
+                ("F5", "→ Settings tab"),
+                ("F6", "→ Jobs tab"),
+            ],
+        ),
+        (
+            "JOBS  (F6)",
+            [
+                ("s", "Stop the running job"),
+                ("r", "Retry selected finished job"),
+                ("Del", "Clear all job history"),
+            ],
+        ),
+        (
+            "RUN / MODEL OPS  (F2)",
+            [
+                ("Ctrl+R", "Start script"),
+                ("Ctrl+S", "Stop script"),
+                ("Ctrl+M", "Toggle run ↔ bench mode"),
+                ("Ctrl+P", "Save script"),
+                ("Ctrl+F", "Focus filter input"),
+                ("Ctrl+J", "Focus script table"),
+                ("Ctrl+U", "Focus script editor"),
+                ("Ctrl+L", "Clear log"),
+            ],
+        ),
+        (
+            "CHAT  (F3)",
+            [
+                ("Ctrl+G", "Connect to server"),
+                ("Ctrl+B", "Auto-detect port"),
+                ("Ctrl+X", "Clear chat history"),
+                ("Alt+S", "Save chat session (md + json)"),
+                ("Sessions", "Browse & load saved sessions"),
+            ],
+        ),
+        (
+            "DOWNLOAD  (F1)",
+            [
+                ("Alt+D", "Download selected model"),
+                ("Alt+E", "Download all enabled models"),
+                ("Alt+N", "Add new model entry"),
+                ("Alt+A", "Apply editor → config"),
+                ("Alt+K", "Delete selected model"),
+                ("Alt+W", "Save config to disk"),
+                ("Alt+O", "Reload config from disk"),
+                ("Alt+V", "Validate config"),
+                ("Alt+T", "Focus model table"),
+                ("Alt+I", "Focus editor pane"),
+                ("Alt+Y", "Clear log"),
+            ],
+        ),
+    ]
+    lines: list[str] = []
+    for heading, bindings in sections:
+        lines.append(f"\n [bold yellow]{heading}[/bold yellow]")
+        for key, desc in bindings:
+            lines.append(f"  [bold cyan]{key:<12}[/bold cyan] {desc}")
+    lines.append("\n [dim]Esc or ? to close[/dim]")
+    return "\n".join(lines)
+
+
+class HelpScreen(ModalScreen):
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close", show=True),
+        Binding("?", "dismiss", "Close", show=False),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="help_dialog"):
+            yield Static("⌨  L3MS Key Bindings", id="help_title")
+            yield Static(_build_help_content(), id="help_body")
+
+
+# ---------------------------------------------------------------------------
+# Chat history browser
+# ---------------------------------------------------------------------------
+
+
+class ChatHistoryScreen(ModalScreen):
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close", show=True),
+    ]
+
+    def __init__(self, sessions: list) -> None:
+        super().__init__()
+        self._sessions: list = sessions
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="history_dialog"):
+            yield Static("💬  Chat Sessions", id="history_title")
+            if not self._sessions:
+                yield Static(
+                    "\n  [dim]No saved sessions found in ~/.l3ms/chats/[/dim]\n",
+                    id="history_empty",
+                )
+            else:
+                yield DataTable(id="history_table")
+            yield Static(
+                "[dim]  Enter to load · Esc to cancel[/dim]", id="history_hint"
+            )
+
+    def on_mount(self) -> None:
+        if not self._sessions:
+            return
+        table = self.query_one("#history_table", DataTable)
+        table.cursor_type = "row"
+        table.add_columns("saved", "msgs")
+        for path in self._sessions:
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                msg_count = str(len(data.get("history", [])))
+                saved = data.get("saved", path.stem)
+            except Exception:
+                msg_count = "?"
+                saved = path.stem
+            table.add_row(saved, msg_count, key=str(path))
+        table.focus()
+
+    @on(DataTable.RowSelected, "#history_table")
+    def on_row_selected(self, event: DataTable.RowSelected) -> None:
+        self.dismiss(Path(str(event.row_key.value)))
+
+
+# ---------------------------------------------------------------------------
+# Command palette
+# ---------------------------------------------------------------------------
+
+PALETTE_COMMANDS: list = [
+    ("→ Download tab", "tab_download"),
+    ("→ Run / Model Ops tab", "tab_run"),
+    ("→ Chat tab", "tab_chat"),
+    ("→ Maintenance tab", "tab_maintenance"),
+    ("→ Settings tab", "tab_settings"),
+    ("→ Jobs tab", "tab_jobs"),
+    ("Start script (Run)", "run_start"),
+    ("Stop script (Run)", "run_stop"),
+    ("Toggle run/bench mode", "run_toggle_mode"),
+    ("Save script (Run)", "run_save_script"),
+    ("Focus filter (Run)", "run_focus_filter"),
+    ("Focus script table (Run)", "run_focus_table"),
+    ("Focus script editor (Run)", "run_focus_editor"),
+    ("Clear run log", "run_clear_log"),
+    ("Chat: Connect to server", "chat_connect"),
+    ("Chat: Auto-detect port", "chat_detect"),
+    ("Chat: Clear history", "chat_clear"),
+    ("Chat: Save session", "chat_save"),
+    ("Download selected model", "download_selected"),
+    ("Download all enabled models", "download_enabled"),
+    ("Add new model entry", "download_add"),
+    ("Apply model editor", "download_apply"),
+    ("Delete selected model", "download_delete"),
+    ("Save config to disk", "download_save"),
+    ("Reload config from disk", "download_load"),
+    ("Validate config", "download_validate"),
+    ("Focus model table", "download_focus_table"),
+    ("Focus download editor", "download_focus_editor"),
+    ("Clear download log", "download_clear_log"),
+    ("Show key bindings help", "show_help"),
+    ("Quit", "quit"),
+]
+
+
+class CommandPaletteScreen(ModalScreen):
+    BINDINGS = [
+        Binding("escape", "dismiss", "Close", show=True),
+        Binding("ctrl+p", "dismiss", "Close", show=False),
+    ]
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="palette_dialog"):
+            yield Static("⌘  Command Palette", id="palette_title")
+            yield Input(placeholder="Type to filter commands…", id="palette_input")
+            yield DataTable(id="palette_table", show_header=False)
+            yield Static("[dim]  Enter to run · Esc to cancel[/dim]", id="palette_hint")
+
+    def on_mount(self) -> None:
+        table = self.query_one("#palette_table", DataTable)
+        table.cursor_type = "row"
+        table.add_column("command", width=54)
+        self._populate(PALETTE_COMMANDS)
+        self.query_one("#palette_input", Input).focus()
+
+    def _populate(self, commands: list) -> None:
+        table = self.query_one("#palette_table", DataTable)
+        table.clear()
+        for label, action in commands:
+            table.add_row(label, key=action)
+
+    @on(Input.Changed, "#palette_input")
+    def on_filter(self, event: Input.Changed) -> None:
+        q = event.value.lower()
+        filtered = [(lbl, act) for lbl, act in PALETTE_COMMANDS if q in lbl.lower()]
+        self._populate(filtered)
+
+    @on(Input.Submitted, "#palette_input")
+    def on_input_submitted(self, _: Input.Submitted) -> None:
+        self._run_highlighted()
+
+    @on(DataTable.RowSelected, "#palette_table")
+    def on_row_selected(self, event: DataTable.RowSelected) -> None:
+        self.dismiss(str(event.row_key.value))
+
+    def _run_highlighted(self) -> None:
+        table = self.query_one("#palette_table", DataTable)
+        try:
+            row_key = table.coordinate_to_cell_key(table.cursor_coordinate).row_key
+            action = str(row_key.value)
+            if action:
+                self.dismiss(action)
+        except Exception:
+            pass
+
+
+# ---------------------------------------------------------------------------
+
+
 class MainScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -892,12 +2079,14 @@ class MainScreen(Screen):
                 yield DownloadPanel()
             with TabPane("Model Ops", id="run"):
                 yield RunPanel()
+            with TabPane("Chat", id="chat"):
+                yield ChatPanel()
             with TabPane("Maintenance", id="maintenance"):
-                yield PlaceholderPanel("Maintenance scripts")
+                yield MaintenancePanel()
             with TabPane("Settings", id="settings"):
                 yield PlaceholderPanel("Toolkit settings")
             with TabPane("Jobs", id="jobs"):
-                yield PlaceholderPanel("Job history and logs")
+                yield JobsPanel()
         yield Footer()
 
 
@@ -905,35 +2094,81 @@ class L3MSApp(App[None]):
     TITLE = "L3MS"
     CSS_PATH = "app.tcss"
     BINDINGS = [
-        ("q", "quit", "Quit"),
-        ("f1", "tab_download", "Download Tab"),
-        ("f2", "tab_run", "Run Tab"),
-        ("f3", "tab_maintenance", "Maintenance Tab"),
-        ("f4", "tab_settings", "Settings Tab"),
-        ("f5", "tab_jobs", "Jobs Tab"),
-        ("ctrl+r", "run_start", "Run Script"),
-        ("ctrl+s", "run_stop", "Stop Script"),
-        ("ctrl+f", "run_focus_filter", "Run Filter"),
-        ("ctrl+j", "run_focus_table", "Run Table"),
-        ("ctrl+u", "run_focus_editor", "Run Editor"),
-        ("ctrl+l", "run_clear_log", "Run Log Clear"),
-        ("ctrl+m", "run_toggle_mode", "Run Mode"),
-        ("ctrl+p", "run_save_script", "Run Save Script"),
-        ("alt+t", "download_focus_table", "Download Table"),
-        ("alt+i", "download_focus_editor", "Download Editor"),
-        ("alt+y", "download_clear_log", "Download Log Clear"),
-        ("alt+o", "download_load", "Download Load Config"),
-        ("alt+w", "download_save", "Download Save Config"),
-        ("alt+v", "download_validate", "Download Validate"),
-        ("alt+n", "download_add", "Download Add Model"),
-        ("alt+a", "download_apply", "Download Apply Edit"),
-        ("alt+k", "download_delete", "Download Delete Model"),
-        ("alt+d", "download_selected", "Download Selected"),
-        ("alt+e", "download_enabled", "Download Enabled"),
+        # ── always visible in footer ──────────────────────────────────
+        Binding("q", "quit", "Quit", show=True),
+        Binding("?", "show_help", "Help", show=True),
+        Binding("f1", "tab_download", "Download", show=True),
+        Binding("f2", "tab_run", "Run", show=True),
+        Binding("f3", "tab_chat", "Chat", show=True),
+        Binding("f4", "tab_maintenance", "Maint", show=True),
+        Binding("f5", "tab_settings", "Settings", show=True),
+        Binding("f6", "tab_jobs", "Jobs", show=True),
+        # ── Run / Model Ops (hidden – see ? Help) ────────────────────
+        Binding("ctrl+r", "run_start", "Start Script", show=False),
+        Binding("ctrl+s", "run_stop", "Stop Script", show=False),
+        Binding("ctrl+f", "run_focus_filter", "Filter", show=False),
+        Binding("ctrl+j", "run_focus_table", "Table", show=False),
+        Binding("ctrl+u", "run_focus_editor", "Editor", show=False),
+        Binding("ctrl+l", "run_clear_log", "Clear Log", show=False),
+        Binding("ctrl+m", "run_toggle_mode", "Toggle Mode", show=False),
+        Binding("alt+p", "run_save_script", "Save Script", show=False),
+        # ── Command palette ───────────────────────────────────────────
+        Binding("ctrl+p", "show_command_palette", "Palette", show=True),
+        # ── Jobs (hidden) ─────────────────────────────────────────────
+        Binding("s", "jobs_stop", "Stop Job", show=False),
+        Binding("r", "jobs_retry", "Retry Job", show=False),
+        # ── Chat (hidden) ─────────────────────────────────────────────
+        Binding("ctrl+g", "chat_connect", "Connect", show=False),
+        Binding("ctrl+b", "chat_detect", "Detect", show=False),
+        Binding("ctrl+x", "chat_clear", "Clear Chat", show=False),
+        Binding("alt+s", "chat_save", "Save Chat", show=False),
+        # ── Download (hidden) ─────────────────────────────────────────
+        Binding("alt+t", "download_focus_table", "Table", show=False),
+        Binding("alt+i", "download_focus_editor", "Editor", show=False),
+        Binding("alt+y", "download_clear_log", "Clear Log", show=False),
+        Binding("alt+o", "download_load", "Load Config", show=False),
+        Binding("alt+w", "download_save", "Save Config", show=False),
+        Binding("alt+v", "download_validate", "Validate", show=False),
+        Binding("alt+n", "download_add", "Add Model", show=False),
+        Binding("alt+a", "download_apply", "Apply Edit", show=False),
+        Binding("alt+k", "download_delete", "Delete Model", show=False),
+        Binding("alt+d", "download_selected", "Download", show=False),
+        Binding("alt+e", "download_enabled", "Dl Enabled", show=False),
     ]
 
     def on_mount(self) -> None:
         self.push_screen(MainScreen())
+
+    async def action_quit(self) -> None:
+        """Graceful shutdown: terminate running processes and cancel async tasks."""
+        run_panel = self.get_run_panel()
+        if run_panel:
+            if run_panel.running_proc:
+                try:
+                    run_panel.running_proc.terminate()
+                except Exception:
+                    pass
+            if run_panel.resource_task and not run_panel.resource_task.done():
+                run_panel.resource_task.cancel()
+            if run_panel.running_task and not run_panel.running_task.done():
+                run_panel.running_task.cancel()
+
+        maint_panel = self.get_maintenance_panel()
+        if maint_panel:
+            if maint_panel.running_proc:
+                try:
+                    maint_panel.running_proc.terminate()
+                except Exception:
+                    pass
+            if maint_panel.running_task and not maint_panel.running_task.done():
+                maint_panel.running_task.cancel()
+
+        chat_panel = self.get_chat_panel()
+        if chat_panel:
+            if chat_panel._active_task and not chat_panel._active_task.done():
+                chat_panel._active_task.cancel()
+
+        self.exit()
 
     def activate_tab(self, tab_id: str) -> None:
         if not self.screen:
@@ -969,11 +2204,41 @@ class L3MSApp(App[None]):
         except Exception:
             return None
 
+    def get_chat_panel(self) -> Optional[ChatPanel]:
+        if not self.screen:
+            return None
+        try:
+            return self.screen.query_one("#chat_panel", ChatPanel)
+        except Exception:
+            return None
+
+    def get_maintenance_panel(self) -> Optional[MaintenancePanel]:
+        if not self.screen:
+            return None
+        try:
+            return self.screen.query_one("#maintenance_panel", MaintenancePanel)
+        except Exception:
+            return None
+
+    def get_jobs_panel(self) -> Optional[JobsPanel]:
+        if not self.screen:
+            return None
+        try:
+            return self.screen.query_one("#jobs_panel", JobsPanel)
+        except Exception:
+            return None
+
     def action_tab_download(self) -> None:
         self.activate_tab("download")
 
     def action_tab_run(self) -> None:
         self.activate_tab("run")
+
+    def action_tab_chat(self) -> None:
+        self.activate_tab("chat")
+        panel = self.get_chat_panel()
+        if panel:
+            panel.focus_input()
 
     def action_tab_maintenance(self) -> None:
         self.activate_tab("maintenance")
@@ -985,14 +2250,26 @@ class L3MSApp(App[None]):
         self.activate_tab("jobs")
 
     async def action_run_start(self) -> None:
-        if self.active_tab() != "run":
+        tab = self.active_tab()
+        if tab == "maintenance":
+            panel = self.get_maintenance_panel()
+            if panel:
+                await panel.run_script()
+            return
+        if tab != "run":
             return
         panel = self.get_run_panel()
         if panel:
             await panel.run_script()
 
     async def action_run_stop(self) -> None:
-        if self.active_tab() != "run":
+        tab = self.active_tab()
+        if tab == "maintenance":
+            panel = self.get_maintenance_panel()
+            if panel:
+                await panel.stop_script()
+            return
+        if tab != "run":
             return
         panel = self.get_run_panel()
         if panel:
@@ -1020,7 +2297,13 @@ class L3MSApp(App[None]):
             panel.focus_editor()
 
     def action_run_clear_log(self) -> None:
-        if self.active_tab() != "run":
+        tab = self.active_tab()
+        if tab == "maintenance":
+            panel = self.get_maintenance_panel()
+            if panel:
+                panel.clear_log()
+            return
+        if tab != "run":
             return
         panel = self.get_run_panel()
         if panel:
@@ -1116,3 +2399,87 @@ class L3MSApp(App[None]):
         panel = self.get_download_panel()
         if panel:
             await panel.download_enabled_models()
+
+    # ------------------------------------------------------------------
+    # Chat actions
+    # ------------------------------------------------------------------
+
+    async def action_chat_connect(self) -> None:
+        if self.active_tab() != "chat":
+            return
+        panel = self.get_chat_panel()
+        if panel:
+            await panel.do_connect()
+
+    async def action_chat_detect(self) -> None:
+        if self.active_tab() != "chat":
+            return
+        panel = self.get_chat_panel()
+        if panel:
+            await panel.do_detect()
+
+    def action_chat_clear(self) -> None:
+        if self.active_tab() != "chat":
+            return
+        panel = self.get_chat_panel()
+        if panel:
+            panel.clear_chat()
+
+    async def action_chat_save(self) -> None:
+        if self.active_tab() != "chat":
+            return
+        panel = self.get_chat_panel()
+        if panel:
+            panel.save_chat()
+
+    def action_show_help(self) -> None:
+        self.push_screen(HelpScreen())
+
+    def action_show_command_palette(self) -> None:
+        def handle_result(action: Optional[str]) -> None:
+            if action:
+                self.call_later(self.run_action, action)
+
+        self.push_screen(CommandPaletteScreen(), callback=handle_result)
+
+    def action_jobs_stop(self) -> None:
+        if self.active_tab() != "jobs":
+            return
+        panel = self.get_jobs_panel()
+        if panel:
+            panel.post_message(JobsPanel.StopRequest())
+
+    def action_jobs_retry(self) -> None:
+        if self.active_tab() != "jobs":
+            return
+        panel = self.get_jobs_panel()
+        if panel:
+            panel.on_retry_btn()
+
+    async def on_jobs_panel_stop_request(self, _: JobsPanel.StopRequest) -> None:
+        panel = self.get_run_panel()
+        if panel:
+            await panel.stop_script()
+
+    async def on_jobs_panel_retry_request(self, event: JobsPanel.RetryRequest) -> None:
+        panel = self.get_run_panel()
+        if panel:
+            self.activate_tab("run")
+            await panel.run_script_by_path(event.script_path, event.mode)
+
+    def on_run_panel_job_started(self, event: RunPanel.JobStarted) -> None:
+        panel = self.get_jobs_panel()
+        if panel:
+            panel.add_job_started(
+                event.name,
+                event.started,
+                mode=event.mode,
+                script_path=event.script_path,
+            )
+
+    def on_run_panel_job_finished(self, event: RunPanel.JobFinished) -> None:
+        panel = self.get_jobs_panel()
+        if panel:
+            panel.update_job_finished(
+                event.name, event.elapsed, event.exit_code, mode=event.mode
+            )

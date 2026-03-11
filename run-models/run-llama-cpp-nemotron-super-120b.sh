@@ -9,7 +9,7 @@ export GGML_CUDA_GRAPH_OPT="${GGML_CUDA_GRAPH_OPT:-1}"
 
 LLAMA_SERVER="${LLAMA_SERVER:-${REPO_DIR}/vendor/llama.cpp/build/bin/llama-server}"
 CPU_RANGE="${CPU_RANGE:-0-11}"
-MODEL="${MODEL:-/home/kchauhan/models/unsloth/Qwen3-Coder-Next-GGUF/Qwen3-Coder-Next-MXFP4_MOE.gguf}"
+MODEL="${MODEL:-/mnt/lab//models/unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF/NVIDIA-Nemotron-3-Super-120B-A12B-UD-Q3_K_XL-00001-of-00003.gguf}"
 
 if [ ! -x "${LLAMA_SERVER}" ]; then
   echo "llama-server not found/executable: ${LLAMA_SERVER}" >&2
@@ -24,26 +24,26 @@ fi
 cmd=(
   "${LLAMA_SERVER}"
   -m "${MODEL}"
-  --alias "unsloth/Qwen3-Coder-Next"
+  --alias "unsloth/NVIDIA-Nemotron-3-Super-120B-A12B (UD-Q3_K_XL)"
   --seed 3407
-  --temp 1.0
+  --temp 0.6
   --top-p 0.95
-  --min-p 0.01
   --top-k 40
+  --min-p 0.05
+  --repeat-penalty 1.0
   --host 0.0.0.0
   --port 8001
   --jinja
-  -ctk q8_0 
-  -ctv q8_0
-  --ctx-size 131072
+  --ctx-size 32768
   --fit on
-  --fit-ctx 131072
-  --fit-target 128
+  --fit-ctx 32768
+  --fit-target 512
   --no-mmap
-  --mlock
   --threads 10
   --threads-batch 12
   --flash-attn on
+  --batch-size 2048
+  --ubatch-size 512
   --prio 2
   --no-warmup
 )

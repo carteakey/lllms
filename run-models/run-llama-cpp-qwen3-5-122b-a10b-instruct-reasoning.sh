@@ -9,7 +9,7 @@ export GGML_CUDA_GRAPH_OPT="${GGML_CUDA_GRAPH_OPT:-1}"
 
 LLAMA_SERVER="${LLAMA_SERVER:-${REPO_DIR}/vendor/llama.cpp/build/bin/llama-server}"
 CPU_RANGE="${CPU_RANGE:-0-11}"
-MODEL="${MODEL:-/home/kchauhan/models/unsloth/Qwen3.5-122B-A10B-GGUF/UD-Q4_K_XL/Qwen3.5-122B-A10B-UD-Q4_K_XL-00001-of-00003.gguf}"
+MODEL="${MODEL:-/mnt/lab//models/unsloth/Qwen3.5-122B-A10B-GGUF/UD-Q4_K_XL/Qwen3.5-122B-A10B-UD-Q4_K_XL-00001-of-00003.gguf}"
 
 if [ ! -x "${LLAMA_SERVER}" ]; then
   echo "llama-server not found/executable: ${LLAMA_SERVER}" >&2
@@ -36,10 +36,8 @@ cmd=(
   --presence-penalty 1.5
   --repeat-penalty 1.0
   --host 0.0.0.0
-  --port 8003
+  --port 8001
   --jinja
-  --reasoning-format deepseek
-  --chat-template-kwargs '{"enable_thinking": false}'
   --ctx-size 65536
   --fit on
   --fit-ctx 65536
@@ -52,7 +50,6 @@ cmd=(
   --batch-size 1024
   --ubatch-size 512
   --prio 2
-  --no-warmup
 )
 
 if command -v taskset >/dev/null 2>&1 && [ -n "${CPU_RANGE}" ]; then

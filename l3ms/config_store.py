@@ -19,7 +19,6 @@ MODEL_KEYS = {
     "ignore_patterns",
     "revision",
     "force_download",
-    "preserve_existing",
     "max_workers",
     "description",
 }
@@ -48,7 +47,6 @@ def normalize_model(model: Dict[str, Any]) -> Dict[str, Any]:
         "ignore_patterns": [str(p).strip() for p in (model.get("ignore_patterns") or []) if str(p).strip()],
         "revision": str(model.get("revision", "")).strip(),
         "force_download": bool(model.get("force_download", False)),
-        "preserve_existing": bool(model.get("preserve_existing", True)),
         "max_workers": model.get("max_workers"),
         "description": str(model.get("description", "")).strip(),
     }

@@ -83,3 +83,211 @@ Checkbox {
     min-height: 16;
     border: round $accent;
 }
+
+/* ---- Chat Panel ---- */
+
+#chat_panel {
+    height: 1fr;
+}
+
+#chat_log {
+    height: 1fr;
+    min-height: 10;
+    border: round $accent;
+    margin-bottom: 1;
+}
+
+#chat_status {
+    width: auto;
+    padding: 0 1;
+    color: $text-muted;
+}
+
+#chat_model_label {
+    width: 1fr;
+    padding: 0 1;
+}
+
+.chat_port_input {
+    width: 10;
+    min-width: 6;
+}
+
+.chat_input_row {
+    height: auto;
+    margin-top: 0;
+}
+
+#chat_input {
+    width: 1fr;
+}
+
+.key_hint {
+    color: $text-disabled;
+    text-style: dim;
+    height: auto;
+    margin-top: 1;
+}
+
+/* Maintenance Panel */
+#maint_table {
+    height: 1fr;
+    min-height: 8;
+    margin-bottom: 1;
+}
+#maint_log {
+    height: 10;
+    border: round $accent;
+}
+#maint_editor {
+    height: 1fr;
+    min-height: 16;
+    border: round $accent;
+}
+#maint_selected_path {
+    margin-bottom: 1;
+    padding: 0 1;
+    border: round $accent;
+}
+#maint_status {
+    width: 1fr;
+    padding: 0 1;
+}
+
+/* Chat streaming preview */
+#chat_stream_preview {
+    height: auto;
+    min-height: 2;
+    max-height: 20;
+    border: round $warning;
+    padding: 0 1;
+    margin-bottom: 1;
+    display: none;
+}
+
+.chat_small_input {
+    width: 10;
+    min-width: 6;
+}
+
+.chat_params_row {
+    height: auto;
+    margin-bottom: 1;
+}
+
+/* Jobs Panel */
+#jobs_table {
+    height: 1fr;
+    min-height: 10;
+}
+
+/* Chat History Screen */
+ChatHistoryScreen {
+    align: center middle;
+}
+
+#history_dialog {
+    width: 70;
+    height: auto;
+    max-height: 80vh;
+    border: round $accent;
+    background: $surface;
+    padding: 0 0 1 0;
+    overflow-y: auto;
+}
+
+#history_title {
+    background: $accent;
+    color: $text;
+    text-style: bold;
+    text-align: center;
+    padding: 0 2;
+    width: 1fr;
+}
+
+#history_table {
+    height: auto;
+    max-height: 40;
+    margin: 1 2;
+}
+
+#history_empty {
+    padding: 0 2;
+    width: 1fr;
+}
+
+#history_hint {
+    text-align: center;
+    width: 1fr;
+    padding: 0 2;
+}
+
+/* Command Palette Screen */
+CommandPaletteScreen {
+    align: center middle;
+}
+
+#palette_dialog {
+    width: 64;
+    height: auto;
+    max-height: 80vh;
+    border: round $accent;
+    background: $surface;
+    padding: 0 0 1 0;
+    overflow-y: auto;
+}
+
+#palette_title {
+    background: $accent;
+    color: $text;
+    text-style: bold;
+    text-align: center;
+    padding: 0 2;
+    width: 1fr;
+}
+
+#palette_input {
+    margin: 1 2 0 2;
+    width: 1fr;
+}
+
+#palette_table {
+    height: auto;
+    max-height: 40;
+    margin: 0 2;
+}
+
+#palette_hint {
+    text-align: center;
+    width: 1fr;
+    padding: 0 2;
+}
+
+/* Help overlay (HelpScreen modal) */
+HelpScreen {
+    align: center middle;
+}
+
+#help_dialog {
+    width: 58;
+    height: auto;
+    max-height: 80vh;
+    border: round $accent;
+    background: $surface;
+    padding: 0 0 1 0;
+    overflow-y: auto;
+}
+
+#help_title {
+    background: $accent;
+    color: $text;
+    text-style: bold;
+    text-align: center;
+    padding: 0 2;
+    width: 1fr;
+}
+
+#help_body {
+    padding: 0 2;
+    width: 1fr;
+}

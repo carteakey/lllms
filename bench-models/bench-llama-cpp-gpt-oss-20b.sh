@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 LLAMA_BENCH="${LLAMA_BENCH:-${REPO_DIR}/vendor/llama.cpp/build/bin/llama-bench}"
-MODEL="${MODEL:-/home/kchauhan/models/ggml-org/gpt-oss-20b-GGUF/gpt-oss-20b-mxfp4.gguf}"
+MODEL="${MODEL:-/mnt/lab//models/ggml-org/gpt-oss-20b-GGUF/gpt-oss-20b-mxfp4.gguf}"
 CPU_RANGE="${CPU_RANGE:-0-11}"
 TASKS="${TASKS:-512,128}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-99}"

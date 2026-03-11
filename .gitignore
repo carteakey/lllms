@@ -22,3 +22,6 @@ cuda-keyring_1.1-1_all.deb
 
 # Toolkit runtime state
 .toolkit/
+
+# Local secrets
+.env

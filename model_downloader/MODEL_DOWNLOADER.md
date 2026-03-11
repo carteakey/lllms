@@ -7,12 +7,12 @@ A flexible and configurable tool for downloading models from HuggingFace Hub wit
 - **Dynamic Configuration**: Use JSON config files or command-line arguments
 - **Pattern Matching**: Include/exclude specific file patterns (e.g., `*Q8*`, `*.bin`)
 - **Batch Downloads**: Download multiple models in one go
-- **Enable/Disable Models**: Toggle models on/off without commenting them out
+- **Enable/Disable Models**: Toggle models on/off without removing them from config
 - **Auto-directory Generation**: Automatically organize models by repository structure
 - **Fast Downloads**: Uses `hf_transfer` for improved download speeds
+- **Incremental Sync**: `--update` pulls only changed/new files for already-downloaded models
 - **Error Handling**: Robust error handling with detailed feedback
-- **Download Throttling**: Control concurrency with `max_workers`
-- **Safe Local Sync**: Preserves existing files in target folders by default
+- **Download Throttling**: Control concurrency with `--slow` or `--max-workers`
 
 ## Installation
 
@@ -57,10 +57,13 @@ Create a configuration file and download multiple models:
 
 ```bash
 # Use existing config
-python download_hf_model.py --config models_config.json
+./download_hf_model.py --config models_config.json
 
-# Create a sample config file
-python download_hf_model.py --create-config my_models.json
+# Sync updates for already-downloaded models
+./download_hf_model.py --config models_config.json --update
+
+# Throttle concurrency
+./download_hf_model.py --config models_config.json --slow
 ```
 
 ### 3. Configuration File Format
@@ -82,7 +85,6 @@ python download_hf_model.py --create-config my_models.json
       "allow_patterns": ["*Q6_K*"],
       "ignore_patterns": ["*.md"],
       "max_workers": 2,
-      "preserve_existing": true,
       "description": "Qwen3 32B with Q6_K quantization"
     },
     {
@@ -104,12 +106,11 @@ python download_hf_model.py --create-config my_models.json
 | `--allow-patterns` | `-a` | File patterns to include |
 | `--ignore-patterns` | `-i` | File patterns to exclude |
 | `--config` | `-c` | Path to JSON configuration file |
-| `--create-config` | | Create sample configuration file |
-| `--revision` | | Specific revision/branch to download |
-| `--force-download` | | Re-download existing files |
-| `--max-workers` | | Max concurrent download workers (throttling) |
-| `--slow` | | Slow preset (`max_workers=4`, unless `--max-workers` is set) |
-| `--no-preserve-existing` | | Use direct local_dir mode instead of safe preserving sync |
+| `--revision` | | Specific branch/tag/commit to pin |
+| `--update` | `-u` | Sync updates for models already on disk; skips fresh downloads |
+| `--force-download` | | Re-download existing files (overrides incremental check) |
+| `--max-workers` | | Max concurrent download workers |
+| `--slow` | | Slow preset (`max_workers=4`) |
 | `--base-models-dir` | | Base directory for all models |
 
 ## Configuration Options
@@ -118,15 +119,14 @@ python download_hf_model.py --create-config my_models.json
 
 Each model in the configuration can have these properties:
 
-- `enabled` (optional, default: `true`): Set to `false` to skip downloading this model without removing it from the config
+- `enabled` (optional, default: `true`): Set to `false` to skip this model without removing it
 - `repo_id` (required): HuggingFace repository ID
 - `local_dir` (optional): Custom local directory path
 - `allow_patterns` (optional): List of file patterns to include
 - `ignore_patterns` (optional): List of file patterns to exclude
 - `revision` (optional): Specific git revision/branch/tag
 - `force_download` (optional): Whether to re-download existing files
-- `max_workers` (optional): Max concurrent file downloads for throttling
-- `preserve_existing` (optional, default: `true`): Keep unrelated/existing local files instead of pruning
+- `max_workers` (optional): Max concurrent file downloads
 - `description` (optional): Human-readable description
 
 ### Pattern Examples
