@@ -180,3 +180,114 @@ Checkbox {
     height: 1fr;
     min-height: 10;
 }
+
+/* Chat History Screen */
+ChatHistoryScreen {
+    align: center middle;
+}
+
+#history_dialog {
+    width: 70;
+    height: auto;
+    max-height: 80vh;
+    border: round $accent;
+    background: $surface;
+    padding: 0 0 1 0;
+    overflow-y: auto;
+}
+
+#history_title {
+    background: $accent;
+    color: $text;
+    text-style: bold;
+    text-align: center;
+    padding: 0 2;
+    width: 1fr;
+}
+
+#history_table {
+    height: auto;
+    max-height: 40;
+    margin: 1 2;
+}
+
+#history_empty {
+    padding: 0 2;
+    width: 1fr;
+}
+
+#history_hint {
+    text-align: center;
+    width: 1fr;
+    padding: 0 2;
+}
+
+/* Command Palette Screen */
+CommandPaletteScreen {
+    align: center middle;
+}
+
+#palette_dialog {
+    width: 64;
+    height: auto;
+    max-height: 80vh;
+    border: round $accent;
+    background: $surface;
+    padding: 0 0 1 0;
+    overflow-y: auto;
+}
+
+#palette_title {
+    background: $accent;
+    color: $text;
+    text-style: bold;
+    text-align: center;
+    padding: 0 2;
+    width: 1fr;
+}
+
+#palette_input {
+    margin: 1 2 0 2;
+    width: 1fr;
+}
+
+#palette_table {
+    height: auto;
+    max-height: 40;
+    margin: 0 2;
+}
+
+#palette_hint {
+    text-align: center;
+    width: 1fr;
+    padding: 0 2;
+}
+
+/* Help overlay (HelpScreen modal) */
+HelpScreen {
+    align: center middle;
+}
+
+#help_dialog {
+    width: 58;
+    height: auto;
+    max-height: 80vh;
+    border: round $accent;
+    background: $surface;
+    padding: 0 0 1 0;
+    overflow-y: auto;
+}
+
+#help_title {
+    background: $accent;
+    color: $text;
+    text-style: bold;
+    text-align: center;
+    padding: 0 2;
+    width: 1fr;
+}
+
+#help_body {
+    padding: 0 2;
+    width: 1fr;
+}

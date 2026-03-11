@@ -4,11 +4,12 @@
     {
       "enabled": false,
       "repo_id": "unsloth/GLM-4.7-Flash-GGUF",
-      "local_dir": "/run/media/kchauhan/Windows/models/unsloth/GLM-4.7-Flash-GGUF",
+      "local_dir": "/mnt/lab/models/unsloth/GLM-4.7-Flash-GGUF",
       "allow_patterns": [
         "*Flash-Q6_K*"
       ],
       "ignore_patterns": [],
+      "revision": "",
       "force_download": false,
       "max_workers": null,
       "description": "GLM"
@@ -16,11 +17,12 @@
     {
       "enabled": true,
       "repo_id": "unsloth/Qwen3.5-35B-A3B-GGUF",
-      "local_dir": "/run/media/kchauhan/Windows/models/unsloth/Qwen3.5-35B-A3B-GGUF",
+      "local_dir": "/mnt/lab/models/unsloth/Qwen3.5-35B-A3B-GGUF",
       "allow_patterns": [
         "*Q4_K_L*"
       ],
       "ignore_patterns": [],
+      "revision": "",
       "force_download": false,
       "max_workers": null,
       "description": "Qwen3.5 35B-A3B Q4_K_L"
@@ -28,11 +30,12 @@
     {
       "enabled": true,
       "repo_id": "unsloth/Qwen3.5-122B-A10B-GGUF",
-      "local_dir": "/run/media/kchauhan/Windows/models/unsloth/Qwen3.5-122B-A10B-GGUF",
+      "local_dir": "/mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF",
       "allow_patterns": [
-        "*UD-Q4_K_XL*"
+        "*UD*IQ4*X*"
       ],
       "ignore_patterns": [],
+      "revision": "",
       "force_download": false,
       "max_workers": null,
       "description": "Qwen3.5"
@@ -40,11 +43,12 @@
     {
       "enabled": true,
       "repo_id": "unsloth/Qwen3-Coder-Next-GGUF",
-      "local_dir": "/run/media/kchauhan/Windows/models/unsloth/Qwen3-Coder-Next-GGUF",
+      "local_dir": "/mnt/lab/models/unsloth/Qwen3-Coder-Next-GGUF",
       "allow_patterns": [
         "*UD*Q4*XL*"
       ],
       "ignore_patterns": [],
+      "revision": "",
       "force_download": false,
       "max_workers": null,
       "description": "Qwen"
@@ -52,11 +56,12 @@
     {
       "enabled": false,
       "repo_id": "ggml-org/gpt-oss-20b-GGUF",
-      "local_dir": "/run/media/kchauhan/Windows/models/ggml-org/gpt-oss-20b-GGUF",
+      "local_dir": "/mnt/lab/models/ggml-org/gpt-oss-20b-GGUF",
       "allow_patterns": [
         "*F16*"
       ],
       "ignore_patterns": [],
+      "revision": "",
       "force_download": false,
       "max_workers": null,
       "description": "GPT OSS 20B model with F16 quantization"
@@ -64,35 +69,25 @@
     {
       "enabled": false,
       "repo_id": "ggml-org/gpt-oss-120b-GGUF",
-      "local_dir": "/run/media/kchauhan/Windows/models/ggml-org/gpt-oss-120b-GGUF",
+      "local_dir": "/mnt/lab/models/ggml-org/gpt-oss-120b-GGUF",
       "allow_patterns": [
         "*mxfp4*"
       ],
       "ignore_patterns": [],
+      "revision": "",
       "force_download": false,
       "max_workers": null,
       "description": "GPT OSS 120B model with F16 quantization"
     },
     {
       "enabled": false,
-      "repo_id": "unsloth/gpt-oss-120b-GGUF",
-      "local_dir": "/run/media/kchauhan/Windows/models/unsloth/gpt-oss-120b-GGUF",
-      "allow_patterns": [
-        "*Q2_K_L*"
-      ],
-      "ignore_patterns": [],
-      "force_download": false,
-      "max_workers": null,
-      "description": "GPT OSS 120B model with Q2 quantization"
-    },
-    {
-      "enabled": false,
       "repo_id": "Qwen/Qwen3-32B-GGUF",
-      "local_dir": "/run/media/kchauhan/Windows/models/qwen/Qwen3-32B-GGUF",
+      "local_dir": "/mnt/lab/models/qwen/Qwen3-32B-GGUF",
       "allow_patterns": [
         "*Q6_K*"
       ],
       "ignore_patterns": [],
+      "revision": "",
       "force_download": false,
       "max_workers": null,
       "description": "Qwen3 32B model with Q6_K quantization"
@@ -100,11 +95,12 @@
     {
       "enabled": false,
       "repo_id": "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
-      "local_dir": "/run/media/kchauhan/Windows/models/qwen/Qwen3-Coder-30B-A3B-Instruct-GGUF",
+      "local_dir": "/mnt/lab/models/qwen/Qwen3-Coder-30B-A3B-Instruct-GGUF",
       "allow_patterns": [
         "*IQ4_NL*"
       ],
       "ignore_patterns": [],
+      "revision": "",
       "force_download": false,
       "max_workers": null,
       "description": "Qwen3 30B Instruct with Q6_K quantization"
@@ -112,14 +108,28 @@
     {
       "enabled": false,
       "repo_id": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF",
-      "local_dir": "/run/media/kchauhan/Windows/models/qwen/Qwen3-30B-A3B-Instruct-2507-GGUF",
+      "local_dir": "/mnt/lab/models/qwen/Qwen3-30B-A3B-Instruct-2507-GGUF",
       "allow_patterns": [
         "*IQ4_NL*"
       ],
       "ignore_patterns": [],
+      "revision": "",
       "force_download": false,
       "max_workers": null,
       "description": "Qwen3 30B Instruct with Q8 quantization"
+    },
+    {
+      "enabled": true,
+      "repo_id": "unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF",
+      "local_dir": "/mnt/lab/models/unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF",
+      "allow_patterns": [
+        "*UD-Q3_K_XL*"
+      ],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": null,
+      "description": "NVIDIA Nemotron 3 Super 120B-A12B UD-Q3_K_XL (~62.6 GB, 3 splits)"
     }
   ]
 }

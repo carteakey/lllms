@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 LLAMA_BENCH="${LLAMA_BENCH:-${REPO_DIR}/vendor/llama.cpp/build/bin/llama-bench}"
-MODEL="${MODEL:-/run/media/kchauhan/Windows/models/unsloth/Qwen3-Coder-Next-GGUF/Qwen3-Coder-Next-MXFP4_MOE.gguf}"
+MODEL="${MODEL:-/mnt/lab//models/unsloth/Qwen3-Coder-Next-GGUF/Qwen3-Coder-Next-MXFP4_MOE.gguf}"
 CPU_RANGE="${CPU_RANGE:-0-11}"
 TASKS="${TASKS:-512,128}"
 N_GPU_LAYERS="${N_GPU_LAYERS:-99}"

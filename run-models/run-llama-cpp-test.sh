@@ -9,7 +9,7 @@ REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 LLAMA_SERVER="${LLAMA_SERVER:-${REPO_DIR}/vendor/llama.cpp/build/bin/llama-server}"
 CPU_RANGE="${CPU_RANGE:-0-11}"
-MODEL="${MODEL:-/run/media/kchauhan/Windows/models/unsloth/Qwen3.5-122B-A10B-GGUF/MXFP4_MOE/Qwen3.5-122B-A10B-MXFP4_MOE-00001-of-00003.gguf}"
+MODEL="${MODEL:-/mnt/lab//models/unsloth/Qwen3.5-122B-A10B-GGUF/MXFP4_MOE/Qwen3.5-122B-A10B-MXFP4_MOE-00001-of-00003.gguf}"
 
 
 if [ ! -x "${LLAMA_SERVER}" ]; then
@@ -44,5 +44,5 @@ if command -v taskset >/dev/null 2>&1 && [ -n "${CPU_RANGE}" ]; then
   exec taskset -c "${CPU_RANGE}" "${cmd[@]}"
 fi
 
-# --mmproj /run/media/kchauhan/Windows/models/unsloth/Qwen3.5-122B-A10B-GGUF/MXFP4_MOE/mmproj-F16.gguf \
+# --mmproj /mnt/lab//models/unsloth/Qwen3.5-122B-A10B-GGUF/MXFP4_MOE/mmproj-F16.gguf \
 exec "${cmd[@]}"

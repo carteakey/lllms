@@ -9,7 +9,7 @@ export GGML_CUDA_GRAPH_OPT="${GGML_CUDA_GRAPH_OPT:-1}"
 
 LLAMA_SERVER="${LLAMA_SERVER:-${REPO_DIR}/vendor/llama.cpp/build/bin/llama-server}"
 CPU_RANGE="${CPU_RANGE:-0-11}"
-MODEL="${MODEL:-/run/media/kchauhan/Windows/models/unsloth/Qwen3.5-35B-A3B-GGUF/Qwen3.5-35B-A3B-UD-Q4_K_L.gguf}"
+MODEL="${MODEL:-/mnt/lab//models/unsloth/Qwen3.5-35B-A3B-GGUF/Qwen3.5-35B-A3B-UD-Q4_K_L.gguf}"
 
 if [ ! -x "${LLAMA_SERVER}" ]; then
   echo "llama-server not found/executable: ${LLAMA_SERVER}" >&2

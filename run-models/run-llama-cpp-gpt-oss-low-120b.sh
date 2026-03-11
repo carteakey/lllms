@@ -10,7 +10,7 @@ export GGML_CUDA_GRAPH_OPT="${GGML_CUDA_GRAPH_OPT:-1}"
 LLAMA_SERVER="${LLAMA_SERVER:-${REPO_DIR}/vendor/llama.cpp/build/bin/llama-server}"
 CHAT_TEMPLATE="${CHAT_TEMPLATE:-${REPO_DIR}/chat-template.jinja}"
 CPU_RANGE="${CPU_RANGE:-0-11}"
-MODEL="${MODEL:-/run/media/kchauhan/Windows/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf}"
+MODEL="${MODEL:-/mnt/lab//models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf}"
 
 if [ ! -x "${LLAMA_SERVER}" ]; then
   echo "llama-server not found/executable: ${LLAMA_SERVER}" >&2

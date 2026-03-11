@@ -9,7 +9,7 @@ export GGML_CUDA_GRAPH_OPT="${GGML_CUDA_GRAPH_OPT:-1}"
 
 LLAMA_SERVER="${LLAMA_SERVER:-${REPO_DIR}/vendor/llama.cpp/build/bin/llama-server}"
 CPU_RANGE="${CPU_RANGE:-0-11}"
-MODEL="${MODEL:-/run/media/kchauhan/Windows/models/unsloth/Qwen3-Coder-Next-GGUF/Qwen3-Coder-Next-UD-Q4_K_XL.gguf}"
+MODEL="${MODEL:-/mnt/lab//models/unsloth/Qwen3-Coder-Next-GGUF/Qwen3-Coder-Next-UD-Q4_K_XL.gguf}"
 if [ ! -x "${LLAMA_SERVER}" ]; then
   echo "llama-server not found/executable: ${LLAMA_SERVER}" >&2
   exit 1
@@ -19,26 +19,6 @@ if [ ! -f "${MODEL}" ]; then
   echo "model file not found: ${MODEL}" >&2
   exit 1
 fi
-
-# cmd=(
-#   "${LLAMA_SERVER}"
-#   -m "${MODEL}"
-#   --alias "unsloth/Qwen3-Coder-Next"
-#   --seed 3407
-#   --temp 1.0
-#   --top-p 0.95
-#   --min-p 0.01
-#   --top-k 40
-#   --host 0.0.0.0
-#   --port 8001
-#   --jinja
-#   --ctx-size 131072
-#   --fit on
-#   --fit-ctx 131072
-#   --fit-target 128
-#   --no-mmap
-#   --flash-attn on
-# )
 
 
 cmd=(
@@ -66,6 +46,7 @@ cmd=(
   --flash-attn on
   --prio 2
   --no-warmup
+  --repeat-penalty 1
 )
 
 
