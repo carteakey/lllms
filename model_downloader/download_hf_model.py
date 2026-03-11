@@ -5,12 +5,12 @@ HuggingFace Model Downloader
 Downloads models from HuggingFace Hub with configurable patterns and concurrency.
 """
 
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
 # Load .env from repo root (two levels up from this file)
 _env_path = Path(__file__).resolve().parents[1] / ".env"
@@ -21,15 +21,35 @@ if _env_path.exists():
             _k, _v = _line.split("=", 1)
             os.environ.setdefault(_k.strip(), _v.strip())
 
-# Enable HF Transfer for faster downloads
-os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
-
 try:
     from huggingface_hub import snapshot_download
 except ImportError:
     print("Error: huggingface_hub is not installed.")
-    print("Please install it with: pip install huggingface_hub hf_transfer")
+    print('Please install it with: pip install -U "huggingface_hub"')
     sys.exit(1)
+
+
+# Detect active download backend and report it.
+# hf_xet is the current fast path (chunk-based deduplication via Xet storage).
+# hf_transfer is deprecated and must NOT be force-enabled alongside hf_xet.
+def _report_download_backend() -> None:
+    try:
+        import importlib.metadata as _meta
+
+        xet_ver = _meta.version("hf_xet")
+        print(f"  download backend: hf_xet {xet_ver} (Xet storage, chunk dedup)")
+        return
+    except Exception:
+        pass
+    # Warn if someone still has HF_HUB_ENABLE_HF_TRANSFER set in environment
+    if os.environ.get("HF_HUB_ENABLE_HF_TRANSFER") == "1":
+        print(
+            "  download backend: hf_transfer (DEPRECATED — unset HF_HUB_ENABLE_HF_TRANSFER and install hf_xet)"
+        )
+        return
+    print(
+        "  download backend: huggingface_hub default (install hf_xet for faster downloads)"
+    )
 
 
 def has_local_files(local_dir: str) -> bool:
@@ -52,7 +72,9 @@ def download_model(
 ) -> str:
     if update_only:
         if not has_local_files(local_dir):
-            print(f"  No local files found — skipping (run without --update to download fresh)")
+            print(
+                f"  No local files found — skipping (run without --update to download fresh)"
+            )
             return local_dir
         print(f"  ↻ Syncing {repo_id} — pulling only changed/new files")
 
@@ -109,6 +131,7 @@ def resolve_local_dir(repo_id: str, base_models_dir: str, local_dir: str = None)
 
 
 def main():
+    _report_download_backend()
     parser = argparse.ArgumentParser(
         description="Download models from HuggingFace Hub",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -119,25 +142,43 @@ Examples:
   ./download_hf_model.py --config models_config.json
   ./download_hf_model.py --config models_config.json --slow
   ./download_hf_model.py --config models_config.json --update
-        """
+        """,
     )
 
     parser.add_argument("--config", "-c", help="Path to JSON configuration file")
     parser.add_argument("--repo-id", "-r", help="Repository ID to download")
     parser.add_argument("--local-dir", "-d", help="Local directory to save the model")
-    parser.add_argument("--allow-patterns", "-a", nargs="+", help="File patterns to include")
-    parser.add_argument("--ignore-patterns", "-i", nargs="+", help="File patterns to exclude")
+    parser.add_argument(
+        "--allow-patterns", "-a", nargs="+", help="File patterns to include"
+    )
+    parser.add_argument(
+        "--ignore-patterns", "-i", nargs="+", help="File patterns to exclude"
+    )
     parser.add_argument("--revision", help="Specific revision/branch to download")
-    parser.add_argument("--force-download", action="store_true", help="Re-download existing files")
-    parser.add_argument("--max-workers", type=int, default=None, help="Max concurrent download workers")
-    parser.add_argument("--slow", action="store_true", help="Slow preset: max_workers=4")
-    parser.add_argument("--update", "-u", action="store_true",
-                        help="Sync updates for models already on disk; skip models with no local files")
+    parser.add_argument(
+        "--force-download", action="store_true", help="Re-download existing files"
+    )
+    parser.add_argument(
+        "--max-workers", type=int, default=None, help="Max concurrent download workers"
+    )
+    parser.add_argument(
+        "--slow", action="store_true", help="Slow preset: max_workers=4"
+    )
+    parser.add_argument(
+        "--update",
+        "-u",
+        action="store_true",
+        help="Sync updates for models already on disk; skip models with no local files",
+    )
     parser.add_argument("--base-models-dir", help="Base directory for all models")
 
     args = parser.parse_args()
-    effective_max_workers = args.max_workers if args.max_workers is not None else (4 if args.slow else None)
-    base_models_dir = args.base_models_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+    effective_max_workers = (
+        args.max_workers if args.max_workers is not None else (4 if args.slow else None)
+    )
+    base_models_dir = args.base_models_dir or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "models"
+    )
 
     if args.config:
         config = load_config(args.config)
@@ -149,7 +190,9 @@ Examples:
         enabled_models = [m for m in models if m.get("enabled", True)]
         disabled_count = len(models) - len(enabled_models)
 
-        print(f"Found {len(models)} models in configuration ({len(enabled_models)} enabled, {disabled_count} disabled)")
+        print(
+            f"Found {len(models)} models in configuration ({len(enabled_models)} enabled, {disabled_count} disabled)"
+        )
 
         if not enabled_models:
             print("No enabled models to download")
