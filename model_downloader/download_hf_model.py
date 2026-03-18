@@ -92,7 +92,7 @@ def download_model(
             local_dir=local_dir,
             allow_patterns=allow_patterns,
             ignore_patterns=ignore_patterns,
-            revision=revision,
+            revision=revision or "main",
             force_download=force_download,
             max_workers=max_workers,
         )

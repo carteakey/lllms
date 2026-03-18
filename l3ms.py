@@ -8,6 +8,8 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from l3ms.script_store import command_for_script
+
 ROOT = Path(__file__).resolve().parent
 RUN_SCRIPT_GLOB = "run-models/run-llama-cpp-*.sh"
 BENCH_SCRIPT_GLOB = "bench-models/bench-llama-cpp-*.sh"
@@ -16,17 +18,6 @@ BENCH_SCRIPT_GLOB = "bench-models/bench-llama-cpp-*.sh"
 def collect_scripts(mode: str) -> List[Path]:
     pattern = RUN_SCRIPT_GLOB if mode == "run" else BENCH_SCRIPT_GLOB
     return sorted([path for path in ROOT.glob(pattern) if path.is_file()])
-
-
-def command_for_script(path: Path, extra_args: List[str]) -> List[str]:
-    suffix = path.suffix.lower()
-    if suffix == ".sh":
-        return ["bash", str(path), *extra_args]
-    if suffix == ".ps1":
-        return ["pwsh", "-File", str(path), *extra_args]
-    if suffix in {".bat", ".cmd"}:
-        return ["cmd", "/c", str(path), *extra_args]
-    return ["bash", str(path), *extra_args]
 
 
 def pretty_name(path: Path) -> str:

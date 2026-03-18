@@ -50,6 +50,10 @@
 - **Bench result diffing**: side-by-side comparison of two bench runs in the
   result browser
 
+## Bench / Hardware
+
+- **Catch slow-tg root cause**: run `sudo bash preflight-check.sh` on the next *fast* boot and save output; do the same on a *slow* boot; diff the two — something will differ. All obvious culprits (governor, EPP, freq, PCIe, GPU clocks, RAM speed, THP, C-states) have been ruled out on a single slow boot.
+
 ## Repo / Platform
 
 - Rename GitHub repository to `l3ms` (external GitHub action required)

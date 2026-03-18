@@ -118,10 +118,17 @@ fi
 [ -n "${NO_OP_OFFLOAD:-}"   ] && cmd+=(-nopo "${NO_OP_OFFLOAD}")
 [ -n "${NO_HOST:-}"         ] && cmd+=(--no-host "${NO_HOST}")
 
+# --- logging ---
+
+LOG_DIR="${SCRIPT_DIR}/logs"
+mkdir -p "${LOG_DIR}"
+_model_slug="$(basename "${MODEL}" .gguf)"
+LOG_FILE="${LOG_DIR}/$(date +%Y-%m-%d_%H-%M-%S)_${_model_slug}.log"
+
 # --- launch ---
 
 if command -v taskset >/dev/null 2>&1 && [ -n "${CPU_RANGE:-}" ]; then
-  exec taskset -c "${CPU_RANGE}" "${cmd[@]}"
+  taskset -c "${CPU_RANGE}" "${cmd[@]}" 2>&1 | tee "${LOG_FILE}"
+else
+  "${cmd[@]}" 2>&1 | tee "${LOG_FILE}"
 fi
-
-exec "${cmd[@]}"

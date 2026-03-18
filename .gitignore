@@ -5,7 +5,7 @@
 /vendor/
 
 # Ignore log files
-/llama.log
+/*.log
 
 # Ignore IDE and editor-specific files
 .idea/
@@ -14,6 +14,10 @@
 *.suo
 *.user
 *.sln.docstates
+
+
+gpt-oss-120b-post.md
+qwen3-coder-next-post.md
 
 llama.cpp
 
@@ -25,3 +29,4 @@ cuda-keyring_1.1-1_all.deb
 
 # Local secrets
 .env
+vendor-forks

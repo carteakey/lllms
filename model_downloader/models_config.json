@@ -2,12 +2,87 @@
   "base_models_dir": "/home/kchauhan/models",
   "models": [
     {
+      "enabled": true,
+      "repo_id": "Tesslate/OmniCoder-9B-GGUF",
+      "local_dir": "/mnt/lab/models/Tesslate/OmniCoder-9B-GGUF",
+      "allow_patterns": ["*q8_0*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": null,
+      "description": "OmniCoder 9B Q8_0 — fits entirely in RTX 4070 VRAM"
+    },
+    {
+      "enabled": true,
+      "repo_id": "unsloth/Qwen3.5-9B-GGUF",
+      "local_dir": "/mnt/lab/models/unsloth/Qwen3.5-9B-GGUF",
+      "allow_patterns": ["*UD*Q6_K*", "*mmproj-F16*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": null,
+      "description": "Qwen3.5 9B Q6_K + mmproj for vision"
+    },
+    {
+      "enabled": true,
+      "repo_id": "unsloth/Qwen-Image-Edit-2511-GGUF",
+      "local_dir": "/mnt/lab/models/unsloth/Qwen-Image-Edit-2511-GGUF",
+      "allow_patterns": ["*Q3_K_L*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": null,
+      "description": "Qwen Image Edit 2511 Q3_K_L"
+    },
+    {
+      "enabled": true,
+      "repo_id": "unsloth/LTX-2.3-GGUF",
+      "local_dir": "/mnt/lab/models/unsloth/LTX-2.3-GGUF",
+      "allow_patterns": ["ltx-2.3-22b-dev-Q3_K_M.gguf"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": null,
+      "description": "LTX-2.3 22B video gen Q3_K_M"
+    },
+    {
+      "enabled": true,
+      "repo_id": "unsloth/Qwen-Image-2512-GGUF",
+      "local_dir": "/mnt/lab/models/unsloth/Qwen-Image-2512-GGUF",
+      "allow_patterns": ["qwen-image-2512-Q3_K_M.gguf"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": null,
+      "description": "Qwen Image 2512 Q3_K_M"
+    },
+    {
+      "enabled": true,
+      "repo_id": "unsloth/Qwen3.5-35B-A3B-GGUF",
+      "local_dir": "/mnt/lab/models/unsloth/Qwen3.5-35B-A3B-GGUF",
+      "allow_patterns": ["*UD-Q4_K_XL*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": null,
+      "description": "Qwen3.5 35B-A3B UD-Q4_K_XL (Q4_K_L already on disk; this adds the XL variant)"
+    },
+    {
+      "enabled": true,
+      "repo_id": "unsloth/Mistral-Small-4-119B-2603-GGUF",
+      "local_dir": "/mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF",
+      "allow_patterns": ["*IQ4_XS*", "*mmproj-F16*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": null,
+      "description": "Mistral-Small-4-119B-2603 UD-Q4_K_XL + mmproj-F16"
+    },
+    {
       "enabled": false,
       "repo_id": "unsloth/GLM-4.7-Flash-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/GLM-4.7-Flash-GGUF",
-      "allow_patterns": [
-        "*Flash-Q6_K*"
-      ],
+      "allow_patterns": ["*Flash-Q6_K*"],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -15,51 +90,32 @@
       "description": "GLM"
     },
     {
-      "enabled": true,
-      "repo_id": "unsloth/Qwen3.5-35B-A3B-GGUF",
-      "local_dir": "/mnt/lab/models/unsloth/Qwen3.5-35B-A3B-GGUF",
-      "allow_patterns": [
-        "*Q4_K_L*"
-      ],
-      "ignore_patterns": [],
-      "revision": "",
-      "force_download": false,
-      "max_workers": null,
-      "description": "Qwen3.5 35B-A3B Q4_K_L"
-    },
-    {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "unsloth/Qwen3.5-122B-A10B-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF",
-      "allow_patterns": [
-        "*UD*IQ4*X*"
-      ],
+      "allow_patterns": ["*UD*IQ4*X*"],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
       "max_workers": null,
-      "description": "Qwen3.5"
+      "description": "Qwen3.5 122B-A10B UD-IQ4_XS (already downloaded)"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "unsloth/Qwen3-Coder-Next-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen3-Coder-Next-GGUF",
-      "allow_patterns": [
-        "*UD*Q4*XL*"
-      ],
+      "allow_patterns": ["*UD*Q4*XL*"],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
       "max_workers": null,
-      "description": "Qwen"
+      "description": "Qwen3-Coder-Next UD-Q4_K_XL (already downloaded)"
     },
     {
       "enabled": false,
       "repo_id": "ggml-org/gpt-oss-20b-GGUF",
       "local_dir": "/mnt/lab/models/ggml-org/gpt-oss-20b-GGUF",
-      "allow_patterns": [
-        "*F16*"
-      ],
+      "allow_patterns": ["*F16*"],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -70,9 +126,7 @@
       "enabled": false,
       "repo_id": "ggml-org/gpt-oss-120b-GGUF",
       "local_dir": "/mnt/lab/models/ggml-org/gpt-oss-120b-GGUF",
-      "allow_patterns": [
-        "*mxfp4*"
-      ],
+      "allow_patterns": ["*mxfp4*"],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -83,9 +137,7 @@
       "enabled": false,
       "repo_id": "Qwen/Qwen3-32B-GGUF",
       "local_dir": "/mnt/lab/models/qwen/Qwen3-32B-GGUF",
-      "allow_patterns": [
-        "*Q6_K*"
-      ],
+      "allow_patterns": ["*Q6_K*"],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -96,9 +148,7 @@
       "enabled": false,
       "repo_id": "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
       "local_dir": "/mnt/lab/models/qwen/Qwen3-Coder-30B-A3B-Instruct-GGUF",
-      "allow_patterns": [
-        "*IQ4_NL*"
-      ],
+      "allow_patterns": ["*IQ4_NL*"],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -109,9 +159,7 @@
       "enabled": false,
       "repo_id": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF",
       "local_dir": "/mnt/lab/models/qwen/Qwen3-30B-A3B-Instruct-2507-GGUF",
-      "allow_patterns": [
-        "*IQ4_NL*"
-      ],
+      "allow_patterns": ["*IQ4_NL*"],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -119,17 +167,37 @@
       "description": "Qwen3 30B Instruct with Q8 quantization"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF",
-      "allow_patterns": [
-        "*UD-Q3_K_XL*"
-      ],
+      "allow_patterns": ["*UD-Q3_K_XL*"],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
       "max_workers": null,
-      "description": "NVIDIA Nemotron 3 Super 120B-A12B UD-Q3_K_XL (~62.6 GB, 3 splits)"
+      "description": "NVIDIA Nemotron 3 Super 120B-A12B UD-Q3_K_XL (already downloaded)"
+    },
+    {
+      "enabled": false,
+      "repo_id": "Sumitc13/sarvam-30b-GGUF",
+      "local_dir": "/mnt/lab/models/Sumitc13/sarvam-30b-GGUF",
+      "allow_patterns": ["*sarvam-30B-Q6_K.gguf*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": 2,
+      "description": "Sarvam 30B Q6_K GGUF (repo: Sumitc13/sarvam-30b-GGUF; requires SarvamMoE-capable llama.cpp fork/branch)"
+    },
+    {
+      "enabled": true,
+      "repo_id": "limegreenpeper1/sarvam-105B-GGUF",
+      "local_dir": "/mnt/lab/models/limegreenpeper1/sarvam-105B-GGUF",
+      "allow_patterns": ["*Q4_K_M*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": 2,
+      "description": "Sarvam 105B GGUF default download profile (Q4_K_M) for local validation"
     }
   ]
 }

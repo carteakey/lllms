@@ -11,6 +11,17 @@ VERSIONS_ROOT = ROOT / ".toolkit" / "script_versions"
 ALLOWED_EXTENSIONS = {".sh", ".ps1", ".bat", ".cmd"}
 
 
+def command_for_script(path: Path, extra_args: List[str]) -> List[str]:
+    suffix = path.suffix.lower()
+    if suffix == ".sh":
+        return ["bash", str(path), *extra_args]
+    if suffix == ".ps1":
+        return ["pwsh", "-File", str(path), *extra_args]
+    if suffix in {".bat", ".cmd"}:
+        return ["cmd", "/c", str(path), *extra_args]
+    return ["bash", str(path), *extra_args]
+
+
 def _safe_stamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 

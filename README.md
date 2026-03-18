@@ -8,6 +8,7 @@ L3MS is built for developers who want script-first control with better ergonomic
 
 - Manage model download configs with validation and version history
 - Run and bench llama.cpp models from curated script folders
+- Browse local GGUF inventories with size, quantization, and metadata details
 - Edit run/bench scripts in-place with snapshot restore
 - Track live process output and runtime resource usage while a model is running
 - Use either a full TUI or interactive CLI commands (`--run`, `--bench`)
@@ -62,7 +63,11 @@ python3 l3ms.py --run qwen --extra "--ctx-size 32768"
   - live run logs + start/stop
   - current running model + resource telemetry (CPU/RAM/GPU when available)
   - script editor and per-script snapshots in `.toolkit/script_versions/`
-- Placeholder tabs: `Maintenance`, `Settings`, `Jobs`
+- `Model Browser` tab:
+  - scan any local directory for `.gguf` files
+  - inspect size, quantization, params, architecture, and modified timestamp in a table
+  - filter/sort results and inspect per-file metadata details
+- Additional tabs: `Chat`, `Maintenance`, `Settings`, `Jobs`
 
 ## Keyboard-first Controls
 
@@ -70,9 +75,11 @@ Global:
 
 - `F1`: Download tab
 - `F2`: Model Ops tab
-- `F3`: Maintenance tab
-- `F4`: Settings tab
-- `F5`: Jobs tab
+- `F3`: Chat tab
+- `F4`: Maintenance tab
+- `F5`: Settings tab
+- `F6`: Jobs tab
+- `F7`: Model Browser tab
 
 Download (active only on Download tab):
 
@@ -96,8 +103,14 @@ Model Ops (active only on Model Ops tab):
 - `Ctrl+M`: toggle run/bench mode
 - `Ctrl+R`: run selected script
 - `Ctrl+S`: stop running script
-- `Ctrl+P`: save edited script snapshot
+- `Alt+P`: save edited script snapshot
 - `Ctrl+L`: clear run log
+
+Model Browser (active only on Model Browser tab):
+
+- `Alt+R`: scan selected GGUF directory
+- `Alt+G`: focus directory path input
+- `Alt+J`: focus GGUF table
 
 ## Project Layout
 

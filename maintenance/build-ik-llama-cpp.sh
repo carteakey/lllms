@@ -269,15 +269,21 @@ CMAKE_ARGS=(
 if [ -n "$CUDA_ARCH" ]; then
     log "Configuring ik_llama.cpp with CUDA support (architecture: $CUDA_ARCH)..."
     CMAKE_ARGS+=(
-        "-DGGML_CUDA=ON"
-	"-DGGML_NATIVE=ON"
-	"-DGGML_LTO=ON"
-	"-DGGML_OPENMP=ON"
-	"-DGGML_CUDA_GRAPHS=ON"
-        "-DGGML_CUDA_FA_ALL_QUANTS=ON"
-        #"-DGGML_CUDA_FORCE_CUBLAS=ON"
-        "-DCMAKE_CUDA_ARCHITECTURES=$CUDA_ARCH"
+    "-DGGML_CUDA=ON"
+    "-DGGML_NATIVE=ON"
+    "-DGGML_LTO=ON"
+    "-DGGML_OPENMP=ON"
+    "-DGGML_CUDA_GRAPHS=ON"
+    "-DGGML_VULKAN=OFF"
+    "-DGGML_RPC=OFF"
+    "-DGGML_BLAS=OFF"
+    "-DGGML_CUDA_F16=ON"
+    "-DGGML_CCACHE=OFF"
+    "-DGGML_CUDA_FA_ALL_QUANTS=ON"
+    "-DCMAKE_CUDA_ARCHITECTURES=$CUDA_ARCH"
     )
+    #"-DGGML_CUDA_FORCE_CUBLAS=ON"
+
 else
     log "Configuring ik_llama.cpp for CPU-only build..."
 fi
@@ -286,7 +292,7 @@ log "Generating build configuration..."
 cmake .. "${CMAKE_ARGS[@]}"
 
 log "Building ik_llama.cpp tools (Release)..."
-cmake --build . --config Release --target llama-server llama-batched-bench llama-cli llama-bench --parallel
+cmake --build . --config Release --target llama-server llama-batched-bench llama-cli llama-bench llama-sweep-bench --parallel
 
 # Copy binaries to root for easy access
 if [ -d "bin" ]; then

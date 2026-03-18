@@ -30,6 +30,8 @@ cmd=(
   --fit-ctx 32678
   --fit-target 512
   --no-mmap
+  -ctk q8_0
+  -ctv q8_0
   --threads 10
   --threads-batch 12
   --flash-attn on

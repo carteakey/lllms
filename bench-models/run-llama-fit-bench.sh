@@ -20,6 +20,8 @@
 #   N_GEN             - generation token count (default: 128)
 #   BATCH_SIZE        - logical batch size (default: 2048)
 #   UBATCH_SIZE       - physical batch size (default: 512)
+#   CACHE_TYPE_K      - KV cache type for K: f16|q8_0|q4_0|... (default: f16) — passed to both fit-params and bench
+#   CACHE_TYPE_V      - KV cache type for V: f16|q8_0|q4_0|... (default: f16) — passed to both fit-params and bench
 #   THREADS           - CPU threads (default: 6)
 #   FA                - flash attention 0|1 (default: 1)
 #   MMP               - mmap 0|1 (default: 0) — bench only, not passed to fit-params
@@ -41,6 +43,10 @@ LLAMA_BENCH="${LLAMA_BENCH:-${REPO_DIR}/vendor/llama.cpp/build/bin/llama-bench}"
 
 FIT_TARGET="${FIT_TARGET:-1024}"
 FIT_CTX="${FIT_CTX:-4096}"
+
+# --- logging (set up early so fit stage output is also captured) ---
+LOG_DIR="${SCRIPT_DIR}/logs"
+mkdir -p "${LOG_DIR}"
 
 BATCH_SIZE="${BATCH_SIZE:-2048}"
 UBATCH_SIZE="${UBATCH_SIZE:-512}"
@@ -82,6 +88,7 @@ echo "# tasks      : ${TASKS:-${N_PROMPT:-512}pp + ${N_GEN:-128}tg}"
 echo "# batch      : ${BATCH_SIZE} / ubatch: ${UBATCH_SIZE}"
 echo "# threads    : ${THREADS}${CPU_RANGE:+ (pinned ${CPU_RANGE})}"
 echo "# fa         : ${FA}  mmp: ${MMP}"
+echo "# ctk        : ${CACHE_TYPE_K:-f16}  ctv: ${CACHE_TYPE_V:-f16}"
 echo "# fit-target : ${FIT_TARGET} MiB margin per GPU"
 echo "# fit-ctx    : ${FIT_CTX} tokens minimum context"
 echo
@@ -97,16 +104,21 @@ echo
 
 echo "# [1/2] running llama-fit-params..."
 
+fit_cmd=(
+  "${LLAMA_FIT}"
+  -m    "${MODEL}"
+  -b    "${BATCH_SIZE}"
+  -ub   "${UBATCH_SIZE}"
+  -t    "${THREADS}"
+  -fa   "${FA}"
+  -fitt "${FIT_TARGET}"
+  -fitc "${FIT_CTX}"
+)
+[ -n "${CACHE_TYPE_K:-}" ] && fit_cmd+=(-ctk "${CACHE_TYPE_K}")
+[ -n "${CACHE_TYPE_V:-}" ] && fit_cmd+=(-ctv "${CACHE_TYPE_V}")
+
 fit_line=$(
-  "${LLAMA_FIT}" \
-    -m    "${MODEL}"      \
-    -b    "${BATCH_SIZE}" \
-    -ub   "${UBATCH_SIZE}"\
-    -t    "${THREADS}"    \
-    -fa   "${FA}"         \
-    -fitt "${FIT_TARGET}" \
-    -fitc "${FIT_CTX}"    \
-    2>/dev/null
+  "${fit_cmd[@]}" 2>/dev/null
 ) || true
 
 if [ -z "${fit_line}" ]; then
@@ -165,6 +177,8 @@ bench_cmd=(
   -mmp "${MMP}"
 )
 
+[ -n "${CACHE_TYPE_K:-}" ] && bench_cmd+=(-ctk "${CACHE_TYPE_K}")
+[ -n "${CACHE_TYPE_V:-}" ] && bench_cmd+=(-ctv "${CACHE_TYPE_V}")
 [ -n "${REPETITIONS:-}"  ] && bench_cmd+=(-r "${REPETITIONS}")
 [ -n "${OUTPUT_FMT:-}"   ] && bench_cmd+=(-o "${OUTPUT_FMT}")
 
@@ -182,8 +196,24 @@ if [ -n "${bench_line:-}" ]; then
   bench_cmd+=("${fitted_arr[@]}")
 fi
 
-if command -v taskset >/dev/null 2>&1 && [ -n "${CPU_RANGE:-}" ]; then
-  exec taskset -c "${CPU_RANGE}" "${bench_cmd[@]}"
-fi
+_model_slug="$(basename "${MODEL}" .gguf)"
+LOG_FILE="${LOG_DIR}/$(date +%Y-%m-%d_%H-%M-%S)_${_model_slug}_fit.log"
 
-exec "${bench_cmd[@]}"
+# Replay the printed config into the log, then run bench with tee
+{
+  echo "# model      : ${MODEL}"
+  echo "# tasks      : ${TASKS:-${N_PROMPT:-512}pp + ${N_GEN:-128}tg}"
+  echo "# batch      : ${BATCH_SIZE} / ubatch: ${UBATCH_SIZE}"
+  echo "# threads    : ${THREADS}${CPU_RANGE:+ (pinned ${CPU_RANGE})}"
+  echo "# fa         : ${FA}  mmp: ${MMP}"
+  echo "# ctk        : ${CACHE_TYPE_K:-f16}  ctv: ${CACHE_TYPE_V:-f16}"
+  echo "# fit-target : ${FIT_TARGET} MiB margin per GPU"
+  echo "# fit-ctx    : ${FIT_CTX} tokens minimum context"
+  echo "# fitted     : ${fit_line:-<none>}"
+  echo
+  if command -v taskset >/dev/null 2>&1 && [ -n "${CPU_RANGE:-}" ]; then
+    taskset -c "${CPU_RANGE}" "${bench_cmd[@]}" 2>&1
+  else
+    "${bench_cmd[@]}" 2>&1
+  fi
+} | tee "${LOG_FILE}"

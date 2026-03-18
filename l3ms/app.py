@@ -7,6 +7,7 @@ import os
 import re
 import shlex
 import shutil
+import struct
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -46,6 +47,7 @@ from .config_store import (
     validate_config,
 )
 from .script_store import (
+    command_for_script,
     list_script_versions,
     load_script,
     restore_script_version,
@@ -59,20 +61,303 @@ IK_RUN_SCRIPT_GLOB = "run-models/run-ik-llama-cpp-*.sh"
 BENCH_SCRIPT_GLOB = "bench-models/bench-llama-cpp-*.sh"
 MAINTENANCE_SCRIPT_GLOB = "maintenance/*.sh"
 
+_BYTES_PER_GB: int = 1_073_741_824
+_ELAPSED_THRESHOLD_SECS: int = 120
+
+_GGUF_MAGIC = b"GGUF"
+_GGUF_TYPE_UINT8 = 0
+_GGUF_TYPE_INT8 = 1
+_GGUF_TYPE_UINT16 = 2
+_GGUF_TYPE_INT16 = 3
+_GGUF_TYPE_UINT32 = 4
+_GGUF_TYPE_INT32 = 5
+_GGUF_TYPE_FLOAT32 = 6
+_GGUF_TYPE_BOOL = 7
+_GGUF_TYPE_STRING = 8
+_GGUF_TYPE_ARRAY = 9
+_GGUF_TYPE_UINT64 = 10
+_GGUF_TYPE_INT64 = 11
+_GGUF_TYPE_FLOAT64 = 12
+_MAX_GGUF_KV = 100_000
+_MAX_GGUF_STRING_BYTES = 16 * 1024 * 1024
+_MAX_GGUF_ARRAY_ITEMS = 50_000_000
+_MAX_GGUF_TENSOR_DIMS = 64
+_GGUF_CAPTURE_KEYS = {
+    "general.name",
+    "general.architecture",
+    "general.file_type",
+    "general.parameter_count",
+    "general.basename",
+    "general.size_label",
+    "tokenizer.ggml.model",
+}
+_GGUF_FIXED_TYPE_SIZES = {
+    _GGUF_TYPE_UINT8: 1,
+    _GGUF_TYPE_INT8: 1,
+    _GGUF_TYPE_UINT16: 2,
+    _GGUF_TYPE_INT16: 2,
+    _GGUF_TYPE_UINT32: 4,
+    _GGUF_TYPE_INT32: 4,
+    _GGUF_TYPE_FLOAT32: 4,
+    _GGUF_TYPE_BOOL: 1,
+    _GGUF_TYPE_UINT64: 8,
+    _GGUF_TYPE_INT64: 8,
+    _GGUF_TYPE_FLOAT64: 8,
+}
+_GGUF_FILE_TYPE_LABELS = {
+    0: "F32",
+    1: "F16",
+    2: "Q4_0",
+    3: "Q4_1",
+    6: "Q5_0",
+    7: "Q5_1",
+    8: "Q8_0",
+    9: "Q2_K",
+    10: "Q3_K_S",
+    11: "Q3_K_M",
+    12: "Q3_K_L",
+    13: "Q4_K_S",
+    14: "Q4_K_M",
+    15: "Q5_K_S",
+    16: "Q5_K_M",
+    17: "Q6_K",
+    18: "Q8_K",
+    19: "IQ2_XXS",
+    20: "IQ2_XS",
+    21: "IQ3_XXS",
+    22: "IQ1_S",
+    23: "IQ4_NL",
+    24: "IQ3_S",
+    25: "IQ2_S",
+    26: "IQ4_XS",
+    27: "I8",
+    28: "I16",
+    29: "I32",
+    30: "I64",
+    31: "F64",
+    32: "IQ1_M",
+    33: "BF16",
+    37: "TQ1_0",
+    38: "TQ2_0",
+}
+_QUANT_TOKEN_RE = re.compile(
+    r"(?i)(?:^|[-_.])((?:ud-)?(?:iq|q)\d(?:[_-][a-z0-9]+)*|(?:bf|fp|f)\d{2}|mxfp4)(?:[-_.]|$)"
+)
+
+
+def _format_bytes(num_bytes: int) -> str:
+    if num_bytes < 0:
+        return "0 B"
+    value = float(num_bytes)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if value < 1024.0 or unit == "TiB":
+            if unit == "B":
+                return f"{int(value)} {unit}"
+            return f"{value:.1f} {unit}"
+        value /= 1024.0
+    return "0 B"
+
+
+def _format_parameter_count(param_count: Optional[int]) -> str:
+    if param_count is None or param_count <= 0:
+        return "-"
+    if param_count >= 1_000_000_000:
+        return f"{param_count / 1_000_000_000:.1f}B"
+    if param_count >= 1_000_000:
+        return f"{param_count / 1_000_000:.1f}M"
+    if param_count >= 1_000:
+        return f"{param_count / 1_000:.1f}K"
+    return str(param_count)
+
+
+def _format_mtime(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
+
+
+def _read_exact(handle: Any, size: int) -> bytes:
+    if size < 0:
+        raise ValueError("negative read size")
+    chunk = handle.read(size)
+    if len(chunk) != size:
+        raise ValueError("unexpected EOF while parsing GGUF")
+    return chunk
+
+
+def _read_u16(handle: Any) -> int:
+    return struct.unpack("<H", _read_exact(handle, 2))[0]
+
+
+def _read_u32(handle: Any) -> int:
+    return struct.unpack("<I", _read_exact(handle, 4))[0]
+
+
+def _read_u64(handle: Any) -> int:
+    return struct.unpack("<Q", _read_exact(handle, 8))[0]
+
+
+def _read_i8(handle: Any) -> int:
+    return struct.unpack("<b", _read_exact(handle, 1))[0]
+
+
+def _read_i16(handle: Any) -> int:
+    return struct.unpack("<h", _read_exact(handle, 2))[0]
+
+
+def _read_i32(handle: Any) -> int:
+    return struct.unpack("<i", _read_exact(handle, 4))[0]
+
+
+def _read_i64(handle: Any) -> int:
+    return struct.unpack("<q", _read_exact(handle, 8))[0]
+
+
+def _read_f32(handle: Any) -> float:
+    return struct.unpack("<f", _read_exact(handle, 4))[0]
+
+
+def _read_f64(handle: Any) -> float:
+    return struct.unpack("<d", _read_exact(handle, 8))[0]
+
+
+def _read_bool(handle: Any) -> bool:
+    return struct.unpack("<?", _read_exact(handle, 1))[0]
+
+
+def _read_gguf_string(handle: Any) -> str:
+    size = _read_u64(handle)
+    if size > _MAX_GGUF_STRING_BYTES:
+        raise ValueError(f"GGUF string too large: {size} bytes")
+    return _read_exact(handle, size).decode("utf-8", errors="replace")
+
+
+def _skip_bytes(handle: Any, size: int) -> None:
+    if size < 0:
+        raise ValueError("negative seek size")
+    handle.seek(size, os.SEEK_CUR)
+
+
+def _skip_gguf_value(handle: Any, value_type: int) -> None:
+    if value_type in _GGUF_FIXED_TYPE_SIZES:
+        _skip_bytes(handle, _GGUF_FIXED_TYPE_SIZES[value_type])
+        return
+
+    if value_type == _GGUF_TYPE_STRING:
+        _ = _read_gguf_string(handle)
+        return
+
+    if value_type == _GGUF_TYPE_ARRAY:
+        nested_type = _read_u32(handle)
+        nested_count = _read_u64(handle)
+        if nested_count > _MAX_GGUF_ARRAY_ITEMS:
+            raise ValueError(f"GGUF array too large: {nested_count} items")
+        if nested_type in _GGUF_FIXED_TYPE_SIZES:
+            _skip_bytes(handle, _GGUF_FIXED_TYPE_SIZES[nested_type] * nested_count)
+            return
+        for _ in range(nested_count):
+            _skip_gguf_value(handle, nested_type)
+        return
+
+    raise ValueError(f"unsupported GGUF value type: {value_type}")
+
+
+def _read_gguf_scalar_value(handle: Any, value_type: int) -> Any:
+    if value_type == _GGUF_TYPE_UINT8:
+        return _read_exact(handle, 1)[0]
+    if value_type == _GGUF_TYPE_INT8:
+        return _read_i8(handle)
+    if value_type == _GGUF_TYPE_UINT16:
+        return _read_u16(handle)
+    if value_type == _GGUF_TYPE_INT16:
+        return _read_i16(handle)
+    if value_type == _GGUF_TYPE_UINT32:
+        return _read_u32(handle)
+    if value_type == _GGUF_TYPE_INT32:
+        return _read_i32(handle)
+    if value_type == _GGUF_TYPE_FLOAT32:
+        return _read_f32(handle)
+    if value_type == _GGUF_TYPE_BOOL:
+        return _read_bool(handle)
+    if value_type == _GGUF_TYPE_STRING:
+        return _read_gguf_string(handle)
+    if value_type == _GGUF_TYPE_UINT64:
+        return _read_u64(handle)
+    if value_type == _GGUF_TYPE_INT64:
+        return _read_i64(handle)
+    if value_type == _GGUF_TYPE_FLOAT64:
+        return _read_f64(handle)
+    raise ValueError(f"unsupported GGUF scalar type: {value_type}")
+
+
+def parse_gguf_metadata(path: Path) -> Dict[str, Any]:
+    with path.open("rb") as handle:
+        if _read_exact(handle, 4) != _GGUF_MAGIC:
+            raise ValueError("invalid GGUF magic")
+
+        version = _read_u32(handle)
+        if version not in {2, 3}:
+            raise ValueError(f"unsupported GGUF version: {version}")
+
+        tensor_count = _read_u64(handle)
+        kv_count = _read_u64(handle)
+        if kv_count > _MAX_GGUF_KV:
+            raise ValueError(f"GGUF metadata key/value count too large: {kv_count}")
+
+        metadata: Dict[str, Any] = {
+            "gguf.version": version,
+            "gguf.tensor_count": tensor_count,
+            "gguf.kv_count": kv_count,
+        }
+        for _ in range(kv_count):
+            key = _read_gguf_string(handle)
+            value_type = _read_u32(handle)
+            if key in _GGUF_CAPTURE_KEYS and value_type != _GGUF_TYPE_ARRAY:
+                metadata[key] = _read_gguf_scalar_value(handle, value_type)
+            else:
+                _skip_gguf_value(handle, value_type)
+
+        derived_parameter_count = 0
+        parsed_tensor_count = 0
+        for _ in range(tensor_count):
+            _ = _read_gguf_string(handle)  # tensor name
+            n_dims = _read_u32(handle)
+            if n_dims > _MAX_GGUF_TENSOR_DIMS:
+                raise ValueError(f"GGUF tensor has too many dimensions: {n_dims}")
+
+            element_count = 1
+            for _ in range(n_dims):
+                dim = _read_u64(handle)
+                element_count *= max(1, dim)
+
+            _ = _read_u32(handle)  # tensor type
+            _ = _read_u64(handle)  # tensor data offset
+            derived_parameter_count += element_count
+            parsed_tensor_count += 1
+
+        metadata["gguf.derived_parameter_count"] = derived_parameter_count
+        metadata["gguf.parsed_tensor_count"] = parsed_tensor_count
+        return metadata
+
+
+def _guess_quantization_from_name(filename: str) -> Optional[str]:
+    match = _QUANT_TOKEN_RE.search(filename)
+    if not match:
+        return None
+    token = match.group(1).upper().replace("-", "_")
+    if token.startswith("UD_"):
+        token = token.replace("UD_", "UD-", 1)
+    return token
+
+
+def infer_quantization(filename: str, metadata: Dict[str, Any]) -> str:
+    file_type = metadata.get("general.file_type")
+    if isinstance(file_type, int):
+        return _GGUF_FILE_TYPE_LABELS.get(file_type, f"ftype:{file_type}")
+    guessed = _guess_quantization_from_name(filename)
+    return guessed or "unknown"
+
 
 def collect_scripts(pattern: str) -> List[Path]:
     return sorted([path for path in ROOT.glob(pattern) if path.is_file()])
-
-
-def command_for_script(path: Path, extra_args: List[str]) -> List[str]:
-    suffix = path.suffix.lower()
-    if suffix == ".sh":
-        return ["bash", str(path), *extra_args]
-    if suffix == ".ps1":
-        return ["pwsh", "-File", str(path), *extra_args]
-    if suffix in {".bat", ".cmd"}:
-        return ["cmd", "/c", str(path), *extra_args]
-    return ["bash", str(path), *extra_args]
 
 
 def collect_llama_binaries() -> List[tuple]:
@@ -172,8 +457,8 @@ class DownloadPanel(Static):
             return
         try:
             usage = shutil.disk_usage(check)
-            free_gb = usage.free / 1_073_741_824
-            total_gb = usage.total / 1_073_741_824
+            free_gb = usage.free / _BYTES_PER_GB
+            total_gb = usage.total / _BYTES_PER_GB
             label.update(
                 f"💾 {free_gb:.0f} / {total_gb:.0f} GB free  {markup_escape(f'[{check}]')}"
             )
@@ -485,7 +770,7 @@ class DownloadPanel(Static):
             self.set_status(f"Checking remote file sizes for {repo_id}…")
             est = await self._estimate_download_size(repo_id, allow, ignore)
             if est is not None:
-                est_gb = est / 1_073_741_824
+                est_gb = est / _BYTES_PER_GB
                 usage_val = self.query_one("#disk_space_label", Static).renderable
                 self.set_status(f"  ~{est_gb:.1f} GB to pull  ·  {usage_val}")
             else:
@@ -646,7 +931,7 @@ class RunPanel(Static):
                     yield DataTable(id="run_scripts_table")
                     yield Label(
                         "Keys: Ctrl+F filter, Ctrl+J table, Ctrl+U editor, Ctrl+M toggle mode, "
-                        "Ctrl+R start, Ctrl+S stop, Ctrl+P save script, Ctrl+L clear log"
+                        "Ctrl+R start, Ctrl+S stop, Alt+P save script, Ctrl+L clear log"
                     )
                     yield RichLog(id="run_log", wrap=True, markup=False)
 
@@ -987,16 +1272,17 @@ class RunPanel(Static):
         self.running_proc = proc
         self.resource_task = asyncio.create_task(self._resource_loop(proc.pid))
         assert proc.stdout is not None
-
-        while True:
-            line = await proc.stdout.readline()
-            if not line:
-                break
-            self.set_status(line.decode("utf-8", errors="replace").rstrip())
-
-        rc = await proc.wait()
-        await self._stop_resource_loop()
-        self.running_proc = None
+        rc = -1
+        try:
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                self.set_status(line.decode("utf-8", errors="replace").rstrip())
+            rc = await proc.wait()
+        finally:
+            await self._stop_resource_loop()
+            self.running_proc = None
         elapsed_secs = 0.0
         if self.running_started_at is not None:
             elapsed_secs = asyncio.get_running_loop().time() - self.running_started_at
@@ -1004,7 +1290,7 @@ class RunPanel(Static):
         self.set_runtime_state("Current: idle", f"Resources: exited (code {rc})")
         elapsed_str = (
             f"{elapsed_secs:.0f}s"
-            if elapsed_secs < 120
+            if elapsed_secs < _ELAPSED_THRESHOLD_SECS
             else f"{elapsed_secs / 60:.1f}m"
         )
         self.post_message(
@@ -1091,6 +1377,329 @@ class RunPanel(Static):
     @on(Button.Pressed, "#run_edit_restore")
     def on_edit_restore(self) -> None:
         self.restore_editor_script()
+
+
+# ---------------------------------------------------------------------------
+# GGUF Model Browser Panel
+# ---------------------------------------------------------------------------
+
+
+class ModelBrowserPanel(Static):
+    def __init__(self) -> None:
+        super().__init__(id="model_browser_panel")
+        self.rows: List[Dict[str, Any]] = []
+        self.filtered_rows: List[Dict[str, Any]] = []
+        self.selected_index: Optional[int] = None
+        self.scan_task: Optional[asyncio.Task[List[Dict[str, Any]]]] = None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="panel"):
+            with Horizontal(classes="row"):
+                yield Input(placeholder="GGUF root directory", id="browser_root")
+                yield Checkbox("recursive", value=True, id="browser_recursive")
+                yield Button("Use Download Dir", id="browser_use_download_dir")
+                yield Button("Scan (Alt+R)", id="browser_scan", variant="success")
+            with Horizontal(classes="row"):
+                yield Input(
+                    placeholder="filter path / quant / architecture",
+                    id="browser_filter",
+                )
+                yield Select(
+                    [
+                        ("Name ↑", "name_asc"),
+                        ("Size ↓", "size_desc"),
+                        ("Size ↑", "size_asc"),
+                        ("Updated ↓", "mtime_desc"),
+                        ("Updated ↑", "mtime_asc"),
+                        ("Quant ↑", "quant_asc"),
+                    ],
+                    value="size_desc",
+                    id="browser_sort",
+                )
+                yield Static("0 shown · 0 total · 0 B", id="browser_summary")
+            with Horizontal(classes="row main"):
+                with Vertical(classes="left"):
+                    yield DataTable(id="browser_table")
+                    yield Label(
+                        "Keys: Alt+G path, Alt+J table, Alt+R scan",
+                        classes="key_hint",
+                    )
+                with Vertical(classes="right"):
+                    yield Static("No file selected", id="browser_selected_path")
+                    yield Static(
+                        "Scan a directory to inspect GGUF metadata.",
+                        id="browser_details",
+                    )
+            yield RichLog(id="browser_log", wrap=True, markup=False)
+
+    def on_mount(self) -> None:
+        table = self.query_one("#browser_table", DataTable)
+        table.cursor_type = "row"
+        table.add_columns("#", "gguf", "quant", "size", "params", "arch", "modified")
+        self.query_one("#browser_root", Input).value = str(self._default_root_dir())
+        self.set_status("Model browser ready")
+        self.focus_table()
+        self.run_worker(self.scan_models(), exclusive=False)
+
+    def _default_root_dir(self) -> Path:
+        configured = str(load_config(DEFAULT_CONFIG_PATH).get("base_models_dir", "")).strip()
+        if configured:
+            return Path(configured).expanduser()
+        return ROOT
+
+    def set_status(self, message: str) -> None:
+        self.query_one("#browser_log", RichLog).write(message)
+
+    def focus_path(self) -> None:
+        self.query_one("#browser_root", Input).focus()
+
+    def focus_table(self) -> None:
+        self.query_one("#browser_table", DataTable).focus()
+
+    def use_download_dir(self) -> None:
+        root = self._default_root_dir()
+        self.query_one("#browser_root", Input).value = str(root)
+        self.set_status(f"Path set to {root}")
+
+    async def scan_models(self) -> None:
+        if self.scan_task and not self.scan_task.done():
+            self.set_status("Scan already in progress")
+            return
+
+        raw_root = self.query_one("#browser_root", Input).value.strip()
+        if not raw_root:
+            self.set_status("Set a GGUF root directory first")
+            return
+
+        root = Path(raw_root).expanduser()
+        if not root.exists():
+            self.set_status(f"Path does not exist: {root}")
+            return
+        if not root.is_dir():
+            self.set_status(f"Path is not a directory: {root}")
+            return
+
+        recursive = self.query_one("#browser_recursive", Checkbox).value
+        mode = "recursive" if recursive else "top-level"
+        self.query_one("#browser_summary", Static).update("Scanning…")
+        self.set_status(f"Scanning {root} ({mode})")
+
+        self.scan_task = asyncio.create_task(
+            asyncio.to_thread(self._scan_directory, root, recursive)
+        )
+        try:
+            self.rows = await self.scan_task
+        except OSError as exc:
+            self.rows = []
+            self.filtered_rows = []
+            self.selected_index = None
+            self.query_one("#browser_summary", Static).update("Scan failed")
+            self.set_status(f"Scan failed: {exc}")
+            return
+        finally:
+            self.scan_task = None
+
+        self.refresh_table()
+        warning_count = sum(1 for row in self.rows if row.get("parse_error"))
+        total_size = sum(row["size_bytes"] for row in self.rows)
+        warning_text = f", {warning_count} warning(s)" if warning_count else ""
+        self.set_status(
+            f"Found {len(self.rows)} GGUF file(s), {_format_bytes(total_size)} total{warning_text}"
+        )
+
+    def _scan_directory(self, root: Path, recursive: bool) -> List[Dict[str, Any]]:
+        records: List[Dict[str, Any]] = []
+        paths = self._iter_gguf_files(root, recursive)
+        for path in paths:
+            try:
+                stat = path.stat()
+            except OSError:
+                continue
+
+            metadata: Dict[str, Any] = {}
+            parse_error = ""
+            try:
+                metadata = parse_gguf_metadata(path)
+            except (OSError, ValueError, struct.error) as exc:
+                parse_error = str(exc)
+
+            try:
+                display_path = path.relative_to(root).as_posix()
+            except ValueError:
+                display_path = path.as_posix()
+
+            params_raw = metadata.get("general.parameter_count")
+            params = params_raw if isinstance(params_raw, int) and params_raw > 0 else None
+            arch_raw = metadata.get("general.architecture")
+            arch = arch_raw if isinstance(arch_raw, str) and arch_raw else "-"
+            name_raw = metadata.get("general.name")
+            model_name = name_raw if isinstance(name_raw, str) else ""
+
+            records.append(
+                {
+                    "path": path,
+                    "display_path": display_path,
+                    "size_bytes": int(stat.st_size),
+                    "size_label": _format_bytes(int(stat.st_size)),
+                    "mtime_ts": float(stat.st_mtime),
+                    "modified_label": _format_mtime(stat.st_mtime),
+                    "quant": infer_quantization(path.name, metadata),
+                    "params": params,
+                    "params_label": _format_parameter_count(params),
+                    "arch": arch,
+                    "model_name": model_name,
+                    "metadata": metadata,
+                    "parse_error": parse_error,
+                }
+            )
+        return records
+
+    def _iter_gguf_files(self, root: Path, recursive: bool) -> List[Path]:
+        files: List[Path] = []
+        if recursive:
+            for dirpath, _, filenames in os.walk(root):
+                base = Path(dirpath)
+                for filename in filenames:
+                    if filename.lower().endswith(".gguf"):
+                        files.append(base / filename)
+            return sorted(files)
+
+        for entry in sorted(root.iterdir()):
+            if entry.is_file() and entry.suffix.lower() == ".gguf":
+                files.append(entry)
+        return files
+
+    def _sorted_rows(self, rows: List[Dict[str, Any]], mode: str) -> List[Dict[str, Any]]:
+        if mode == "name_asc":
+            return sorted(rows, key=lambda row: str(row["display_path"]).lower())
+        if mode == "size_asc":
+            return sorted(rows, key=lambda row: int(row["size_bytes"]))
+        if mode == "mtime_desc":
+            return sorted(rows, key=lambda row: float(row["mtime_ts"]), reverse=True)
+        if mode == "mtime_asc":
+            return sorted(rows, key=lambda row: float(row["mtime_ts"]))
+        if mode == "quant_asc":
+            return sorted(rows, key=lambda row: str(row["quant"]).lower())
+        return sorted(rows, key=lambda row: int(row["size_bytes"]), reverse=True)
+
+    def refresh_table(self) -> None:
+        table = self.query_one("#browser_table", DataTable)
+        table.clear()
+
+        filter_text = self.query_one("#browser_filter", Input).value.strip().lower()
+        sort_mode = str(self.query_one("#browser_sort", Select).value or "size_desc")
+        rows = self.rows
+        if filter_text:
+            rows = [
+                row
+                for row in rows
+                if filter_text in str(row["display_path"]).lower()
+                or filter_text in str(row["quant"]).lower()
+                or filter_text in str(row["arch"]).lower()
+                or filter_text in str(row["model_name"]).lower()
+            ]
+
+        self.filtered_rows = self._sorted_rows(rows, sort_mode)
+        for idx, row in enumerate(self.filtered_rows):
+            table.add_row(
+                str(idx),
+                str(row["display_path"]),
+                str(row["quant"]),
+                str(row["size_label"]),
+                str(row["params_label"]),
+                str(row["arch"]),
+                str(row["modified_label"]),
+                key=str(idx),
+            )
+
+        shown_size = sum(int(row["size_bytes"]) for row in self.filtered_rows)
+        summary = (
+            f"{len(self.filtered_rows)} shown · {len(self.rows)} total · {_format_bytes(shown_size)} shown"
+        )
+        self.query_one("#browser_summary", Static).update(summary)
+
+        if self.filtered_rows:
+            table.move_cursor(row=0, column=0)
+            self._set_selected_index(0)
+        else:
+            self.selected_index = None
+            self.query_one("#browser_selected_path", Static).update("No file selected")
+            self.query_one("#browser_details", Static).update(
+                "No GGUF file matches current filter."
+            )
+
+    def _set_selected_index(self, idx: int) -> None:
+        if not (0 <= idx < len(self.filtered_rows)):
+            return
+        self.selected_index = idx
+        row = self.filtered_rows[idx]
+        metadata = row["metadata"]
+
+        self.query_one("#browser_selected_path", Static).update(
+            markup_escape(str(row["path"]))
+        )
+
+        def _fmt(value: Any) -> str:
+            if value is None:
+                return "-"
+            text = str(value).strip()
+            if not text:
+                return "-"
+            return markup_escape(text)
+
+        lines = [
+            f"model: {_fmt(row['model_name'])}",
+            f"quantization: {_fmt(row['quant'])}",
+            f"size: {_fmt(row['size_label'])} ({int(row['size_bytes']):,} bytes)",
+            f"architecture: {_fmt(row['arch'])}",
+            f"parameters: {_fmt(row['params_label'])}",
+            f"modified: {_fmt(row['modified_label'])}",
+            f"gguf version: {_fmt(metadata.get('gguf.version'))}",
+            f"tensor count: {_fmt(metadata.get('gguf.tensor_count'))}",
+            f"file type id: {_fmt(metadata.get('general.file_type'))}",
+            f"tokenizer: {_fmt(metadata.get('tokenizer.ggml.model'))}",
+        ]
+        parse_error = str(row.get("parse_error", "")).strip()
+        if parse_error:
+            lines.append(f"parse warning: {_fmt(parse_error)}")
+
+        self.query_one("#browser_details", Static).update("\n".join(lines))
+
+    @on(DataTable.RowHighlighted, "#browser_table")
+    def on_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        try:
+            idx = int(str(event.row_key.value))
+        except (TypeError, ValueError, AttributeError):
+            return
+        self._set_selected_index(idx)
+
+    @on(DataTable.RowSelected, "#browser_table")
+    def on_row_selected(self, event: DataTable.RowSelected) -> None:
+        try:
+            idx = int(str(event.row_key.value))
+        except (TypeError, ValueError, AttributeError):
+            return
+        self._set_selected_index(idx)
+
+    @on(Input.Changed, "#browser_filter")
+    def on_filter_changed(self, _: Input.Changed) -> None:
+        self.refresh_table()
+
+    @on(Select.Changed, "#browser_sort")
+    def on_sort_changed(self, _: Select.Changed) -> None:
+        self.refresh_table()
+
+    @on(Button.Pressed, "#browser_use_download_dir")
+    def on_use_download_dir(self) -> None:
+        self.use_download_dir()
+
+    @on(Button.Pressed, "#browser_scan")
+    async def on_scan_pressed(self) -> None:
+        await self.scan_models()
+
+    @on(Input.Submitted, "#browser_root")
+    async def on_root_submitted(self, _: Input.Submitted) -> None:
+        await self.scan_models()
 
 
 # ---------------------------------------------------------------------------
@@ -1598,13 +2207,16 @@ class MaintenancePanel(Static):
         )
         self.running_proc = proc
         assert proc.stdout is not None
-        while True:
-            line = await proc.stdout.readline()
-            if not line:
-                break
-            self.set_status(line.decode("utf-8", errors="replace").rstrip())
-        rc = await proc.wait()
-        self.running_proc = None
+        rc = -1
+        try:
+            while True:
+                line = await proc.stdout.readline()
+                if not line:
+                    break
+                self.set_status(line.decode("utf-8", errors="replace").rstrip())
+            rc = await proc.wait()
+        finally:
+            self.running_proc = None
         self.set_status_label("idle")
         self.set_status(f"Script exited with code {rc}")
 
@@ -1661,7 +2273,8 @@ class MaintenancePanel(Static):
             self._load_script_into_editor(self.selected_script)
 
 
-JOBS_FILE = Path.home() / ".l3ms" / "jobs.json"
+_L3MS_DATA_DIR = Path(os.environ.get("L3MS_DATA_DIR", str(Path.home() / ".l3ms")))
+JOBS_FILE = _L3MS_DATA_DIR / "jobs.json"
 JOBS_MAX = 200
 
 
@@ -1857,6 +2470,16 @@ def _build_help_content() -> str:
                 ("F4", "→ Maintenance tab"),
                 ("F5", "→ Settings tab"),
                 ("F6", "→ Jobs tab"),
+                ("F7", "→ Model Browser tab"),
+            ],
+        ),
+        (
+            "MODEL BROWSER  (F7)",
+            [
+                ("Alt+R", "Scan GGUF files"),
+                ("Alt+G", "Focus root path input"),
+                ("Alt+J", "Focus GGUF table"),
+                ("Enter", "Scan when root path input is focused"),
             ],
         ),
         (
@@ -1873,7 +2496,7 @@ def _build_help_content() -> str:
                 ("Ctrl+R", "Start script"),
                 ("Ctrl+S", "Stop script"),
                 ("Ctrl+M", "Toggle run ↔ bench mode"),
-                ("Ctrl+P", "Save script"),
+                ("Alt+P", "Save script"),
                 ("Ctrl+F", "Focus filter input"),
                 ("Ctrl+J", "Focus script table"),
                 ("Ctrl+U", "Focus script editor"),
@@ -1985,10 +2608,14 @@ class ChatHistoryScreen(ModalScreen):
 PALETTE_COMMANDS: list = [
     ("→ Download tab", "tab_download"),
     ("→ Run / Model Ops tab", "tab_run"),
+    ("→ Model Browser tab", "tab_browser"),
     ("→ Chat tab", "tab_chat"),
     ("→ Maintenance tab", "tab_maintenance"),
     ("→ Settings tab", "tab_settings"),
     ("→ Jobs tab", "tab_jobs"),
+    ("Model Browser: Scan GGUF files", "browser_scan"),
+    ("Model Browser: Focus root path", "browser_focus_path"),
+    ("Model Browser: Focus table", "browser_focus_table"),
     ("Start script (Run)", "run_start"),
     ("Stop script (Run)", "run_stop"),
     ("Toggle run/bench mode", "run_toggle_mode"),
@@ -2079,6 +2706,8 @@ class MainScreen(Screen):
                 yield DownloadPanel()
             with TabPane("Model Ops", id="run"):
                 yield RunPanel()
+            with TabPane("Model Browser", id="browser"):
+                yield ModelBrowserPanel()
             with TabPane("Chat", id="chat"):
                 yield ChatPanel()
             with TabPane("Maintenance", id="maintenance"):
@@ -2103,6 +2732,7 @@ class L3MSApp(App[None]):
         Binding("f4", "tab_maintenance", "Maint", show=True),
         Binding("f5", "tab_settings", "Settings", show=True),
         Binding("f6", "tab_jobs", "Jobs", show=True),
+        Binding("f7", "tab_browser", "Browser", show=True),
         # ── Run / Model Ops (hidden – see ? Help) ────────────────────
         Binding("ctrl+r", "run_start", "Start Script", show=False),
         Binding("ctrl+s", "run_stop", "Stop Script", show=False),
@@ -2134,6 +2764,10 @@ class L3MSApp(App[None]):
         Binding("alt+k", "download_delete", "Delete Model", show=False),
         Binding("alt+d", "download_selected", "Download", show=False),
         Binding("alt+e", "download_enabled", "Dl Enabled", show=False),
+        # ── Model Browser (hidden) ────────────────────────────────────
+        Binding("alt+r", "browser_scan", "Scan GGUF", show=False),
+        Binding("alt+g", "browser_focus_path", "Browser Path", show=False),
+        Binding("alt+j", "browser_focus_table", "Browser Table", show=False),
     ]
 
     def on_mount(self) -> None:
@@ -2167,6 +2801,11 @@ class L3MSApp(App[None]):
         if chat_panel:
             if chat_panel._active_task and not chat_panel._active_task.done():
                 chat_panel._active_task.cancel()
+
+        browser_panel = self.get_model_browser_panel()
+        if browser_panel:
+            if browser_panel.scan_task and not browser_panel.scan_task.done():
+                browser_panel.scan_task.cancel()
 
         self.exit()
 
@@ -2220,6 +2859,14 @@ class L3MSApp(App[None]):
         except Exception:
             return None
 
+    def get_model_browser_panel(self) -> Optional[ModelBrowserPanel]:
+        if not self.screen:
+            return None
+        try:
+            return self.screen.query_one("#model_browser_panel", ModelBrowserPanel)
+        except Exception:
+            return None
+
     def get_jobs_panel(self) -> Optional[JobsPanel]:
         if not self.screen:
             return None
@@ -2248,6 +2895,9 @@ class L3MSApp(App[None]):
 
     def action_tab_jobs(self) -> None:
         self.activate_tab("jobs")
+
+    def action_tab_browser(self) -> None:
+        self.activate_tab("browser")
 
     async def action_run_start(self) -> None:
         tab = self.active_tab()
@@ -2399,6 +3049,27 @@ class L3MSApp(App[None]):
         panel = self.get_download_panel()
         if panel:
             await panel.download_enabled_models()
+
+    async def action_browser_scan(self) -> None:
+        if self.active_tab() != "browser":
+            return
+        panel = self.get_model_browser_panel()
+        if panel:
+            await panel.scan_models()
+
+    def action_browser_focus_path(self) -> None:
+        if self.active_tab() != "browser":
+            return
+        panel = self.get_model_browser_panel()
+        if panel:
+            panel.focus_path()
+
+    def action_browser_focus_table(self) -> None:
+        if self.active_tab() != "browser":
+            return
+        panel = self.get_model_browser_panel()
+        if panel:
+            panel.focus_table()
 
     # ------------------------------------------------------------------
     # Chat actions

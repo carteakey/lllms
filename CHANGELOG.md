@@ -7,13 +7,45 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 ## [Unreleased]
 
 ### Added
-- Zellij-style `?` help overlay: footer now shows only tab-switch keys (`F1–F6`), `q`, `?`, and `Ctrl+P`; all `Ctrl+*`/`Alt+*` shortcuts moved to a `HelpScreen` modal grouped by context (Global / Jobs / Run / Chat / Download)
+- **GGUF Model Browser tab**:
+  - New `Model Browser` tab to scan any local directory for `.gguf` files (recursive or top-level)
+  - Sortable/filterable table with quantization, size, parameter count, architecture, and modified time
+  - Lightweight GGUF header parser for per-file metadata (model name, architecture, tokenizer, tensor count)
+  - New keyboard actions: `Alt+R` scan, `Alt+G` focus path, `Alt+J` focus table, and `F7` tab switch
+- **Sarvam 30B workflow support**:
+  - `maintenance/llama-test-pr.sh` now defaults to PR-specific vendor folders: `vendor/llama.cpp-pr-test-<joined-prs>`
+  - `maintenance/build-sarvam-llama-cpp.sh` is now a thin wrapper over `maintenance/llama-test-pr.sh` with default `SARVAM_PR_NUMBER=20275`
+  - `run-models/run-llama-cpp-sarvam-30b.sh` updated with cleaner server flags and Sarvam-aligned sampling defaults (`temp=1.0`, `top_p=1.0`, `top_k=20`)
+  - `bench-models/bench-llama-cpp-sarvam-30b.sh` for repeatable `llama-bench` runs against the Sarvam build
+  - `bench-models/bench-llama-cpp-sarvam-30b-fit.sh` for automatic fit-based benching
+  - `bench-models/fit-params-sarvam-30b.sh` for printing fitted `-ngl/-ts/-ot` placement args
+  - `model_downloader/models_config.json` entries for `Sumitc13/sarvam-30b-GGUF` (Q6_K) and `limegreenpeper1/sarvam-105B-GGUF` (Q4_K_M default)
+  - `docs/sarvam-local-post.md`: first natural-language draft post for running Sarvam locally (30B workflow + 105B download profile)
+- **gpt-oss-120b bench suite**: `bench-llama-cpp-gpt-oss-120b.sh`, `bench-llama-cpp-gpt-oss-120b-strategies.sh`, `bench-llama-cpp-gpt-oss-120b-fit.sh`, `bench-ik-llama-cpp-gpt-oss-120b.sh` — full runbook coverage for gpt-oss-120b mxfp4 on 64 GB RAM systems
+- **Qwen3.5-122B-A10B bench suite**: `bench-llama-cpp-qwen3-5-122b-a10b.sh`, `bench-llama-cpp-qwen3-5-122b-a10b-strategies.sh`, `bench-llama-cpp-qwen3-5-122b-a10b-fit.sh`, `bench-ik-llama-cpp-qwen3-5-122b-a10b.sh` — full bench coverage; documents shared-expert `(ch|)exps` pattern gotcha
+- **`run-llama-cpp-gpt-oss-120b-optimized.sh`**: optimized server run script with static `-ngl 37 --override-tensor` (fit-derived), `--parallel 1`, explicit `--ctx-size 32768`; drops `--fit` startup overhead; confirmed +540 MiB more model weight on GPU and 28 t/s tg vs 27 t/s with original script
+- **`maintenance/build-llama-cpp-cublas.sh`**: builds llama.cpp with `GGML_CUDA_FORCE_CUBLAS=ON` + `GGML_CUDA_FORCE_DMMV=OFF` into a separate `build-cublas/` dir; tested against gpt-oss-120b, found slower than default build (GGML MMQ mxfp4 kernel wins at decode-batch sizes)
+- **`docs/bench-runbook.md §8`**: bench results for Qwen3.5-122B-A10B and gpt-oss-120b; documents shared-expert OOM root cause, RAM ceiling constraints, cuBLAS/ik_llama findings, static-ot vs fit VRAM breakdown comparison, and active-parameter tg scaling table
+- **`2025-09-21-optimizing-gpt-oss-120b-local-inference.md`**: updated TL;DR tg to 28 t/s, pp to 420+; added `llama-fit-params` workflow section; expanded `--override-tensor` section with shared-expert gotcha and RAM ceiling warning; updated run script to static placement + `--parallel 1`; added l3ms repo link; closed out cuBLAS and ik_llama experiments
+- Zellij-style `?` help overlay: footer now shows only tab-switch keys (`F1–F7`), `q`, `?`, and `Ctrl+P`; all `Ctrl+*`/`Alt+*` shortcuts moved to a `HelpScreen` modal grouped by context (Global / Jobs / Run / Chat / Download)
 - **Command palette** (`Ctrl+P`): fuzzy-filtered `CommandPaletteScreen` modal lists every app action; type to narrow, Enter to run, Esc to cancel
 - **Jobs tab stop + retry**: `■ Stop Running` and `↺ Retry Selected` buttons added to Jobs panel; running job shown with `▶` indicator; `s` / `r` key shortcuts when Jobs tab is active; `StopRequest` / `RetryRequest` messages routed through `L3MSApp` to `RunPanel`; `script_path` and `mode` now persisted in job history for reliable retry
 - **Chat history persistence**: `save_chat` now writes both `.md` (human-readable) and `.json` (machine-loadable) to `~/.l3ms/chats/`; new `Sessions` / `Load` buttons open `ChatHistoryScreen` modal to browse and restore saved sessions
 - **Graceful shutdown** (`action_quit`): on `q`, all running subprocesses are `terminate()`d and async resource/task loops are cancelled before exit — no more orphaned `llama-server` processes on quit
 - `run-llama-cpp-nemotron-super-120b.sh`: run script for NVIDIA Nemotron 3 Super 120B-A12B UD-Q3_K_XL (latent-MoE, 12B active params, port 8001, ctx 32768)
 - `NVIDIA-Nemotron-3-Super-120B-A12B-GGUF` UD-Q3_K_XL entry added to `models_config.json` (~62.6 GB, 3 split shards, enabled)
+- **Mistral Small 4 (119B) script set**:
+  - `run-models/run-llama-cpp-mistral-small-4-119b.sh` standard fit-based server script (safe defaults)
+  - `run-models/run-llama-cpp-mistral-small-4-119b-optimized.sh` throughput-oriented static-placement script (`-ngl`, `--override-tensor`, `q8_0` KV, `--parallel 1`)
+  - `run-models/run-llama-cpp-mistral-small-4-119b-optimized-no-vision.sh` explicit non-vision optimized preset (same tuned defaults as current non-vision path)
+  - `run-models/run-llama-cpp-mistral-small-4-119b-optimized-vision.sh` explicit vision optimized preset with `--mmproj` and one fewer GPU layer by default (`-ngl 8`)
+  - `bench-models/bench-llama-cpp-mistral-small-4-119b-strategies.sh` strategy sweep script that compares tg across offload presets and reports the best strategy
+- **Bench + run script expansion**:
+  - Added model-specific strategy/fit benches for Nemotron 120B, Qwen3.5-122B-A10B, Sarvam 30B, and gpt-oss-120B under `bench-models/`
+  - Added optimized launch presets `run-llama-cpp-qwen3-coder-next-optimized.sh` and `run-llama-cpp-mistral-small-4-119b-optimized-no-vision-thinking.sh`
+  - Added `preflight-check.sh` and maintenance helpers (`llama-sweep.sh`, `llama-test-pr.sh`) for repeatable local validation workflows
+- **Docs additions**:
+  - Added `docs/vibe_configuration.md` and expanded bench/run workflow guidance for current local model ops
 
 ### Fixed
 - `MarkupError` crash in `refresh_disk_space`: paths like `/home/user` inside `[…]` were parsed as Rich closing tags; fixed by passing the full `[path]` token through `markup_escape()`

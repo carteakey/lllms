@@ -42,6 +42,12 @@ TabbedContent {
     margin-bottom: 1;
 }
 
+#browser_table {
+    height: 1fr;
+    min-height: 12;
+    margin-bottom: 1;
+}
+
 Input {
     width: 1fr;
     min-width: 20;
@@ -65,7 +71,18 @@ Checkbox {
     border: round $accent;
 }
 
+#browser_log {
+    height: 10;
+    border: round $accent;
+}
+
 #run_selected_path {
+    margin-bottom: 1;
+    padding: 0 1;
+    border: round $accent;
+}
+
+#browser_selected_path {
     margin-bottom: 1;
     padding: 0 1;
     border: round $accent;
@@ -78,10 +95,23 @@ Checkbox {
     border: round $accent;
 }
 
+#browser_summary {
+    width: auto;
+    padding: 0 1;
+    border: round $accent;
+}
+
 #run_editor {
     height: 1fr;
     min-height: 16;
     border: round $accent;
+}
+
+#browser_details {
+    height: 1fr;
+    min-height: 16;
+    border: round $accent;
+    padding: 0 1;
 }
 
 /* ---- Chat Panel ---- */

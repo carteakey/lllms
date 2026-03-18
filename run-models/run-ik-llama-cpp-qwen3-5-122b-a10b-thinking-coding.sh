@@ -9,7 +9,7 @@ REPO_DIR="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 
 LLAMA_SERVER="${LLAMA_SERVER:-${REPO_DIR}/vendor/llama.cpp/build/bin/llama-server}"
 CPU_RANGE="${CPU_RANGE:-0-11}"
-MODEL="${MODEL:-/mnt/lab//models/unsloth/Qwen3.5-122B-A10B-GGUF/Qwen3.5-122B-A10B-IQ4_KSS.gguf}"
+MODEL="${MODEL:-/mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF/UD-IQ4_XS/Qwen3.5-122B-A10B-UD-IQ4_XS-00001-of-00003.gguf}"
 
 
 if [ ! -x "${LLAMA_SERVER}" ]; then
@@ -32,14 +32,12 @@ cmd=(
   --min-p 0.0
   --host 0.0.0.0
   --port 8001
+  -merge-qkv
   --jinja
   -ctk q8_0
   -ctv q8_0
   --flash-attn on
   --ctx-size 65536
-  --fit on
-  --fit-ctx 65536
-  --fit-target 512
   --no-mmap
   --threads 10
   --threads-batch 12

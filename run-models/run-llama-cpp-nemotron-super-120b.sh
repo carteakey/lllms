@@ -9,7 +9,7 @@ export GGML_CUDA_GRAPH_OPT="${GGML_CUDA_GRAPH_OPT:-1}"
 
 LLAMA_SERVER="${LLAMA_SERVER:-${REPO_DIR}/vendor/llama.cpp/build/bin/llama-server}"
 CPU_RANGE="${CPU_RANGE:-0-11}"
-MODEL="${MODEL:-/mnt/lab//models/unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF/NVIDIA-Nemotron-3-Super-120B-A12B-UD-Q3_K_XL-00001-of-00003.gguf}"
+MODEL="${MODEL:-/mnt/lab//models/unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF/UD-Q3_K_XL/NVIDIA-Nemotron-3-Super-120B-A12B-UD-Q3_K_XL-00001-of-00003.gguf}"
 
 if [ ! -x "${LLAMA_SERVER}" ]; then
   echo "llama-server not found/executable: ${LLAMA_SERVER}" >&2
