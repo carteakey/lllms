@@ -865,6 +865,94 @@ for s in fused fused-ger fused-mqkv; do
 done
 ```
 
+### gpt-oss-puzzle-88B quickstart
+
+```sh
+# 1) Build puzzle-compatible llama.cpp from upstream PR merge flow
+./maintenance/build-gpt-oss-puzzle-llama-cpp.sh
+
+# 2) Download MXFP4_MOE quant
+./model_downloader/download_hf_model.py \
+  --repo-id SamPurkis/gpt-oss-puzzle-88B-GGUF \
+  --allow-patterns '*MXFP4_MOE*' \
+  --local-dir /home/kchauhan/models/SamPurkis/gpt-oss-puzzle-88B-GGUF \
+  --max-workers 2
+
+# 3) Run / bench
+./run-models/run-llama-cpp-gpt-oss-puzzle-88b.sh
+./bench-models/bench-llama-cpp-gpt-oss-puzzle-88b.sh
+./bench-models/bench-llama-cpp-gpt-oss-puzzle-88b-fit.sh
+```
+
+Notes:
+
+- These puzzle scripts default to `vendor/llama.cpp-pr-test-21032/build/bin/*`.
+- Strategy sweeps are available via:
+
+```sh
+STRATEGY=partial-cpu ./bench-models/bench-llama-cpp-gpt-oss-puzzle-88b-strategies.sh
+```
+
+Puzzle benchmark notes (RTX 4070, PR #21032 build):
+
+- Baseline (`N_CPU_MOE=48`, `ngl=99`): `pp ~432.8`, `tg ~20.7`
+- Strategy `all-cpu-moe`: `pp ~431.5`, `tg ~23.9`
+- Best observed: fit/fit-shaped partial split at `ngl=37`:
+  - fit auto: `pp ~549.5`, `tg ~27.0`
+  - partial-cpu (semicolons in `OVERRIDE_TENSOR`): `pp ~548.7`, `tg ~27.0`
+
+Like gpt-oss-120b, this model benefits from lowering `ngl` and using explicit
+expert offload patterns rather than high-`ngl` defaults.
+
+### Gemma-4-26B-A4B quickstart
+
+```sh
+# 1) Build/update mainline llama.cpp
+./maintenance/build-llama-cpp.sh
+
+# 2) Download Gemma 4 26B-A4B UD-Q5_K_XL + mmproj
+./model_downloader/download_hf_model.py \
+  --repo-id unsloth/gemma-4-26B-A4B-it-GGUF \
+  --allow-patterns '*gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf*' '*mmproj-BF16.gguf*' \
+  --local-dir /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF \
+  --max-workers 2
+
+# 3) Run / bench
+./run-models/run-llama-cpp-gemma-4-26b-a4b.sh
+./run-models/run-llama-cpp-gemma-4-26b-a4b-vision.sh
+./bench-models/bench-llama-cpp-gemma-4-26b-a4b.sh
+./bench-models/bench-llama-cpp-gemma-4-26b-a4b-fit.sh
+```
+
+Notes:
+
+- The run script defaults to mainline `vendor/llama.cpp/build/bin/llama-server`.
+- The `-vision` script is explicit and always wires `mmproj-BF16.gguf`.
+- Base script is text-only by default (`USE_VISION=0`) and defaults to `128k` context.
+- Vision preset defaults to `64k` context and `ubatch-size=512`.
+- Gemma defaults are set to `temp=1.0`, `top-p=0.95`, `top-k=64`.
+
+### Gemma vision as a user startup service
+
+Use the included user-level systemd unit if this is your daily default model:
+
+```sh
+# install + enable + start
+./maintenance/setup-gemma-vision-service.sh install
+
+# common controls
+./maintenance/setup-gemma-vision-service.sh status
+./maintenance/setup-gemma-vision-service.sh stop
+./maintenance/setup-gemma-vision-service.sh start
+./maintenance/setup-gemma-vision-service.sh restart
+./maintenance/setup-gemma-vision-service.sh disable
+./maintenance/setup-gemma-vision-service.sh enable
+./maintenance/setup-gemma-vision-service.sh logs
+```
+
+Unit source lives at `maintenance/systemd/gemma-vision.service` and is installed
+to `~/.config/systemd/user/gemma-vision.service`.
+
 ### Per-model winner cheatsheet
 
 | Model | Best bench config | pp (t/s) | tg (t/s) | Optimized run script |
@@ -872,6 +960,7 @@ done
 | **Qwen3-Coder-Next** | fit ngl=49, 64k ctx, q8_0 KV, 512 MiB margin | **502** | **~39–40** | `run-llama-cpp-qwen3-coder-next-optimized.sh` |
 | **gpt-oss-120b** | static -ot ngl=37, q8_0 KV | 428 | 23.4 | `run-llama-cpp-gpt-oss-120b-optimized.sh` |
 | **Qwen3.5-122B** | partial-cpu blk 3+, f16 KV | 284 | 9.8 | `run-llama-cpp-qwen3-5-122b-a10b-thinking-coding.sh` |
+| **Gemma-4-26B-A4B** | fit, 32k ctx, q8_0 KV | _(run bench)_ | _(run bench)_ | `run-llama-cpp-gemma-4-26b-a4b.sh` |
 
 ### KV cache quant — universal recommendation
 

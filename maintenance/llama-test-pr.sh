@@ -114,7 +114,7 @@ build_llama() {
       -DGGML_CUDA_FA_ALL_QUANTS=ON \
       -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCH"
 
-    cmake --build . --config Release --target llama-server llama-batched-bench llama-cli llama-bench llama-sweep-bench llama-fit-params --parallel
+    cmake --build . --config Release --target llama-server llama-batched-bench llama-cli llama-bench llama-fit-params --parallel
 }
 
 prepare_repo

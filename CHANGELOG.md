@@ -7,6 +7,29 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 ## [Unreleased]
 
 ### Added
+- **Gemma-4-26B-A4B workflow support**:
+  - `run-models/run-llama-cpp-gemma-4-26b-a4b.sh` run script targeting mainline `vendor/llama.cpp/build/bin/llama-server`
+  - `run-models/run-llama-cpp-gemma-4-26b-a4b-vision.sh` dedicated vision preset wiring `mmproj-BF16.gguf`
+  - default contexts now aligned to this local profile: text `128k`, vision `64k`
+  - `bench-models/bench-llama-cpp-gemma-4-26b-a4b.sh` baseline bench script
+  - `bench-models/bench-llama-cpp-gemma-4-26b-a4b-strategies.sh` strategy sweep bench script
+  - `bench-models/bench-llama-cpp-gemma-4-26b-a4b-fit.sh` fit-based bench script
+  - `model_downloader/models_config.json` profile for `unsloth/gemma-4-26B-A4B-it-GGUF` (`UD-Q5_K_XL` + `mmproj-BF16`)
+  - `docs/bench-runbook.md` quickstart section for Gemma-4-26B-A4B on mainline llama.cpp
+- **Gemma vision user service support**:
+  - `maintenance/systemd/gemma-vision.service` user-level systemd unit for always-on startup
+  - `maintenance/setup-gemma-vision-service.sh` helper for `install/start/stop/restart/enable/disable/status/logs`
+  - `docs/bench-runbook.md` usage section for managing Gemma vision as a startup service
+- **gpt-oss-puzzle-88B workflow support**:
+  - `maintenance/build-gpt-oss-puzzle-llama-cpp.sh` wrapper for upstream PR merge build flow (defaults to PR `#21032` via `llama-test-pr.sh`)
+  - `run-models/run-llama-cpp-gpt-oss-puzzle-88b.sh` run script targeting puzzle-compatible llama.cpp build output
+  - `bench-models/bench-llama-cpp-gpt-oss-puzzle-88b.sh` baseline bench script
+  - `bench-models/bench-llama-cpp-gpt-oss-puzzle-88b-strategies.sh` strategy sweep bench script (defaulted to fit-shaped partial split, `ngl=37`, semicolon-delimited `-ot` patterns)
+  - `bench-models/bench-llama-cpp-gpt-oss-puzzle-88b-fit.sh` fit-based bench script
+  - `model_downloader/models_config.json` profile for `SamPurkis/gpt-oss-puzzle-88B-GGUF` (`*MXFP4_MOE*` primary pattern)
+  - `docs/bench-runbook.md` quickstart section + recorded benchmark results (`pp/tg`) for baseline, all-cpu-moe, and fit/fit-shaped partial split
+- **Model onboarding playbook**:
+  - new `docs/model-onboarding-playbook.md` documenting end-to-end model-family onboarding (build wrapper, downloader profile, run/bench scripts, docs/changelog, validation, and targeted download flow)
 - **GGUF Model Browser tab**:
   - New `Model Browser` tab to scan any local directory for `.gguf` files (recursive or top-level)
   - Sortable/filterable table with quantization, size, parameter count, architecture, and modified time

@@ -135,6 +135,28 @@
     },
     {
       "enabled": false,
+      "repo_id": "SamPurkis/gpt-oss-puzzle-88B-GGUF",
+      "local_dir": "/home/kchauhan/models/SamPurkis/gpt-oss-puzzle-88B-GGUF",
+      "allow_patterns": ["*MXFP4_MOE*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": 2,
+      "description": "GPT OSS Puzzle 88B GGUF (MXFP4_MOE primary profile; requires puzzle PR build flow #21032)"
+    },
+    {
+      "enabled": false,
+      "repo_id": "unsloth/gemma-4-26B-A4B-it-GGUF",
+      "local_dir": "/home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF",
+      "allow_patterns": ["*gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf*", "*mmproj-BF16.gguf*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": 2,
+      "description": "Gemma 4 26B-A4B UD-Q5_K_XL + mmproj-BF16 (mainline llama.cpp, /home model path)"
+    },
+    {
+      "enabled": false,
       "repo_id": "Qwen/Qwen3-32B-GGUF",
       "local_dir": "/mnt/lab/models/qwen/Qwen3-32B-GGUF",
       "allow_patterns": ["*Q6_K*"],

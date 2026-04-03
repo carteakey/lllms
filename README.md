@@ -118,8 +118,10 @@ Model Browser (active only on Model Browser tab):
 - `run-models/`: one `run-llama-cpp-*.sh` script per model
 - `bench-models/`: one `bench-llama-cpp-*.sh` script per model
 - `maintenance/`: system/build scripts
+- `maintenance/systemd/`: user service units (optional startup services)
 - `l3ms/`: TUI app + stores
 - `l3ms.py`: launcher (TUI and CLI modes)
+- `docs/model-onboarding-playbook.md`: end-to-end checklist for adding new model families
 
 ## Downloader CLI (direct)
 
