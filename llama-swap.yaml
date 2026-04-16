@@ -666,9 +666,11 @@ models:
       --threads 10
 
 # ===========================================================================
-# Startup: preload the production default so the first request is instant.
+# Startup: preload the default so the first request is instant.
+# gemma-4-26b-a4b-vision is the default — small enough to stay resident,
+# vision-capable, and the previous gemma-vision.service entrypoint.
 # ===========================================================================
 hooks:
   on_startup:
     preload:
-      - "gpt-oss-120b"
+      - "gemma-4-26b-a4b-vision"

@@ -9,16 +9,6 @@
 
 ## 🟡 High Priority
 
-- **TUI: teach Model Ops about llama-swap**: after the `run-models/` deletion
-  the "Run" list is empty. Either (a) repoint `app.py:59-60` globs to parse
-  `llama-swap.yaml` as the serving inventory (list model IDs, wire "run" to
-  a `POST /models/load` call), or (b) drop the Run/Bench toggle and keep
-  Bench-only
-- **Chat tab default port**: was `8001`, should default to llama-swap's
-  `8080`. Small change in the Chat base-URL field / Settings
-- **Fix `gemma-vision.service`**: still points at the deleted
-  `run-models/run-llama-cpp-gemma-4-26b-a4b-vision.sh`; either retire the
-  unit (llama-swap covers it) or repoint ExecStart at `llama-swap.service`
 - **Bench-vs-serve flag drift**: bench scripts carry their own copies of
   `-ngl` / `--override-tensor`. Consider a later pass where bench scripts
   source shared args from `llama-swap.yaml` (yq) so tuning stays in sync
@@ -80,6 +70,14 @@
 
 ## ✅ Done
 
+- ~~TUI: teach Model Ops about llama-swap~~ — Run mode now reads from
+  `/v1/models`; Start/Stop call `/models/load` and `/models/unload`;
+  editor shows model state + curl snippets. Bench mode unchanged.
+- ~~Chat tab default port~~ — already `8080` (checked post-migration,
+  TODO was stale)
+- ~~Retire `gemma-vision.service`~~ — moved unit + helper to
+  `maintenance/systemd/archive/` and `maintenance/archive/`; llama-swap
+  preloads `gemma-4-26b-a4b-vision` instead
 - ~~Fix `preserve_existing` field loss~~ — removed from schema, no longer needed
 - ~~Add `action_quit` method~~ — implemented with graceful subprocess + task cleanup
 - ~~Add missing Maintenance tab output capture~~ — `run_script` no longer awaits

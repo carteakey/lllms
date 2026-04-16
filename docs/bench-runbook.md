@@ -917,41 +917,22 @@ expert offload patterns rather than high-`ngl` defaults.
   --local-dir /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF \
   --max-workers 2
 
-# 3) Run / bench
-./run-models/run-llama-cpp-gemma-4-26b-a4b.sh
-./run-models/run-llama-cpp-gemma-4-26b-a4b-vision.sh
+# 3) Serve / bench
+# Serving is handled by llama-swap (model IDs: gemma-4-26b-a4b, gemma-4-26b-a4b-vision)
+curl -s http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gemma-4-26b-a4b-vision","messages":[{"role":"user","content":"hi"}]}'
 ./bench-models/bench-llama-cpp-gemma-4-26b-a4b.sh
 ./bench-models/bench-llama-cpp-gemma-4-26b-a4b-fit.sh
 ```
 
 Notes:
 
-- The run script defaults to mainline `vendor/llama.cpp/build/bin/llama-server`.
-- The `-vision` script is explicit and always wires `mmproj-BF16.gguf`.
-- Base script is text-only by default (`USE_VISION=0`) and defaults to `128k` context.
-- Vision preset defaults to `64k` context and `ubatch-size=512`.
-- Gemma defaults are set to `temp=1.0`, `top-p=0.95`, `top-k=64`.
-
-### Gemma vision as a user startup service
-
-Use the included user-level systemd unit if this is your daily default model:
-
-```sh
-# install + enable + start
-./maintenance/setup-gemma-vision-service.sh install
-
-# common controls
-./maintenance/setup-gemma-vision-service.sh status
-./maintenance/setup-gemma-vision-service.sh stop
-./maintenance/setup-gemma-vision-service.sh start
-./maintenance/setup-gemma-vision-service.sh restart
-./maintenance/setup-gemma-vision-service.sh disable
-./maintenance/setup-gemma-vision-service.sh enable
-./maintenance/setup-gemma-vision-service.sh logs
-```
-
-Unit source lives at `maintenance/systemd/gemma-vision.service` and is installed
-to `~/.config/systemd/user/gemma-vision.service`.
+- The llama-swap `gemma-4-26b-a4b` entry defaults to text, 131k ctx.
+- The `gemma-4-26b-a4b-vision` entry wires `mmproj-BF16.gguf`, 128k ctx.
+- `gemma-4-26b-a4b-vision` is the llama-swap preload default — it's warm at
+  service startup. See `docs/llama-swap-runbook.md`.
+- Gemma defaults are `temp=1.0`, `top-p=0.95`, `top-k=64`.
 
 ### Per-model winner cheatsheet
 

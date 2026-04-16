@@ -53,13 +53,13 @@ from .script_store import (
     restore_script_version,
     save_script_with_version,
 )
+from . import llama_swap
 
 ROOT = Path(__file__).resolve().parents[1]
 DOWNLOAD_SCRIPT = ROOT / "model_downloader" / "download_hf_model.py"
-RUN_SCRIPT_GLOB = "run-models/run-llama-cpp-*.sh"
-IK_RUN_SCRIPT_GLOB = "run-models/run-ik-llama-cpp-*.sh"
 BENCH_SCRIPT_GLOB = "bench-models/bench-llama-cpp-*.sh"
 MAINTENANCE_SCRIPT_GLOB = "maintenance/*.sh"
+LLAMA_SWAP_CONFIG_PATH = ROOT / "llama-swap.yaml"
 
 _BYTES_PER_GB: int = 1_073_741_824
 _ELAPSED_THRESHOLD_SECS: int = 120
@@ -892,15 +892,18 @@ class RunPanel(Static):
     def __init__(self) -> None:
         super().__init__(id="run_panel")
         self.mode = "run"
-        self.run_scripts: List[Path] = []
+        self.swap_models: List[llama_swap.SwapModel] = []
         self.bench_scripts: List[Path] = []
-        self.filtered: List[Path] = []
+        self.filtered_scripts: List[Path] = []
+        self.filtered_models: List[llama_swap.SwapModel] = []
         self.selected_script: Optional[Path] = None
+        self.selected_model_id: Optional[str] = None
         self.running_proc: Optional[asyncio.subprocess.Process] = None
         self.running_task: Optional[asyncio.Task[None]] = None
         self.resource_task: Optional[asyncio.Task[None]] = None
         self.running_started_at: Optional[float] = None
         self._current_job_name: str = "idle"
+        self._swap_refresh_task: Optional[asyncio.Task[None]] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel"):
@@ -952,10 +955,18 @@ class RunPanel(Static):
     def on_mount(self) -> None:
         table = self.query_one("#run_scripts_table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("#", "script")
+        self._install_table_columns()
         self.refresh_script_inventory()
         self.refresh_binary_selector()
         self.focus_table()
+
+    def _install_table_columns(self) -> None:
+        table = self.query_one("#run_scripts_table", DataTable)
+        table.clear(columns=True)
+        if self.mode == "run":
+            table.add_columns("state", "model", "name")
+        else:
+            table.add_columns("#", "script")
 
     def set_status(self, message: str) -> None:
         self.query_one("#run_log", RichLog).write(message)
@@ -986,59 +997,130 @@ class RunPanel(Static):
         )
 
     def refresh_script_inventory(self) -> None:
-        self.run_scripts = sorted(
-            collect_scripts(RUN_SCRIPT_GLOB) + collect_scripts(IK_RUN_SCRIPT_GLOB)
-        )
         self.bench_scripts = collect_scripts(BENCH_SCRIPT_GLOB)
-        self.refresh_table()
+        if self.mode == "run":
+            self._schedule_swap_refresh()
+        else:
+            self.refresh_table()
 
-    def current_scripts(self) -> List[Path]:
-        return self.bench_scripts if self.mode == "bench" else self.run_scripts
+    def _schedule_swap_refresh(self) -> None:
+        if self._swap_refresh_task and not self._swap_refresh_task.done():
+            return
+        self._swap_refresh_task = asyncio.create_task(self._load_swap_models())
+
+    async def _load_swap_models(self) -> None:
+        try:
+            models = await llama_swap.list_models()
+        except Exception as exc:
+            self.swap_models = []
+            self.set_status(
+                f"llama-swap unreachable at {llama_swap.DEFAULT_BASE_URL}: {exc}. "
+                "Start llama-swap.service, then click Refresh."
+            )
+        else:
+            self.swap_models = models
+            self.set_status(f"Loaded {len(models)} model(s) from llama-swap")
+        if self.mode == "run":
+            self.refresh_table()
 
     def refresh_table(self) -> None:
+        self._install_table_columns()
         table = self.query_one("#run_scripts_table", DataTable)
         filter_text = self.query_one("#run_filter", Input).value.strip().lower()
-        scripts = self.current_scripts()
-        self.filtered = []
 
-        table.clear()
-        for script in scripts:
+        if self.mode == "run":
+            self.filtered_models = [
+                m for m in self.swap_models
+                if not filter_text or filter_text in m.id.lower() or filter_text in m.name.lower()
+            ]
+            for model in self.filtered_models:
+                table.add_row(model.state, model.id, model.name, key=model.id)
+
+            if self.filtered_models:
+                first = self.filtered_models[0]
+                self.selected_model_id = first.id
+                table.move_cursor(row=0, column=0)
+                self._show_model_details(first)
+                self.set_status(
+                    f"Loaded {len(self.filtered_models)} model(s) from llama-swap "
+                    f"({len(self.swap_models)} total)"
+                )
+            else:
+                self.selected_model_id = None
+                self.query_one("#run_selected_path", Static).update(
+                    "No model selected" if self.swap_models else "llama-swap unavailable — click Refresh"
+                )
+                self.query_one("#run_editor", TextArea).text = ""
+                self.query_one("#run_version_select", Select).set_options([])
+            return
+
+        # bench mode: script-driven (unchanged)
+        self.filtered_scripts = []
+        for script in self.bench_scripts:
             rel = script.relative_to(ROOT).as_posix()
             if filter_text and filter_text not in rel.lower():
                 continue
-            self.filtered.append(script)
-            idx = len(self.filtered) - 1
+            self.filtered_scripts.append(script)
+            idx = len(self.filtered_scripts) - 1
             table.add_row(str(idx), rel, key=str(idx))
 
-        if self.filtered:
-            self.selected_script = self.filtered[0]
+        if self.filtered_scripts:
+            self.selected_script = self.filtered_scripts[0]
             table.move_cursor(row=0, column=0)
             self.load_selected_script_into_editor()
             self.set_status(
-                f"Loaded {len(self.filtered)} {self.mode} script(s) "
-                f"({len(scripts)} total before filter)"
+                f"Loaded {len(self.filtered_scripts)} bench script(s) "
+                f"({len(self.bench_scripts)} total before filter)"
             )
         else:
             self.selected_script = None
             self.query_one("#run_selected_path", Static).update("No script selected")
             self.query_one("#run_editor", TextArea).text = ""
             self.query_one("#run_version_select", Select).set_options([])
-            self.set_status(f"No {self.mode} scripts match current filter")
+            self.set_status("No bench scripts match current filter")
+
+    def _show_model_details(self, model: llama_swap.SwapModel) -> None:
+        self.query_one("#run_selected_path", Static).update(f"{model.id}  —  state: {model.state}")
+        details = [
+            f"# llama-swap model: {model.id}",
+            f"# name:   {model.name}" if model.name else "",
+            f"# state:  {model.state}",
+            f"# desc:   {model.description}" if model.description else "",
+            "",
+            "# Trigger load:",
+            f"curl -X POST {llama_swap.DEFAULT_BASE_URL}/models/load \\",
+            f"     -H 'Content-Type: application/json' \\",
+            f"     -d '{{\"model\": \"{model.id}\"}}'",
+            "",
+            "# Chat:",
+            f"curl {llama_swap.DEFAULT_BASE_URL}/v1/chat/completions \\",
+            f"     -H 'Content-Type: application/json' \\",
+            f"     -d '{{\"model\":\"{model.id}\",\"messages\":[{{\"role\":\"user\",\"content\":\"hi\"}}]}}'",
+            "",
+            "# Unload:",
+            f"curl -X POST {llama_swap.DEFAULT_BASE_URL}/models/unload \\",
+            f"     -H 'Content-Type: application/json' \\",
+            f"     -d '{{\"model\": \"{model.id}\"}}'",
+            "",
+            "# Full definition lives in llama-swap.yaml.",
+        ]
+        self.query_one("#run_editor", TextArea).text = "\n".join(line for line in details if line is not None)
+        self.query_one("#run_version_select", Select).set_options([])
 
     def toggle_mode(self) -> None:
         select = self.query_one("#run_mode", Select)
         self.mode = "bench" if self.mode == "run" else "run"
         select.value = self.mode
-        self.refresh_table()
+        self.refresh_script_inventory()
 
     def selected_model_name(self) -> str:
+        if self.mode == "run":
+            return self.selected_model_id or "idle"
         if self.selected_script is None:
             return "idle"
         name = self.selected_script.stem
         for prefix in (
-            "run-ik-llama-cpp-",
             "bench-ik-llama-cpp-",
-            "run-llama-cpp-",
             "bench-llama-cpp-",
         ):
             if name.startswith(prefix):
@@ -1048,10 +1130,17 @@ class RunPanel(Static):
 
     def _sync_selected_from_cursor(self) -> None:
         table = self.query_one("#run_scripts_table", DataTable)
-        if self.filtered and 0 <= table.cursor_row < len(self.filtered):
-            self.selected_script = self.filtered[table.cursor_row]
+        if self.mode == "run":
+            if self.filtered_models and 0 <= table.cursor_row < len(self.filtered_models):
+                self.selected_model_id = self.filtered_models[table.cursor_row].id
+            return
+        if self.filtered_scripts and 0 <= table.cursor_row < len(self.filtered_scripts):
+            self.selected_script = self.filtered_scripts[table.cursor_row]
 
     def load_selected_script_into_editor(self) -> None:
+        if self.mode == "run":
+            # run mode: editor is a read-only detail pane populated by _show_model_details
+            return
         if self.selected_script is None:
             return
         try:
@@ -1069,6 +1158,11 @@ class RunPanel(Static):
         select.set_options([(name, name) for name in versions])
 
     def save_editor_script(self) -> None:
+        if self.mode == "run":
+            self.set_status(
+                "Run mode is read-only; edit llama-swap.yaml to change a model entry"
+            )
+            return
         self._sync_selected_from_cursor()
         if self.selected_script is None:
             self.set_status("No script selected")
@@ -1086,6 +1180,9 @@ class RunPanel(Static):
         self.set_status("Script saved with version snapshot")
 
     def restore_editor_script(self) -> None:
+        if self.mode == "run":
+            self.set_status("Run mode is read-only; no script versions to restore")
+            return
         self._sync_selected_from_cursor()
         if self.selected_script is None:
             self.set_status("No script selected")
@@ -1111,6 +1208,30 @@ class RunPanel(Static):
             return
 
         self._sync_selected_from_cursor()
+
+        if self.mode == "run":
+            if not self.selected_model_id:
+                self.set_status("No model selected")
+                return
+            model_id = self.selected_model_id
+            self._current_job_name = model_id
+            self.running_started_at = asyncio.get_running_loop().time()
+            self.set_runtime_state(
+                f"Current: {model_id} (run)", "Resources: loading via llama-swap..."
+            )
+            self.post_message(
+                RunPanel.JobStarted(
+                    model_id,
+                    datetime.now().strftime("%H:%M:%S"),
+                    self.mode,
+                    script_path="",
+                )
+            )
+            self.running_task = asyncio.create_task(self._swap_load(model_id))
+            await self.running_task
+            return
+
+        # bench mode: subprocess launch (unchanged)
         if self.selected_script is None:
             self.set_status("No script selected")
             return
@@ -1147,17 +1268,58 @@ class RunPanel(Static):
         self.running_task = asyncio.create_task(self._stream_command(cmd, env=env))
         await self.running_task
 
+    async def _swap_load(self, model_id: str) -> None:
+        self.set_status(f"POST {llama_swap.DEFAULT_BASE_URL}/models/load  model={model_id}")
+        try:
+            result = await llama_swap.load_model(model_id)
+        except Exception as exc:
+            self.set_status(f"load failed: {exc}")
+            self.set_runtime_state("Current: idle", "Resources: load failed")
+            self.post_message(RunPanel.JobFinished(model_id, "0s", 1, self.mode))
+            self.running_started_at = None
+            return
+        self.set_status(result)
+        await self._load_swap_models()
+        elapsed_secs = 0.0
+        if self.running_started_at is not None:
+            elapsed_secs = asyncio.get_running_loop().time() - self.running_started_at
+        self.running_started_at = None
+        self.set_runtime_state(f"Current: {model_id} (loaded)", "Resources: managed by llama-swap")
+        elapsed_str = (
+            f"{elapsed_secs:.0f}s"
+            if elapsed_secs < _ELAPSED_THRESHOLD_SECS
+            else f"{elapsed_secs / 60:.1f}m"
+        )
+        self.post_message(RunPanel.JobFinished(model_id, elapsed_str, 0, self.mode))
+
+    async def _swap_unload(self, model_id: str) -> None:
+        self.set_status(f"POST {llama_swap.DEFAULT_BASE_URL}/models/unload  model={model_id}")
+        try:
+            result = await llama_swap.unload_model(model_id)
+        except Exception as exc:
+            self.set_status(f"unload failed: {exc}")
+            return
+        self.set_status(result)
+        await self._load_swap_models()
+
     async def run_script_by_path(self, script_path: str, mode: str) -> None:
         """Select a script by full path and run it. Used by Jobs tab retry."""
+        if mode == "run":
+            # Run-mode retries are now model IDs, not paths. script_path holds the id.
+            self.mode = "run"
+            self.refresh_script_inventory()
+            self.selected_model_id = script_path or None
+            await self.run_script()
+            return
+
         target = Path(script_path)
         if not target.exists():
             self.set_status(f"Script not found for retry: {script_path}")
             return
-        if mode in {"run", "bench"}:
-            self.mode = mode
+        if mode == "bench":
+            self.mode = "bench"
             self.refresh_table()
-        # Try to find it in the visible filtered list and move cursor
-        for i, s in enumerate(self.filtered):
+        for i, s in enumerate(self.filtered_scripts):
             if s == target:
                 self.selected_script = s
                 table = self.query_one("#run_scripts_table", DataTable)
@@ -1165,7 +1327,6 @@ class RunPanel(Static):
                 self.load_selected_script_into_editor()
                 break
         else:
-            # Not visible (different mode or filter) — set directly
             self.selected_script = target
             self.load_selected_script_into_editor()
         await self.run_script()
@@ -1298,9 +1459,19 @@ class RunPanel(Static):
         )
 
     async def stop_script(self) -> None:
+        if self.mode == "run":
+            self._sync_selected_from_cursor()
+            if not self.selected_model_id:
+                self.set_status("No model selected")
+                return
+            await self._swap_unload(self.selected_model_id)
+            self.running_started_at = None
+            self.set_runtime_state("Current: idle", "Resources: unloaded via llama-swap")
+            return
+
         proc = self.running_proc
         if proc is None:
-            self.set_status("No active run/bench process")
+            self.set_status("No active bench process")
             return
 
         self.set_status("Stopping process...")
@@ -1317,33 +1488,40 @@ class RunPanel(Static):
             self.set_runtime_state("Current: idle", "Resources: stopped")
         self.set_status("Process stopped")
 
+    def _handle_row_activated(self, event_key) -> None:
+        key_str = str(event_key.value) if event_key is not None else ""
+        if self.mode == "run":
+            for model in self.filtered_models:
+                if model.id == key_str:
+                    self.selected_model_id = model.id
+                    self._show_model_details(model)
+                    return
+            return
+        try:
+            idx = int(key_str)
+        except (TypeError, ValueError):
+            return
+        if 0 <= idx < len(self.filtered_scripts):
+            self.selected_script = self.filtered_scripts[idx]
+            self.load_selected_script_into_editor()
+
     @on(DataTable.RowHighlighted, "#run_scripts_table")
     def on_script_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        try:
-            idx = int(str(event.row_key.value))
-        except (TypeError, ValueError, AttributeError):
-            return
-        if 0 <= idx < len(self.filtered):
-            self.selected_script = self.filtered[idx]
-            self.load_selected_script_into_editor()
+        self._handle_row_activated(event.row_key)
 
     @on(DataTable.RowSelected, "#run_scripts_table")
     def on_script_selected(self, event: DataTable.RowSelected) -> None:
-        try:
-            idx = int(str(event.row_key.value))
-        except (TypeError, ValueError, AttributeError):
-            return
-        if 0 <= idx < len(self.filtered):
-            self.selected_script = self.filtered[idx]
-            self.load_selected_script_into_editor()
+        self._handle_row_activated(event.row_key)
 
     @on(Select.Changed, "#run_mode")
     def on_mode_changed(self, event: Select.Changed) -> None:
         value = str(event.value or "run")
         if value not in {"run", "bench"}:
             return
+        if value == self.mode:
+            return
         self.mode = value
-        self.refresh_table()
+        self.refresh_script_inventory()
 
     @on(Input.Changed, "#run_filter")
     def on_filter_changed(self, _: Input.Changed) -> None:

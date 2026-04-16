@@ -13,17 +13,33 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
     + aliases + reasoning-effort variants).
   - New `maintenance/systemd/llama-swap.service` user-level unit runs
     `llama-swap -config llama-swap.yaml -listen :8080`.
+  - Startup preload is `gemma-4-26b-a4b-vision` (previously the dedicated
+    `gemma-vision.service` default).
   - New `docs/llama-swap-runbook.md` covers install, start/stop, curl,
     and how to add a model.
   - **Breaking**: `run-models/` directory removed. Clients previously hitting
     per-model ports (mostly `:8001`) now hit the single `:8080` endpoint and
     pass the model ID in the OpenAI `model` field. Update the TUI Chat tab's
     base URL to `http://<host>:8080/v1`.
-  - **Breaking**: `maintenance/systemd/gemma-vision.service` still references
-    the deleted `run-models/run-llama-cpp-gemma-4-26b-a4b-vision.sh`. Switch
-    that unit to the new `llama-swap.service` (or disable it).
-  - TUI Model Ops "Run" list is empty after this change (the glob returns no
-    files). Bench list is unchanged. See TODO.md for the planned follow-up.
+- **TUI Model Ops Run mode now talks to llama-swap**:
+  - New `l3ms/llama_swap.py` HTTP client (`list_models`, `load_model`,
+    `unload_model`, `probe`). `LLAMA_SWAP_URL` env override supported.
+  - Run mode table lists models from `/v1/models` (with state column).
+    Start (`Ctrl+R`) calls `POST /models/load`; Stop (`Ctrl+S`) calls
+    `POST /models/unload`. Editor becomes a read-only detail pane with
+    ready-to-copy curl snippets.
+  - Bench mode is unchanged: still globs `bench-models/*.sh` and spawns
+    subprocesses.
+  - Jobs tab retry: for `run` mode, retries now resolve as model IDs
+    (not script paths).
+  - `l3ms.py --run`: picks a model from llama-swap and POSTs `/models/load`.
+    `l3ms.py --list run`: prints models from `/v1/models`.
+- **`gemma-vision.service` retired**:
+  - Unit moved to `maintenance/systemd/archive/gemma-vision.service`.
+  - Installer helper moved to
+    `maintenance/archive/setup-gemma-vision-service.sh`.
+  - `maintenance/archive/README.md` explains the migration + disable steps.
+  - `docs/bench-runbook.md` no longer documents that flow.
 
 ### Added
 - **Gemma-4-26B-A4B workflow support**:
