@@ -5,21 +5,22 @@ Single-port OpenAI-compatible endpoint that hot-swaps between every model in
 
 ## Install
 
-Download a release binary into `~/bin/`:
-
 ```bash
-mkdir -p ~/bin
-# pick the linux_amd64 tarball from https://github.com/mostlygeek/llama-swap/releases
-curl -L -o /tmp/llama-swap.tar.gz \
-  "https://github.com/mostlygeek/llama-swap/releases/latest/download/llama-swap_linux_amd64.tar.gz"
-tar -xzf /tmp/llama-swap.tar.gz -C ~/bin llama-swap
-chmod +x ~/bin/llama-swap
-~/bin/llama-swap --version
+./maintenance/install-llama-swap.sh
 ```
 
-`L3MS_ROOT` must resolve to this repo's root at launch time. On the serving
-host that's typically `/home/kchauhan/repos/l3ms`. Export it in your shell rc
-or rely on the systemd unit (which sets it explicitly).
+Installs the latest release to `~/bin/llama-swap`. Env overrides:
+
+- `LLAMA_SWAP_VERSION=v143` pin a specific release tag
+- `LLAMA_SWAP_BIN_DIR=/usr/local/bin` choose a different install dir
+- `FORCE=1` overwrite an existing binary
+
+The script auto-detects `linux`/`darwin` and `amd64`/`arm64`. Override with
+`LLAMA_SWAP_OS` / `LLAMA_SWAP_ARCH` if the detection is wrong.
+
+`L3MS_ROOT` must resolve to this repo's root at launch time. The systemd
+unit sets it to `%h/repos/l3ms` by default; override via
+`systemctl --user edit llama-swap.service` (see below).
 
 ## Validate config
 

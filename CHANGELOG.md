@@ -34,6 +34,10 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
     (not script paths).
   - `l3ms.py --run`: picks a model from llama-swap and POSTs `/models/load`.
     `l3ms.py --list run`: prints models from `/v1/models`.
+- **Installer**: `maintenance/install-llama-swap.sh` fetches the release
+  binary into `~/bin/` with OS/arch auto-detection and `FORCE` / version
+  pinning. Replaces the copy-paste curl snippet in the runbook.
+
 - **Polish pass on the migration**:
   - Fix `--fit-ctx 32678` → `32768` typo in `gpt-oss-120b-legacy` and
     `gpt-oss-120b-low` (copied verbatim from the original shell scripts).
