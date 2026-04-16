@@ -7,9 +7,16 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-WorkingDirectory=/home/kchauhan/repos/l3ms
-Environment=L3MS_ROOT=/home/kchauhan/repos/l3ms
-ExecStart=/home/kchauhan/bin/llama-swap -config /home/kchauhan/repos/l3ms/llama-swap.yaml -listen :8080
+# Override L3MS_ROOT and LLAMA_SWAP_BIN in a drop-in if your layout differs:
+#   systemctl --user edit llama-swap.service
+#   [Service]
+#   Environment=L3MS_ROOT=/path/to/l3ms
+#   Environment=LLAMA_SWAP_BIN=/path/to/llama-swap
+Environment=L3MS_ROOT=%h/repos/l3ms
+Environment=LLAMA_SWAP_BIN=%h/bin/llama-swap
+Environment=LLAMA_SWAP_LISTEN=:8080
+WorkingDirectory=%h/repos/l3ms
+ExecStart=/bin/sh -c '${LLAMA_SWAP_BIN} -config ${L3MS_ROOT}/llama-swap.yaml -listen ${LLAMA_SWAP_LISTEN}'
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=60

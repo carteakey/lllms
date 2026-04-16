@@ -898,6 +898,8 @@ class RunPanel(Static):
         self.filtered_models: List[llama_swap.SwapModel] = []
         self.selected_script: Optional[Path] = None
         self.selected_model_id: Optional[str] = None
+        # last model we successfully loaded via llama-swap; Stop targets this, not the cursor
+        self.loaded_model_id: Optional[str] = None
         self.running_proc: Optional[asyncio.subprocess.Process] = None
         self.running_task: Optional[asyncio.Task[None]] = None
         self.resource_task: Optional[asyncio.Task[None]] = None
@@ -1224,7 +1226,8 @@ class RunPanel(Static):
                     model_id,
                     datetime.now().strftime("%H:%M:%S"),
                     self.mode,
-                    script_path="",
+                    # for run-mode, script_path carries the model ID so Jobs-tab retries work
+                    script_path=model_id,
                 )
             )
             self.running_task = asyncio.create_task(self._swap_load(model_id))
@@ -1279,12 +1282,14 @@ class RunPanel(Static):
             self.running_started_at = None
             return
         self.set_status(result)
+        self.loaded_model_id = model_id
         await self._load_swap_models()
+        await self._start_swap_resource_loop()
         elapsed_secs = 0.0
         if self.running_started_at is not None:
             elapsed_secs = asyncio.get_running_loop().time() - self.running_started_at
         self.running_started_at = None
-        self.set_runtime_state(f"Current: {model_id} (loaded)", "Resources: managed by llama-swap")
+        self.set_runtime_state(f"Current: {model_id} (loaded)", "Resources: polling...")
         elapsed_str = (
             f"{elapsed_secs:.0f}s"
             if elapsed_secs < _ELAPSED_THRESHOLD_SECS
@@ -1300,7 +1305,26 @@ class RunPanel(Static):
             self.set_status(f"unload failed: {exc}")
             return
         self.set_status(result)
+        if self.loaded_model_id == model_id:
+            self.loaded_model_id = None
+        await self._stop_resource_loop()
         await self._load_swap_models()
+
+    async def _start_swap_resource_loop(self) -> None:
+        await self._stop_resource_loop()
+        pid = await _find_llama_swap_pid()
+        if pid is None:
+            return
+        self.resource_task = asyncio.create_task(self._swap_resource_loop(pid))
+
+    async def _swap_resource_loop(self, swap_pid: int) -> None:
+        while self.loaded_model_id is not None:
+            try:
+                snapshot = await _resource_snapshot_for_ppid(swap_pid)
+                self.query_one("#run_resources", Static).update(snapshot)
+            except Exception:
+                pass
+            await asyncio.sleep(2)
 
     async def run_script_by_path(self, script_path: str, mode: str) -> None:
         """Select a script by full path and run it. Used by Jobs tab retry."""
@@ -1460,11 +1484,13 @@ class RunPanel(Static):
 
     async def stop_script(self) -> None:
         if self.mode == "run":
-            self._sync_selected_from_cursor()
-            if not self.selected_model_id:
-                self.set_status("No model selected")
+            target = self.loaded_model_id
+            if not target:
+                self.set_status(
+                    "No model is loaded via llama-swap; nothing to unload"
+                )
                 return
-            await self._swap_unload(self.selected_model_id)
+            await self._swap_unload(target)
             self.running_started_at = None
             self.set_runtime_state("Current: idle", "Resources: unloaded via llama-swap")
             return
@@ -1891,6 +1917,88 @@ def parse_port_from_script(content: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+async def _find_llama_swap_pid() -> Optional[int]:
+    """Return the PID of the llama-swap daemon, or None if not running."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pgrep",
+            "-f",
+            "llama-swap",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await proc.communicate()
+    except Exception:
+        return None
+    for line in out.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if line.isdigit():
+            return int(line)
+    return None
+
+
+async def _resource_snapshot_for_ppid(parent_pid: int) -> str:
+    """ps-scrape CPU+RAM for the llama-swap children (the upstream llama-server procs)."""
+    proc = await asyncio.create_subprocess_exec(
+        "ps",
+        "-o",
+        "pid=,ppid=,pcpu=,rss=",
+        "-ax",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    out, _ = await proc.communicate()
+    pids: List[int] = []
+    cpu_total = 0.0
+    rss_kib_total = 0
+    for row in out.decode("utf-8", errors="replace").splitlines():
+        parts = row.split()
+        if len(parts) < 4:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+            cpu = float(parts[2])
+            rss = int(parts[3])
+        except ValueError:
+            continue
+        if ppid != parent_pid:
+            continue
+        pids.append(pid)
+        cpu_total += cpu
+        rss_kib_total += rss
+
+    gpu_mem_mib: Optional[int] = None
+    if pids and shutil.which("nvidia-smi"):
+        gpu = await asyncio.create_subprocess_exec(
+            "nvidia-smi",
+            "--query-compute-apps=pid,used_memory",
+            "--format=csv,noheader,nounits",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        gpu_out, _ = await gpu.communicate()
+        gpu_mem_mib = 0
+        for row in gpu_out.decode("utf-8", errors="replace").splitlines():
+            parts = [p.strip() for p in row.split(",")]
+            if len(parts) < 2:
+                continue
+            try:
+                pid = int(parts[0])
+                mem = int(parts[1])
+            except ValueError:
+                continue
+            if pid in pids:
+                gpu_mem_mib += mem
+
+    rss_mib = rss_kib_total / 1024.0
+    gpu_text = f"{gpu_mem_mib} MiB" if gpu_mem_mib is not None else "n/a"
+    return (
+        f"Resources: upstreams={len(pids)} cpu={cpu_total:.1f}% "
+        f"ram={rss_mib:.1f} MiB gpu={gpu_text}"
+    )
+
+
 async def detect_llama_port() -> Optional[int]:
     """Probe running llama-server processes for their port via pgrep."""
     try:
@@ -1938,7 +2046,7 @@ class ChatPanel(Static):
             # Status bar
             with Horizontal(classes="row"):
                 yield Static("◉ disconnected", id="chat_status")
-                yield Static("", id="chat_model_label")
+                yield Select([], id="chat_model_select", prompt="model")
                 yield Input(
                     value=str(self.DEFAULT_PORT),
                     placeholder="port",
@@ -1991,34 +2099,49 @@ class ChatPanel(Static):
         except ValueError:
             port = self.DEFAULT_PORT
 
-        model = await self._probe_model(port)
-        if model:
-            self._set_connected(port, model)
+        models = await self._probe_models(port)
+        if models:
+            self._set_connected(port, models)
         else:
             self._set_disconnected()
 
-    async def _probe_model(self, port: int) -> Optional[str]:
+    async def _probe_models(self, port: int) -> List[str]:
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
                 r = await client.get(f"http://localhost:{port}/v1/models")
                 if r.status_code == 200:
                     data = r.json()
-                    models = data.get("data", [])
-                    return models[0].get("id", "unknown") if models else "unknown"
+                    return [
+                        str(m.get("id"))
+                        for m in data.get("data", [])
+                        if isinstance(m, dict) and m.get("id")
+                    ]
         except Exception:
             pass
-        return None
+        return []
 
-    def _set_connected(self, port: int, model: str) -> None:
+    def _set_connected(self, port: int, models: List[str]) -> None:
         self.query_one("#chat_status", Static).update(
             f"[green]◉ localhost:{port}[/green]"
         )
-        self.query_one("#chat_model_label", Static).update(f"[dim]{model}[/dim]")
+        select = self.query_one("#chat_model_select", Select)
+        options = [(m, m) for m in models] if models else []
+        select.set_options(options)
+        if options:
+            current = select.value
+            if not isinstance(current, str) or current not in models:
+                select.value = models[0]
         self.query_one("#chat_port", Input).value = str(port)
 
     def _set_disconnected(self) -> None:
         self.query_one("#chat_status", Static).update("[red]◉ disconnected[/red]")
-        self.query_one("#chat_model_label", Static).update("")
+        self.query_one("#chat_model_select", Select).set_options([])
+
+    def _current_model(self) -> str:
+        value = self.query_one("#chat_model_select", Select).value
+        if isinstance(value, str) and value:
+            return value
+        return "default"
 
     def _current_port(self) -> int:
         try:
@@ -2081,7 +2204,7 @@ class ChatPanel(Static):
             max_tokens = 2048
 
         payload = {
-            "model": "default",
+            "model": self._current_model(),
             "messages": messages,
             "stream": True,
             "temperature": temperature,
@@ -2214,19 +2337,23 @@ class ChatPanel(Static):
         self._log("[dim]Detecting running llama-server…[/dim]")
         port = await detect_llama_port()
         if port:
-            model = await self._probe_model(port)
-            self._set_connected(port, model or "unknown")
-            self._log(f"[green]Detected server on port {port}[/green]")
+            models = await self._probe_models(port)
+            self._set_connected(port, models)
+            self._log(
+                f"[green]Detected server on port {port} — {len(models)} model(s)[/green]"
+            )
         else:
             self._set_disconnected()
             self._log("[yellow]No running llama-server found[/yellow]")
 
     async def do_connect(self) -> None:
         port = self._current_port()
-        model = await self._probe_model(port)
-        if model:
-            self._set_connected(port, model)
-            self._log(f"[green]Connected to localhost:{port} — model: {model}[/green]")
+        models = await self._probe_models(port)
+        if models:
+            self._set_connected(port, models)
+            self._log(
+                f"[green]Connected to localhost:{port} — {len(models)} model(s)[/green]"
+            )
         else:
             self._set_disconnected()
             self._log(f"[red]Could not connect to localhost:{port}[/red]")

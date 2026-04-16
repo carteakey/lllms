@@ -33,12 +33,29 @@ you see "listening on …".
 
 ## Run as a systemd user service
 
+The unit uses `%h` (home) and three env vars so it runs unmodified on any
+account. Defaults:
+
+- `L3MS_ROOT=$HOME/repos/l3ms`
+- `LLAMA_SWAP_BIN=$HOME/bin/llama-swap`
+- `LLAMA_SWAP_LISTEN=:8080`
+
 ```bash
 mkdir -p ~/.config/systemd/user
 cp maintenance/systemd/llama-swap.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now llama-swap.service
 journalctl --user -fu llama-swap
+```
+
+Override any of the defaults with a drop-in (no fork of the unit file):
+
+```bash
+systemctl --user edit llama-swap.service
+# [Service]
+# Environment=L3MS_ROOT=/srv/l3ms
+# Environment=LLAMA_SWAP_BIN=/usr/local/bin/llama-swap
+# Environment=LLAMA_SWAP_LISTEN=:9090
 ```
 
 Stop / restart:

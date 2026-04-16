@@ -34,6 +34,26 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
     (not script paths).
   - `l3ms.py --run`: picks a model from llama-swap and POSTs `/models/load`.
     `l3ms.py --list run`: prints models from `/v1/models`.
+- **Polish pass on the migration**:
+  - Fix `--fit-ctx 32678` → `32768` typo in `gpt-oss-120b-legacy` and
+    `gpt-oss-120b-low` (copied verbatim from the original shell scripts).
+  - Switch `ik-qwen3-5-122b-thinking-coding` to `${ik_server}` (the original
+    ik- shell script used the vanilla binary — required the ik fork for
+    `-merge-qkv`).
+  - `llama-swap.service` now uses `%h` + env vars (`L3MS_ROOT`,
+    `LLAMA_SWAP_BIN`, `LLAMA_SWAP_LISTEN`) so the unit runs unmodified on any
+    account; documented drop-in override flow in the runbook.
+  - RunPanel in run mode now tracks `loaded_model_id` separately from the
+    cursor; Ctrl+S unloads the model that's actually loaded, not whatever
+    row the user last clicked. Friendly message when nothing is loaded.
+  - Run-mode live resource telemetry restored: `_find_llama_swap_pid` +
+    `ps --ppid` aggregate CPU/RAM of llama-swap upstream processes, polled
+    every 2s. `nvidia-smi` still feeds the GPU column when available.
+  - ChatPanel: replaced the read-only model label with a `Select` populated
+    from `/v1/models` on connect/detect; requests use the selected model ID
+    instead of the hard-coded `"default"` string (which llama-swap rejects).
+  - Jobs-tab retry for run mode now carries the model ID through
+    `JobStarted.script_path` so "retry" reloads the right model.
 - **`gemma-vision.service` retired**:
   - Unit moved to `maintenance/systemd/archive/gemma-vision.service`.
   - Installer helper moved to
