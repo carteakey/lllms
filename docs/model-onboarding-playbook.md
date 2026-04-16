@@ -33,23 +33,31 @@ Edit `model_downloader/models_config.json` and add a **disabled-by-default** ent
 
 Keep defaults non-destructive (`force_download: false`).
 
-## 3) Add run script
+## 3) Add a `llama-swap.yaml` entry
 
-Create:
+Append a model entry under `models:` in the root `llama-swap.yaml`.
+Conventions:
+
+- unique key (e.g. `"<model-family>"`); use `unlisted: true` for variants
+  kept around for regression comparison
+- reuse the existing macros (`${llama_server}`, `${ik_server}`,
+  `${chat_template}`, `${cpu_range}`) — do not hardcode paths
+- `cmd:` must pass `--port ${PORT} --host 0.0.0.0` (llama-swap auto-assigns
+  the upstream port; its listener stays on `:8080`)
+- put `LLAMA_SET_ROWS` / `GGML_CUDA_GRAPH_OPT` in `env:` per model
+- safe serving defaults (`--fit` or static `-ngl`+`-ot`, `--parallel 1`,
+  `-ctk/-ctv q8_0`, `--flash-attn on`)
+- add reasoning-effort variants with `filters.setParamsByID` (aliases like
+  `<model>:high` / `:low` are auto-generated)
+
+Restart llama-swap and verify:
 
 ```bash
-run-models/run-llama-cpp-<model>.sh
+systemctl --user restart llama-swap.service
+curl -s http://localhost:8080/v1/models | jq '.data[].id'
 ```
 
-Follow existing conventions:
-
-- `set -euo pipefail`
-- `LLAMA_SERVER`, `MODEL`, `CPU_RANGE` env overrides
-- executable/file checks before launch
-- optional `taskset -c` wrapping
-- safe serving defaults (`--fit`, `--fit-ctx`, `--fit-target`, `--parallel 1`, `-ctk/-ctv q8_0`)
-
-The script will auto-appear in `l3ms.py --run` if naming matches `run-llama-cpp-*.sh`.
+See `docs/llama-swap-runbook.md` for the full invocation / curl patterns.
 
 ## 4) Add bench scripts
 
@@ -95,12 +103,16 @@ Add entries under `CHANGELOG.md` → `## [Unreleased]` → `### Added` listing:
 Run:
 
 ```bash
-python3 l3ms.py --list run
 python3 l3ms.py --list bench
-bash -n run-models/run-llama-cpp-<model>.sh
 bash -n bench-models/bench-llama-cpp-<model>.sh
 bash -n bench-models/bench-llama-cpp-<model>-strategies.sh
 bash -n bench-models/bench-llama-cpp-<model>-fit.sh
+
+# llama-swap dry-load + model ID check
+L3MS_ROOT=$(pwd) ~/bin/llama-swap -config ./llama-swap.yaml -watch &
+sleep 2
+curl -s http://localhost:8080/v1/models | jq '.data[] | select(.id | contains("<model>"))'
+kill %1
 ```
 
 ## 8) Trigger model download
@@ -118,12 +130,13 @@ Use targeted download (preferred over enabling all config rows):
 ## Worked example: gpt-oss-puzzle-88B
 
 - Build wrapper: `maintenance/build-gpt-oss-puzzle-llama-cpp.sh` (PR `#21032`)
-- Run script: `run-models/run-llama-cpp-gpt-oss-puzzle-88b.sh`
+- llama-swap entry: `gpt-oss-puzzle-88b` in `llama-swap.yaml` (uses `${puzzle_server}` macro)
 - Bench scripts:
   - `bench-models/bench-llama-cpp-gpt-oss-puzzle-88b.sh`
   - `bench-models/bench-llama-cpp-gpt-oss-puzzle-88b-strategies.sh`
   - `bench-models/bench-llama-cpp-gpt-oss-puzzle-88b-fit.sh`
 - Downloader profile: `SamPurkis/gpt-oss-puzzle-88B-GGUF` with `*MXFP4_MOE*`
+- Client call: `curl http://localhost:8080/v1/chat/completions -d '{"model":"gpt-oss-puzzle-88b", ...}'`
 - Targeted download:
 
 ```bash

@@ -30,3 +30,6 @@ cuda-keyring_1.1-1_all.deb
 # Local secrets
 .env
 vendor-forks
+
+# macOS
+.DS_Store

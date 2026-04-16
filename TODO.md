@@ -9,6 +9,19 @@
 
 ## 🟡 High Priority
 
+- **TUI: teach Model Ops about llama-swap**: after the `run-models/` deletion
+  the "Run" list is empty. Either (a) repoint `app.py:59-60` globs to parse
+  `llama-swap.yaml` as the serving inventory (list model IDs, wire "run" to
+  a `POST /models/load` call), or (b) drop the Run/Bench toggle and keep
+  Bench-only
+- **Chat tab default port**: was `8001`, should default to llama-swap's
+  `8080`. Small change in the Chat base-URL field / Settings
+- **Fix `gemma-vision.service`**: still points at the deleted
+  `run-models/run-llama-cpp-gemma-4-26b-a4b-vision.sh`; either retire the
+  unit (llama-swap covers it) or repoint ExecStart at `llama-swap.service`
+- **Bench-vs-serve flag drift**: bench scripts carry their own copies of
+  `-ngl` / `--override-tensor`. Consider a later pass where bench scripts
+  source shared args from `llama-swap.yaml` (yq) so tuning stays in sync
 - **Benchmark result browser**: UI to view and compare results from
   `bench-results/`; parse timing/throughput from existing `.md` files and
   display in a sortable table — closes the run → bench → compare workflow loop

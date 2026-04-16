@@ -6,6 +6,25 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+### Changed
+- **Serving architecture switched to llama-swap**:
+  - New `llama-swap.yaml` is the single source of truth for every servable
+    model (28 previous `run-models/*.sh` scripts collapsed into YAML entries
+    + aliases + reasoning-effort variants).
+  - New `maintenance/systemd/llama-swap.service` user-level unit runs
+    `llama-swap -config llama-swap.yaml -listen :8080`.
+  - New `docs/llama-swap-runbook.md` covers install, start/stop, curl,
+    and how to add a model.
+  - **Breaking**: `run-models/` directory removed. Clients previously hitting
+    per-model ports (mostly `:8001`) now hit the single `:8080` endpoint and
+    pass the model ID in the OpenAI `model` field. Update the TUI Chat tab's
+    base URL to `http://<host>:8080/v1`.
+  - **Breaking**: `maintenance/systemd/gemma-vision.service` still references
+    the deleted `run-models/run-llama-cpp-gemma-4-26b-a4b-vision.sh`. Switch
+    that unit to the new `llama-swap.service` (or disable it).
+  - TUI Model Ops "Run" list is empty after this change (the glob returns no
+    files). Bench list is unchanged. See TODO.md for the planned follow-up.
+
 ### Added
 - **Gemma-4-26B-A4B workflow support**:
   - `run-models/run-llama-cpp-gemma-4-26b-a4b.sh` run script targeting mainline `vendor/llama.cpp/build/bin/llama-server`

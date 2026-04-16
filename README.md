@@ -115,13 +115,21 @@ Model Browser (active only on Model Browser tab):
 ## Project Layout
 
 - `model_downloader/`: Hugging Face downloader + model config
-- `run-models/`: one `run-llama-cpp-*.sh` script per model
+- `llama-swap.yaml`: single source of truth for servable models (see `docs/llama-swap-runbook.md`)
 - `bench-models/`: one `bench-llama-cpp-*.sh` script per model
 - `maintenance/`: system/build scripts
-- `maintenance/systemd/`: user service units (optional startup services)
+- `maintenance/systemd/`: user service units (including `llama-swap.service`)
 - `l3ms/`: TUI app + stores
 - `l3ms.py`: launcher (TUI and CLI modes)
+- `docs/llama-swap-runbook.md`: install, start/stop, curl, add-a-model
 - `docs/model-onboarding-playbook.md`: end-to-end checklist for adding new model families
+
+## Serving
+
+Models are served by [llama-swap](https://github.com/mostlygeek/llama-swap) on
+a single OpenAI-compatible endpoint (`http://<host>:8080`). The daemon
+hot-swaps models on demand and exposes every entry in `llama-swap.yaml`
+under `/v1/models`. See `docs/llama-swap-runbook.md`.
 
 ## Downloader CLI (direct)
 

@@ -1,0 +1,674 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/mostlygeek/llama-swap/refs/heads/main/config-schema.json
+#
+# L3MS llama-swap configuration
+# -----------------------------
+# Single source of truth for serving. Replaces run-models/*.sh.
+# See configuration.md (in-repo) for schema reference.
+#
+# ${env.L3MS_ROOT} must point at the repo root on the serving host
+# (e.g. /home/kchauhan/repos/l3ms on the Linux box). llama-swap evaluates
+# env macros before config load; startup fails loudly if it is unset.
+
+healthCheckTimeout: 500
+logLevel: info
+logToStdout: both
+
+# upstream ${PORT} auto-increments from here; llama-swap itself listens on 8080
+startPort: 10001
+
+# globalTTL: auto-unload idle models after 10 minutes to free VRAM. Override
+# per-model with ttl: 0 to pin.
+globalTTL: 600
+
+sendLoadingState: true
+
+macros:
+  # --- binary paths ---
+  "llama_server":  "${env.L3MS_ROOT}/vendor/llama.cpp/build/bin/llama-server"
+  "ik_server":     "${env.L3MS_ROOT}/vendor/ik_llama.cpp/build/bin/llama-server"
+  "puzzle_server": "${env.L3MS_ROOT}/vendor/llama.cpp-pr-test-21032/build/bin/llama-server"
+  "sarvam_server": "${env.L3MS_ROOT}/vendor/llama.cpp-pr-test-20275/build/bin/llama-server"
+
+  # --- shared paths ---
+  "chat_template": "${env.L3MS_ROOT}/chat-template.jinja"
+
+  # --- taskset wrapper (empty if CPU_RANGE unset) ---
+  "cpu_range": "0-11"
+
+models:
+
+  # ===========================================================================
+  # gpt-oss family
+  # ===========================================================================
+
+  "gpt-oss-120b":
+    name: "gpt-oss 120B (optimized, bench-derived static placement, reasoning=high)"
+    description: "Production default. pp=427 tg=23.4 t/s. See docs/bench-runbook.md §8."
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf
+      --alias ggml-org/gpt-oss-120b
+      # bench-derived static split: blk 0-4 on GPU, blk 5+ experts on CPU
+      -ngl 37
+      --override-tensor "blk\.(5|[6-9]|[0-9][0-9]|[0-9][0-9][0-9])\.ffn_(up|down|gate)_(ch|)exps=CPU"
+      --no-mmap
+      -ctk q8_0 -ctv q8_0
+      --ctx-size 32768 --parallel 1
+      --flash-attn on
+      --batch-size 2048 --ubatch-size 512
+      --threads 10 --threads-batch 12
+      --temp 1.0 --min-p 0.0 --top-p 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --no-warmup --jinja --reasoning-format none
+      --chat-template-file ${chat_template}
+    filters:
+      setParamsByID:
+        "${MODEL_ID}":      { chat_template_kwargs: { reasoning_effort: high } }
+        "${MODEL_ID}:high": { chat_template_kwargs: { reasoning_effort: high } }
+        "${MODEL_ID}:med":  { chat_template_kwargs: { reasoning_effort: medium } }
+        "${MODEL_ID}:low":  { chat_template_kwargs: { reasoning_effort: low } }
+
+  "gpt-oss-120b-legacy":
+    name: "gpt-oss 120B (legacy, --fit auto-placement)"
+    description: "Pre-optimized variant using --fit. Keep for regression comparison."
+    unlisted: true
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf
+      --alias ggml-org/gpt-oss-120b
+      --fit on --fit-ctx 32678 --fit-target 512
+      --no-mmap
+      -ctk q8_0 -ctv q8_0
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 2048 --ubatch-size 512
+      --prio 2 --no-warmup
+      --temp 1.0 --min-p 0.0 --top-p 1.0
+      --jinja --reasoning-format none
+      --chat-template-kwargs '{"reasoning_effort":"high"}'
+      --chat-template-file ${chat_template}
+      --host 0.0.0.0 --port ${PORT}
+
+  "gpt-oss-120b-low":
+    name: "gpt-oss 120B (legacy --fit, reasoning=low)"
+    description: "Lower-latency variant. Preserved from run-llama-cpp-gpt-oss-low-120b.sh."
+    unlisted: true
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf
+      --alias ggml-org/gpt-oss-120b
+      --fit on --fit-ctx 32678 --fit-target 512
+      --no-mmap
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 2048 --ubatch-size 512 --prio 2 --no-warmup
+      --temp 1.0 --top-k 100 --min-p 0.0 --top-p 1.0
+      --jinja --reasoning-format none
+      --chat-template-kwargs '{"reasoning_effort":"low"}'
+      --chat-template-file ${chat_template}
+      --host 0.0.0.0 --port ${PORT}
+
+  "gpt-oss-20b":
+    name: "gpt-oss 20B"
+    env:
+      - "LLAMA_SET_ROWS=1"
+    cmd: |
+      ${llama_server}
+      -m /mnt/lab/models/ggml-org/gpt-oss-20b-GGUF/gpt-oss-20b-mxfp4.gguf
+      --n-cpu-moe 4 --ctx-size 32000 --n-gpu-layers 99
+      --temp 1.0 --min-p 0.0 --top-p 1.0 --top-k 20
+      --flash-attn --jinja --reasoning-format none
+      --chat-template-file ${chat_template}
+      --chat-template-kwargs '{"reasoning_effort": "high"}'
+      --host 0.0.0.0 --port ${PORT}
+
+  "gpt-oss-puzzle-88b":
+    name: "gpt-oss-puzzle 88B (optimized, bench-derived static placement)"
+    description: "pp=549 tg=27.0 t/s. Requires the PR-21032 llama.cpp build."
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${puzzle_server}
+      -m /home/kchauhan/models/SamPurkis/gpt-oss-puzzle-88B-GGUF/gpt-oss-puzzle-88B.MXFP4_MOE.gguf
+      --alias SamPurkis/gpt-oss-puzzle-88B
+      -ngl 37
+      --override-tensor "blk\.4\.ffn_down.*=CPU,blk\.(5|[6-9]|[0-9][0-9]|[0-9][0-9][0-9])\.ffn_(up|down|gate_up|gate)_(ch|)exps=CPU"
+      --no-mmap
+      -ctk q8_0 -ctv q8_0
+      --ctx-size 32768 --parallel 1
+      --flash-attn on
+      --batch-size 2048 --ubatch-size 512
+      --threads 10 --threads-batch 12
+      --prio 2 --no-warmup
+      --temp 1.0 --min-p 0.0 --top-p 1.0
+      --jinja --reasoning-format none
+      --chat-template-kwargs '{"reasoning_effort":"high"}'
+      --chat-template-file ${chat_template}
+      --host 0.0.0.0 --port ${PORT}
+
+  "gpt-oss-puzzle-88b-legacy":
+    name: "gpt-oss-puzzle 88B (legacy --fit)"
+    description: "Pre-optimized variant using --fit. Keep for regression comparison."
+    unlisted: true
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${puzzle_server}
+      -m /home/kchauhan/models/SamPurkis/gpt-oss-puzzle-88B-GGUF/gpt-oss-puzzle-88B.MXFP4_MOE.gguf
+      --alias SamPurkis/gpt-oss-puzzle-88B
+      --fit on --fit-ctx 65536 --fit-target 512
+      --no-mmap
+      -ctk q8_0 -ctv q8_0
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 2048 --ubatch-size 512 --parallel 1
+      --prio 2 --no-warmup
+      --temp 1.0 --min-p 0.0 --top-p 1.0 --jinja
+      --host 0.0.0.0 --port ${PORT}
+
+  # ===========================================================================
+  # Qwen3 Coder Next (80B.A3B)
+  # ===========================================================================
+
+  "qwen3-coder-next":
+    name: "Qwen3-Coder-Next 80B.A3B (optimized, bench-derived static placement)"
+    description: "Default coder. pp=502 tg=39.6 t/s @ 64k ctx. See bench-runbook.md §8."
+    env:
+      - "LLAMA_SET_ROWS=1"
+      # GRAPH_OPT=0: CUDA graph re-capture can OOM with tight VRAM headroom
+      - "GGML_CUDA_GRAPH_OPT=0"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Qwen3-Coder-Next-GGUF/Qwen3-Coder-Next-UD-Q4_K_XL.gguf
+      --alias unsloth/Qwen3-Coder-Next
+      # bench-derived (FIT_CTX=65536 + q8_0 KV + 512 MiB margin)
+      -ngl 49
+      --override-tensor "blk\.7\.ffn_down.*=CPU,blk\.([89]|[1-9][0-9])\.ffn_(up|down|gate)_(ch|)exps=CPU"
+      --no-mmap --mlock
+      -ctk q8_0 -ctv q8_0
+      --ctx-size 65536 --parallel 1
+      --threads 10 --threads-batch 12
+      --flash-attn on
+      --batch-size 2048 --ubatch-size 512
+      --seed 3407
+      --temp 1.0 --top-p 0.95 --min-p 0.01 --top-k 40 --repeat-penalty 1
+      --host 0.0.0.0 --port ${PORT}
+      --jinja --prio 2 --no-warmup
+
+  "qwen3-coder-next-legacy":
+    name: "Qwen3-Coder-Next 80B.A3B (legacy --fit, 131k ctx)"
+    description: "Pre-optimized variant using --fit @ 131k. Keep for long-context use."
+    unlisted: true
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Qwen3-Coder-Next-GGUF/Qwen3-Coder-Next-UD-Q4_K_XL.gguf
+      --alias unsloth/Qwen3-Coder-Next
+      --seed 3407
+      --temp 1.0 --top-p 0.95 --min-p 0.01 --top-k 40
+      --jinja
+      -ctk q8_0 -ctv q8_0
+      --ctx-size 131072
+      --fit on --fit-ctx 131072 --fit-target 128
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12 --flash-attn on
+      --prio 2 --no-warmup --repeat-penalty 1
+      --host 0.0.0.0 --port ${PORT}
+
+  "qwen3-coder-next-ik":
+    name: "Qwen3-Coder-Next 80B.A3B (ik_llama.cpp)"
+    description: "ik_llama fork binary, --n-cpu-moe 38 @ 131k. Preserved from run-llama-cpp-qwen3-coder-next-test.sh."
+    unlisted: true
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${ik_server}
+      -m /mnt/lab/models/unsloth/Qwen3-Coder-Next-GGUF/Qwen3-Coder-Next-UD-Q4_K_XL.gguf
+      --alias unsloth/Qwen3-Coder-Next
+      --seed 3407
+      --temp 1.0 --top-p 0.95 --min-p 0.01 --top-k 40
+      --jinja
+      -ctk q8_0 -ctv q8_0
+      --ctx-size 131072
+      --n-cpu-moe 38
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12 --flash-attn on --no-warmup
+      --host 0.0.0.0 --port ${PORT}
+
+  # ===========================================================================
+  # Qwen3 30B / 35B
+  # ===========================================================================
+
+  "qwen3-30b-a3b":
+    name: "Qwen3-30B-A3B-Instruct-2507 (Q8_0)"
+    cmd: |
+      ${llama_server}
+      -m /mnt/lab/models/qwen/Qwen3-30B-A3B-Instruct-2507-GGUF/Qwen3-30B-A3B-Instruct-2507-Q8_0.gguf
+      --host 127.0.0.1 --port ${PORT}
+      --n-gpu-layers 99
+      --flash-attn --slots --metrics
+      --ubatch-size 512 --batch-size 512
+      --presence-penalty 1.5
+      --cache-type-k q8_0 --cache-type-v q8_0
+      --no-context-shift
+      --ctx-size 32768 --n-predict 32768
+      --temp 0.6 --top-k 20 --top-p 0.95 --min-p 0 --repeat-penalty 1.1
+      --jinja --reasoning-format deepseek
+      --threads 5 --threads-http 5
+      --cache-reuse 256
+      --override-tensor 'blk\.([0-9]*[02468])\.ffn_.*_exps\.=CPU'
+      --no-mmap
+
+  "qwen3-5-35b-a3b":
+    name: "Qwen3.5-35B-A3B (UD-Q4_K_L)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Qwen3.5-35B-A3B-GGUF/Qwen3.5-35B-A3B-UD-Q4_K_L.gguf
+      --alias "unsloth/Qwen3.5-35B-A3B (UD-Q4_K_L)"
+      --seed 3407
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
+      --presence-penalty 1.5 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 65536
+      --fit on --fit-ctx 65536 --fit-target 128
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12
+      --flash-attn on
+      --batch-size 1024 --ubatch-size 512
+      --prio 2
+
+  "ik-qwen3-5-35b-a3b":
+    name: "Qwen3.5-35B-A3B ik_llama.cpp (UD-Q4_K_L)"
+    description: "ik_llama fork binary, --n-cpu-moe 18."
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${ik_server}
+      -m /mnt/lab/models/unsloth/Qwen3.5-35B-A3B-GGUF/Qwen3.5-35B-A3B-UD-Q4_K_L.gguf
+      --alias "unsloth/Qwen3.5-35B-A3B (UD-Q4_K_L)"
+      --seed 3407
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
+      --presence-penalty 1.5 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 65536
+      --n-cpu-moe 18
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12
+      --flash-attn on
+
+  # ===========================================================================
+  # Qwen3.5 122B-A10B (4 preset variants)
+  # ===========================================================================
+
+  "qwen3-5-122b-instruct-general":
+    name: "Qwen3.5-122B-A10B (instruct-general)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF/UD-Q4_K_XL/Qwen3.5-122B-A10B-UD-Q4_K_XL-00001-of-00003.gguf
+      --alias "unsloth/Qwen3.5-122B-A10B (instruct-general)"
+      --seed 3407
+      --temp 0.7 --top-p 0.8 --top-k 20 --min-p 0.0
+      --presence-penalty 1.5 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 65536
+      --fit on --fit-ctx 65536 --fit-target 128
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 1024 --ubatch-size 512
+      --prio 2
+
+  "qwen3-5-122b-instruct-reasoning":
+    name: "Qwen3.5-122B-A10B (instruct-reasoning)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF/UD-Q4_K_XL/Qwen3.5-122B-A10B-UD-Q4_K_XL-00001-of-00003.gguf
+      --alias "unsloth/Qwen3.5-122B-A10B (instruct-reasoning)"
+      --seed 3407
+      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0
+      --presence-penalty 1.5 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 65536
+      --fit on --fit-ctx 65536 --fit-target 128
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 1024 --ubatch-size 512
+      --prio 2
+
+  "qwen3-5-122b-thinking-coding":
+    name: "Qwen3.5-122B-A10B (thinking-coding, IQ4_XS, static -ot)"
+    description: "pp=284 tg=9.8 t/s @ 512pp+128tg. Compute-bound on 10B active/tok."
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF/UD-IQ4_XS/Qwen3.5-122B-A10B-UD-IQ4_XS-00001-of-00003.gguf
+      --alias "unsloth/Qwen3.5-122B-A10B-thinking-coding"
+      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      -ctk q8_0 -ctv q8_0
+      --flash-attn on
+      --ctx-size 65536
+      --no-mmap
+      # routed experts blk 3-47 + shared via (ch|) to CPU. Dropping shared OOMs.
+      --override-tensor "blk\.(3|[4-9]|[0-9][0-9]|[0-9][0-9][0-9])\.ffn_(up|down|gate)_(ch|)exps=CPU"
+      --threads 10 --threads-batch 12
+
+  "qwen3-5-122b-thinking-general":
+    name: "Qwen3.5-122B-A10B (thinking-general)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF/UD-Q4_K_XL/Qwen3.5-122B-A10B-UD-Q4_K_XL-00001-of-00003.gguf
+      --alias "unsloth/Qwen3.5-122B-A10B (thinking-general)"
+      --seed 3407
+      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0
+      --presence-penalty 1.5 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 65536
+      --fit on --fit-ctx 65536 --fit-target 128
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 1024 --ubatch-size 512
+      --prio 2
+
+  "ik-qwen3-5-122b-thinking-coding":
+    name: "Qwen3.5-122B-A10B thinking-coding (ik_llama build invocation)"
+    description: "Preserves the -merge-qkv flag from run-ik-llama-cpp-qwen3-5-122b-a10b-thinking-coding.sh. Note: original script used the vanilla llama.cpp binary despite the ik- prefix; preserved as-is."
+    unlisted: true
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF/UD-IQ4_XS/Qwen3.5-122B-A10B-UD-IQ4_XS-00001-of-00003.gguf
+      --alias "unsloth/Qwen3.5-122B-A10B-thinking-coding"
+      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0
+      --host 0.0.0.0 --port ${PORT}
+      -merge-qkv
+      --jinja
+      -ctk q8_0 -ctv q8_0
+      --flash-attn on
+      --ctx-size 65536 --no-mmap
+      --threads 10 --threads-batch 12
+
+  # ===========================================================================
+  # Mistral Small 4 119B (5 variants)
+  # ===========================================================================
+
+  "mistral-small-4-119b":
+    name: "Mistral-Small-4-119B-2603 (standard, --fit)"
+    description: "Baseline validation preset. Use -optimized for throughput."
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
+      --alias "unsloth/Mistral-Small-4-119B-2603 (standard)"
+      --seed 3407
+      --temp 0.15 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 32768
+      --fit on --fit-ctx 32768 --fit-target 512
+      --no-mmap
+      --threads 10 --threads-batch 12 --flash-attn on --parallel 1
+      -ctk q8_0 -ctv q8_0
+      --batch-size 2048 --ubatch-size 512
+      --chat-template-kwargs '{"reasoning_effort":"none"}'
+      --prio 2 --no-warmup
+
+  "mistral-small-4-119b-optimized":
+    name: "Mistral-Small-4-119B-2603 (optimized, static -ot)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
+      --alias "unsloth/Mistral-Small-4-119B-2603 (optimized)"
+      --fit off
+      -ngl 9
+      --override-tensor ".ffn_(up|down)_(ch|)exps=CPU"
+      --seed 3407
+      --temp 0.15 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 32768 --parallel 1
+      -ctk q8_0 -ctv q8_0
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 2048 --ubatch-size 512
+      --prio 2 --no-warmup
+      --mmproj /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/mmproj-F16.gguf
+
+  "mistral-small-4-119b-no-vision":
+    name: "Mistral-Small-4-119B-2603 (optimized, text-only)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
+      --alias "unsloth/Mistral-Small-4-119B-2603 (optimized no-vision)"
+      --fit off
+      -ngl 9
+      --override-tensor ".ffn_(up|down)_(ch|)exps=CPU"
+      --seed 3407
+      --temp 0.15 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 32768 --parallel 1
+      -ctk q8_0 -ctv q8_0
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 2048 --ubatch-size 512
+      --prio 2 --no-warmup
+
+  "mistral-small-4-119b-no-vision-thinking":
+    name: "Mistral-Small-4-119B-2603 (optimized, text-only, reasoning=high)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
+      --alias "unsloth/Mistral-Small-4-119B-2603 (optimized no-vision)"
+      --fit off
+      -ngl 9
+      --override-tensor ".ffn_(up|down)_(ch|)exps=CPU"
+      --seed 3407
+      --temp 0.7 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 65536 --parallel 1
+      --no-mmap --mlock
+      --flash-attn on
+      -ctv q8_0 -ctk q8_0
+      --threads 10
+      --chat-template-kwargs '{"reasoning_effort":"high"}'
+      --threads-batch 12
+      --batch-size 2048 --ubatch-size 512
+      --prio 2 --no-warmup
+
+  "mistral-small-4-119b-vision":
+    name: "Mistral-Small-4-119B-2603 (optimized, vision/mmproj)"
+    description: "One fewer GPU layer than non-vision to leave headroom for mmproj path."
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
+      --mmproj /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/mmproj-F16.gguf
+      --alias "unsloth/Mistral-Small-4-119B-2603 (optimized vision)"
+      --fit off
+      -ngl 8
+      --override-tensor ".ffn_(up|down)_(ch|)exps=CPU"
+      --seed 3407
+      --temp 0.15 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 32768 --parallel 1
+      -ctk q8_0 -ctv q8_0
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 2048 --ubatch-size 512
+      --prio 2 --no-warmup
+
+  # ===========================================================================
+  # Nemotron / Gemma / Sarvam
+  # ===========================================================================
+
+  "nemotron-super-120b":
+    name: "NVIDIA-Nemotron-3-Super-120B-A12B (UD-Q3_K_XL)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF/UD-Q3_K_XL/NVIDIA-Nemotron-3-Super-120B-A12B-UD-Q3_K_XL-00001-of-00003.gguf
+      --alias "unsloth/NVIDIA-Nemotron-3-Super-120B-A12B (UD-Q3_K_XL)"
+      --seed 3407
+      --temp 0.6 --top-p 0.95 --top-k 40 --min-p 0.05 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 32768
+      --fit on --fit-ctx 32768 --fit-target 512
+      --no-mmap
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 2048 --ubatch-size 512
+      --prio 2 --no-warmup
+
+  "gemma-4-26b-a4b":
+    name: "gemma-4-26B-A4B-it (UD-Q5_K_XL, text, 131k ctx)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf
+      --alias "unsloth/gemma-4-26B-A4B-it (UD-Q5_K_XL)"
+      --seed 3407
+      --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 131072
+      --fit on --fit-ctx 131072 --fit-target 512
+      --parallel 1
+      -ctk q8_0 -ctv q8_0
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 1024 --ubatch-size 512
+      --prio 2 --no-warmup
+
+  "gemma-4-26b-a4b-vision":
+    name: "gemma-4-26B-A4B-it (UD-Q5_K_XL, vision/mmproj, 128k ctx)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      # GRAPH_OPT=0 matches the vision preset's env override
+      - "GGML_CUDA_GRAPH_OPT=0"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf
+      --mmproj /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF/mmproj-BF16.gguf
+      --alias "unsloth/gemma-4-26B-A4B-it (UD-Q5_K_XL)"
+      --seed 3407
+      --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 128000
+      --fit on --fit-ctx 128000 --fit-target 2048
+      --parallel 1
+      -ctk q8_0 -ctv q8_0
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 512 --ubatch-size 512
+      --prio 2 --no-warmup
+
+  "sarvam-30b":
+    name: "sarvam-30B (Q6_K)"
+    description: "Requires the PR-20275 llama.cpp build (./maintenance/build-sarvam-llama-cpp.sh)."
+    cmd: |
+      ${sarvam_server}
+      --host 0.0.0.0 --port ${PORT}
+      --model /mnt/lab/models/Sumitc13/sarvam-30b-GGUF/sarvam-30B-Q6_K.gguf
+      --ctx-size 4096
+      --n-gpu-layers 99
+      --fit on --fit-target 512 --fit-ctx 4096
+      --n-predict 512
+      --batch-size 2048 --ubatch-size 512
+      --threads 10 --threads-batch 12
+      --temp 1.0 --top-p 1.0 --top-k 20 --min-p 0.0 --repeat-penalty 1.0
+      --flash-attn on
+      --jinja --no-mmap --mlock --prio 2
+
+  # ===========================================================================
+  # Low-resource / test
+  # ===========================================================================
+
+  "qwen3-cpu-only":
+    name: "Qwen3-30B-A3B (CPU-only, pulled via -hf)"
+    description: "No GPU layers. Uses -hf to pull unsloth/Qwen3-30B-A3B-GGUF:q4_k_m."
+    cmd: |
+      ${llama_server}
+      -hf unsloth/Qwen3-30B-A3B-GGUF:q4_k_m
+      --n-gpu-layers 0
+      --jinja --reasoning-format deepseek
+      --flash-attn
+      -sm row
+      --temp 0.6 --top-k 20 --top-p 0.95 --min-p 0
+      --ctx-size 40960 --n-predict 32768
+      --no-context-shift
+      --port ${PORT} --host 0.0.0.0
+      --metrics
+      --alias "Qwen3-30B (CPU Only)"
+
+  "llama-cpp-test":
+    name: "dev/test harness (Qwen3.5-122B MXFP4)"
+    description: "Minimal smoke-test invocation. Not for production."
+    unlisted: true
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF/MXFP4_MOE/Qwen3.5-122B-A10B-MXFP4_MOE-00001-of-00003.gguf
+      --alias "unsloth/Qwen3.5-122B-A10B-thinking-coding"
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      -ctk q8_0 -ctv q8_0
+      --flash-attn on
+      --ctx-size 65536
+      --fit on --fit-ctx 65536 --fit-target 512
+      --no-mmap
+      --threads 10
+
+# ===========================================================================
+# Startup: preload the production default so the first request is instant.
+# ===========================================================================
+hooks:
+  on_startup:
+    preload:
+      - "gpt-oss-120b"
