@@ -7,6 +7,12 @@
 # Ignore log files
 /*.log
 
+# Bench raw logs — gitignored (large, redundant; structured results go in bench-models/results/)
+bench-models/logs/
+# Keep the results dir itself tracked (JSONL records are small and valuable)
+!bench-models/results/
+!bench-models/results/.gitkeep
+
 # Ignore IDE and editor-specific files
 .idea/
 .vscode/

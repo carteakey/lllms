@@ -1,51 +1,110 @@
 # /add-bench-result
 
 Record benchmark results into `docs/bench-runbook.md` §8 and update CHANGELOG.md.
-Read existing results tables before writing to maintain consistent formatting.
+Results are now **also** stored as structured JSONL in `bench-models/results/<model-key>.jsonl`.
+The JSONL file is written automatically by the runner scripts — this skill handles the human-readable runbook update.
 
 ## Usage
 
 ```
-/add-bench-result <model-key> [--log <log-file>]
+/add-bench-result <model-key> [--log <log-file>] [--from-jsonl]
 ```
 
 **Arguments:**
 - `<model-key>` — model slug matching the bench script suffix (e.g. `qwen3-6-35b-a3b`)
 - `--log <log-file>` — specific log file from `bench-models/logs/` to parse (default: most recent)
+- `--from-jsonl` — read from `bench-models/results/<model-key>.jsonl` instead of raw logs
+
+## JSONL result file
+
+Every bench run now **automatically** writes a JSONL record to `bench-models/results/<model-key>.jsonl`.
+These files are git-tracked and contain all the structured data you need for the runbook table.
+
+### Record schema
+
+```json
+{
+  "ts":             "2026-04-19T20:00:00Z",
+  "model_key":      "qwen3-6-35b-a3b",
+  "model":          "/mnt/lab/models/unsloth/Qwen3.6-35B-A3B-GGUF/...",
+  "backend":        "llama.cpp",
+  "strategy":       "fit",
+  "ngl":            41,
+  "n_cpu_moe":      null,
+  "override_tensor": "blk.13 down + blk.14-40 ...",
+  "fit_ctx":        65536,
+  "fit_target":     512,
+  "ctx":            "512,128",
+  "ctk":            "q8_0",
+  "ctv":            "q8_0",
+  "threads":        10,
+  "repetitions":    1,
+  "pp_tokens":      512,
+  "pp_ts":          970.77,
+  "pp_std":         3.1,
+  "tg_tokens":      128,
+  "tg_ts":          52.33,
+  "tg_std":         0.2,
+  "git_sha":        "d9f6201",
+  "llama_version":  "b5000",
+  "log_file":       "bench-models/logs/2026-04-19_..._fit.log",
+  "notes":          ""
+}
+```
+
+### Manually log a result from an existing log file
+
+```bash
+MODEL_KEY=qwen3-6-35b-a3b \
+STRATEGY=fit \
+LOG_FILE=bench-models/logs/2026-04-19_..._fit.log \
+  bench-models/log-result.sh
+```
+
+### Query JSONL results
+
+```bash
+# All results for a model, sorted by tg_ts descending
+cat bench-models/results/qwen3-6-35b-a3b.jsonl | \
+  python3 -c "import sys,json; rows=list(map(json.loads,sys.stdin)); \
+  rows.sort(key=lambda r: r.get('tg_ts',0), reverse=True); \
+  [print(f'{r[\"ts\"][:10]}  strategy={r.get(\"strategy\",\"?\"):20}  pp={r.get(\"pp_ts\",\"?\")}  tg={r.get(\"tg_ts\",\"?\")}') for r in rows]"
+
+# Best tg across ALL models
+cat bench-models/results/*.jsonl 2>/dev/null | \
+  python3 -c "import sys,json; rows=list(map(json.loads,sys.stdin)); \
+  rows.sort(key=lambda r: r.get('tg_ts',0), reverse=True); \
+  [print(f'{r[\"model_key\"]:30}  strategy={r.get(\"strategy\",\"?\"):20}  tg={r.get(\"tg_ts\",\"?\")}') for r in rows[:20]]"
+
+# Show pp and tg for a specific strategy
+grep '"strategy": "fit"' bench-models/results/qwen3-6-35b-a3b.jsonl | python3 -c \
+  "import sys,json; [print(json.dumps(json.loads(l), indent=2)) for l in sys.stdin]"
+```
 
 ## Workflow
 
-### Step 1 — Find the bench log
+### Step 1 — Check the JSONL results file
 
 ```bash
-ls -lt bench-models/logs/ | grep <model-key> | head -10
+# See all recorded runs for a model
+cat bench-models/results/<model-key>.jsonl | python3 -m json.tool --no-ensure-ascii | head -80
+
+# Or quick summary
+cat bench-models/results/<model-key>.jsonl | \
+  python3 -c "import sys,json; [print(f'{r[\"ts\"][:10]}  {r.get(\"strategy\",\"?\"):20}  pp={r.get(\"pp_ts\",\"?\")}  tg={r.get(\"tg_ts\",\"?\")}') for r in map(json.loads, sys.stdin)]"
 ```
 
-Read the most recent log file(s) for the model. They are named:
-```
-YYYY-MM-DD_HH-MM-SS_<model-key>.log
-YYYY-MM-DD_HH-MM-SS_<model-key>_fit.log
-YYYY-MM-DD_HH-MM-SS_<model-key>_strategies.log
-```
+### Step 2 — Find the best results
 
-### Step 2 — Extract the key numbers
+From the JSONL, identify the winning strategy per metric:
+- Highest `tg_ts` = best token generation config
+- Highest `pp_ts` = best prompt processing config
 
-From the llama-bench Markdown output table, extract:
-- `pp N` — prompt processing tokens/s (higher is better)
-- `tg N` — token generation tokens/s (higher is better)
-- The configuration used (`-ngl`, `N_CPU_MOE`, `STRATEGY`, `CACHE_TYPE_K`, etc.)
-
-Example bench output format:
-```
-| model | size | params | backend | ngl | threads | n_kv | fmoe | test | t/s |
-|-------|------|--------|---------|-----|---------|------|------|------|-----|
-| ...   | ...  | ...    | CUDA    | 49  | 10      | ...  | 0    | pp 512 | 502.34 ± 3.1 |
-| ...   | ...  | ...    | CUDA    | 49  | 10      | ...  | 0    | tg 128 | 39.62 ± 0.2  |
-```
+Note the associated `ngl`, `override_tensor`, `ctk`/`ctv`, `fit_ctx`, `fit_target` for the runbook.
 
 ### Step 3 — Read existing §8 section for the model
 
-Read `docs/bench-runbook.md` to find the existing section. If none exists, create it.
+Read `docs/bench-runbook.md` to find any existing section. If none exists, create it.
 
 ### Step 4 — Update bench-runbook.md §8
 
@@ -55,14 +114,14 @@ Read `docs/bench-runbook.md` to find the existing section. If none exists, creat
 ### <Display Name> <Quant> — <GPU> / <CPU> / <RAM>
 
 **Architecture:** <N> blocks, <N> experts per MoE layer, <N> active/token, <size> on disk.
-<Key architecture notes: shared experts? DeltaNet? No shared expert tensors?>
+<Key architecture notes: shared experts? DeltaNet? Non-standard naming?>
 
-**Results (<pp_ctx>pp + <tg_ctx>tg, <threads> threads, FA=<fa>, no-mmap, q8_0 KV, <reps> repetitions):**
+**Results (<pp_tokens>pp + <tg_tokens>tg, <threads> threads, FA=1, no-mmap, <ctk> KV):**
 
 | Strategy | ngl | flags | pp (t/s) | tg (t/s) | Notes |
 |----------|-----|-------|----------|----------|-------|
 | baseline / `all-cpu-moe` | 99 | ... | <pp> | <tg> | safe baseline |
-| **fit-params auto** | **<ngl>** | `blk.<N> + blk.<N+1>-<N_last>` | **<pp>** | **<tg>** | **winner** |
+| **fit-params auto** | **<ngl>** | `...` | **<pp>** | **<tg>** | **winner** |
 
 **Winner:** <which strategy> — <brief reason>
 
@@ -71,7 +130,7 @@ Read `docs/bench-runbook.md` to find the existing section. If none exists, creat
 | Setting | Value | Reason |
 |---------|-------|--------|
 | `-ngl` | <value> | fit-params derived for <ctx> ctx + q8_0 + <target> MiB margin |
-| `--override-tensor` | `<ot-pattern>` | Static; <MiB> MiB margin |
+| `--override-tensor` | `<ot-pattern>` | Static placement |
 | `-ctk / -ctv` | `q8_0` | KV at <ctx> ≈ <size> GB |
 | `--ctx-size` | <ctx> | <reason> |
 | `GGML_CUDA_GRAPH_OPT` | <0 or 1> | <reason> |
@@ -87,25 +146,15 @@ Read `docs/bench-runbook.md` to find the existing section. If none exists, creat
 ### Step 5 — Update CHANGELOG.md
 
 Under `## [Unreleased]` → `### Added` or `### Changed`:
-
 ```markdown
-- `docs/bench-runbook.md`: §8 results for <model-key> — best pp=<pp>, tg=<tg> t/s
+- `bench-models/results/<model-key>.jsonl`: bench results record (pp=<pp>, tg=<tg> t/s)
+- `docs/bench-runbook.md`: §8 results for <model-key>
 ```
-
-### Guidelines for recording results
-
-- **Bold the winner row** in the results table
-- Include the bench context (`512pp + 128tg` unless different) in the section header
-- Note KV cache type used during bench (f16 or q8_0) — it matters for VRAM headroom
-- For MoE models, note whether `N_CPU_MOE` or `-ot` regex path was used
-- Clearly separate bench tg (short context) from server tg (real serving context) with a note like:
-  > These numbers use bench-only 512-token context. Server tg at 64k ctx with q8_0 KV will differ.
-- If there is a model-specific gotcha (shared experts, `gate_up` naming, unstable integer path), document it prominently
 
 ### Gotcha checklist to document
 
-- [ ] Shared experts: does this model have `_shexp` tensors? (Qwen3.5-122B does; use `(ch|)exps` pattern)
+- [ ] Shared experts: does this model have `_shexp` tensors? (use `(ch|)exps` pattern)
 - [ ] Non-standard expert naming: `gate_up` vs `gate` (Qwen3.6-35B-A3B needs `gate_up` included)
-- [ ] N_CPU_MOE instability: was the integer `-ncmoe` path unstable? (use `-ot` or `--fit` instead)
+- [ ] N_CPU_MOE instability: was the integer `-ncmoe` path unstable?
 - [ ] Vision OOM profile: what `FIT_TARGET` was needed for stable vision inference?
-- [ ] GGML_CUDA_GRAPH_OPT: should it be 0 or 1? (0 if context depth varies)
+- [ ] GGML_CUDA_GRAPH_OPT: should it be 0 or 1?

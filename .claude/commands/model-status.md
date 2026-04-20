@@ -28,18 +28,36 @@ Read `llama-swap.yaml` and for each non-`unlisted` model entry, collect:
 - `name` field
 - Whether `--fit` is still in use (not yet optimized) vs hardcoded `-ngl` + `--override-tensor`
 - Whether bench scripts exist: `bench-models/bench-llama-cpp-<key>.sh`
-- Whether bench results exist in `docs/bench-runbook.md` §8
+- Whether a JSONL results file exists: `bench-models/results/<key>.jsonl`
 
 ### Step 3 — Output status table
 
+Check JSONL files for the latest bench result per model:
+```bash
+# Best tg across all models from JSONL records
+cat bench-models/results/*.jsonl 2>/dev/null | \
+  python3 -c "
+import sys, json
+rows = list(map(json.loads, sys.stdin))
+rows.sort(key=lambda r: r.get('tg_ts', 0), reverse=True)
+seen = set()
+for r in rows:
+    k = r['model_key']
+    if k not in seen:
+        seen.add(k)
+        print(f'{k:35}  strategy={r.get(\"strategy\",\"?\"):15}  pp={r.get(\"pp_ts\",\"?\")}  tg={r.get(\"tg_ts\",\"?\")}  [{r[\"ts\"][:10]}]')
+"
+```
+
 Format as a markdown table:
 
-| Model Key | Type | Serving | Fit? | Bench Script | Bench Result | Notes |
-|-----------|------|---------|------|--------------|--------------|-------|
-| `gpt-oss-120b` | MoE | ✅ live | ❌ static -ot | ✅ exists | ✅ §8 | production |
-| `qwen3-coder-next` | MoE | ✅ live | ❌ static -ot | ✅ exists | ✅ §8 | production |
-| `gemma-4-26b-a4b` | MoE | ✅ live | ✅ --fit | ✅ exists | ✅ §8 | needs optimize |
-| `new-model` | ? | ❌ not loaded | ✅ --fit | ❌ missing | ❌ missing | onboarding |
+| Model Key | Type | Serving | Fit? | JSONL Results | Best tg (t/s) | Notes |
+|-----------|------|---------|------|---------------|---------------|-------|
+| `gpt-oss-120b` | MoE | ✅ live | ❌ static -ot | ✅ exists | 28.0 | production |
+| `qwen3-coder-next` | MoE | ✅ live | ❌ static -ot | ✅ exists | 39.6 | production |
+| `gemma-4-26b-a4b` | MoE | ✅ live | ✅ --fit | ✅ exists | 47.9 | needs optimize |
+| `new-model` | ? | ❌ not loaded | ✅ --fit | ❌ missing | — | onboarding |
+
 
 **Fit? column:**
 - `✅ --fit` = still using `--fit on` auto-placement (less deterministic, startup overhead)

@@ -22,10 +22,12 @@ Always run the system preflight first. Stop when results are good enough.
    ls bench-models/bench-llama-cpp-<model-key>*.sh
    ```
 2. Check that the model file is present (look for the path in the bench script `MODEL=` line)
-3. Run `/preflight` or manually verify:
-   - CPU governor: `cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor` → must be `performance`
-   - EPP: `cat /sys/devices/system/cpu/cpu0/cpufreq/energy_performance_preference` → must be `performance`
-   - No other heavy workloads running: `ps aux --sort=-%cpu | head -8`
+3. Run `/preflight` or manually verify CPU governor, EPP, VRAM state
+
+**Result logging is automatic** — every run writes a JSONL record to
+`bench-models/results/<model-key>.jsonl` via `log-result.sh`.
+Set `STRATEGY=<label>` before running to tag the record (e.g. `STRATEGY=partial-cpu`).
+Set `NOTES=<text>` to add a free-text annotation.
 
 ## Experiment sequence (from bench-runbook.md §4)
 
@@ -107,6 +109,11 @@ STRATEGY=fused-muge ./bench-models/bench-ik-llama-cpp-<model-key>-strategies.sh
 
 ## After benchmarking
 
-1. Log results: bench output is auto-saved to `bench-models/logs/`
-2. Run `/add-bench-result <model-key>` to record results in `docs/bench-runbook.md`
+1. Results are **auto-logged** to `bench-models/results/<model-key>.jsonl`
+   ```bash
+   # Quick summary of all recorded runs
+   cat bench-models/results/<model-key>.jsonl | \
+     python3 -c "import sys,json; [print(f'{r[\"ts\"][:10]}  {r.get(\"strategy\",\"?\"):20}  pp={r.get(\"pp_ts\",\"?\")}  tg={r.get(\"tg_ts\",\"?\")}') for r in map(json.loads, sys.stdin)]"
+   ```
+2. Run `/add-bench-result <model-key>` to update the human-readable table in `docs/bench-runbook.md`
 3. Run `/optimize-model <model-key>` to derive the production llama-swap.yaml config
