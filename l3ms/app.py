@@ -407,8 +407,7 @@ class DownloadPanel(Static):
                         yield Button("Download Selected", id="btn_download_selected")
                         yield Button("Download Enabled", id="btn_download_enabled")
                     yield Label(
-                        "Keys: Alt+T table, Alt+I editor, Alt+O load, Alt+W save, Alt+V validate, "
-                        "Alt+N add, Alt+A apply, Alt+K delete, Alt+D selected, Alt+E enabled, Alt+Y clear log"
+                        "Core: Alt+D selected · Alt+E enabled · Alt+N add · Alt+A apply · Alt+K delete · ? full shortcuts"
                     )
 
                 with Vertical(classes="right"):
@@ -935,8 +934,7 @@ class RunPanel(Static):
                 with Vertical(classes="left"):
                     yield DataTable(id="run_scripts_table")
                     yield Label(
-                        "Keys: Ctrl+F filter, Ctrl+J table, Ctrl+U editor, Ctrl+M toggle mode, "
-                        "Ctrl+R start, Ctrl+S stop, Alt+P save script, Ctrl+L clear log"
+                        "Core: Ctrl+R start · Ctrl+S stop · Ctrl+M mode · Ctrl+F filter · Ctrl+U editor · ? full shortcuts"
                     )
                     yield RichLog(id="run_log", wrap=True, markup=False)
 
@@ -1428,9 +1426,10 @@ class RunPanel(Static):
             try:
                 snapshot = await self._resource_snapshot_for_group(pgid)
                 self.query_one("#run_resources", Static).update(snapshot)
-            except Exception:
-                # keep resource loop non-fatal for process execution
-                pass
+            except (OSError, ValueError, RuntimeError):
+                self.query_one("#run_resources", Static).update(
+                    "Resources: unavailable"
+                )
             await asyncio.sleep(1)
 
     async def _stop_resource_loop(self) -> None:
@@ -1625,7 +1624,7 @@ class ModelBrowserPanel(Static):
                 with Vertical(classes="left"):
                     yield DataTable(id="browser_table")
                     yield Label(
-                        "Keys: Alt+G path, Alt+J table, Alt+R scan",
+                        "Core: Alt+R scan · Alt+G path · Alt+J table · ? full shortcuts",
                         classes="key_hint",
                     )
                 with Vertical(classes="right"):
@@ -2014,7 +2013,7 @@ async def detect_llama_port() -> Optional[int]:
         m = re.search(r"--port\s+(\d+)", text)
         if m:
             return int(m.group(1))
-    except Exception:
+    except (OSError, ValueError):
         pass
     # Fallback: probe common ports
     for port in (8080, 8001, 8000, 8888):
@@ -2023,7 +2022,7 @@ async def detect_llama_port() -> Optional[int]:
                 r = await client.get(f"http://localhost:{port}/v1/models")
                 if r.status_code == 200:
                     return port
-        except Exception:
+        except httpx.HTTPError:
             pass
     return None
 
@@ -2083,7 +2082,7 @@ class ChatPanel(Static):
                 yield Button("Send ↵", id="chat_send", variant="success")
 
             yield Label(
-                "Enter send · Ctrl+X clear · Ctrl+G connect · Ctrl+B detect · Alt+S save chat · Thinking=Qwen3",
+                "Core: Enter send · Ctrl+G connect · Ctrl+B detect · Ctrl+X clear · Alt+S save · ? full shortcuts",
                 classes="key_hint",
             )
 
@@ -2119,6 +2118,7 @@ class ChatPanel(Static):
         except Exception:
             pass
         return []
+
 
     def _set_connected(self, port: int, models: List[str]) -> None:
         self.query_one("#chat_status", Static).update(
@@ -2258,7 +2258,7 @@ class ChatPanel(Static):
             self._history.pop()  # remove the unanswered user message
             preview.display = False
             return
-        except Exception as exc:
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             self._log(f"[red]Error: {exc}[/red]")
             preview.display = False
             return
@@ -2305,7 +2305,7 @@ class ChatPanel(Static):
             history = data.get("history", [])
             if not isinstance(history, list):
                 raise ValueError("invalid history format")
-        except Exception as exc:
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
             self._log(f"[red]Failed to load session: {exc}[/red]")
             return
         self._history = history
@@ -2421,7 +2421,8 @@ class MaintenancePanel(Static):
                         yield Button("Reload", id="maint_edit_reload")
                     yield TextArea("", id="maint_editor")
             yield Label(
-                "Keys: Ctrl+R run · Ctrl+S stop · Ctrl+L clear log", classes="key_hint"
+                "Core: Ctrl+R run · Ctrl+S stop · Ctrl+L clear log · ? full shortcuts",
+                classes="key_hint",
             )
 
     def on_mount(self) -> None:
@@ -2472,7 +2473,7 @@ class MaintenancePanel(Static):
     def _load_script_into_editor(self, path: Path) -> None:
         try:
             content = path.read_text(encoding="utf-8")
-        except Exception as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             self.set_status(f"Failed to load: {exc}")
             return
         rel = path.relative_to(ROOT).as_posix()
@@ -2487,7 +2488,7 @@ class MaintenancePanel(Static):
         try:
             self.selected_script.write_text(content, encoding="utf-8")
             self.set_status(f"Saved {self.selected_script.name}")
-        except Exception as exc:
+        except OSError as exc:
             self.set_status(f"Save failed: {exc}")
 
     async def run_script(self) -> None:
@@ -2607,9 +2608,10 @@ class JobsPanel(Static):
                 yield Button("■ Stop Running", id="jobs_stop", variant="error")
                 yield Button("↺ Retry Selected", id="jobs_retry", variant="primary")
                 yield Button("Clear", id="jobs_clear")
+                yield Static("history: ready", id="jobs_status")
             yield DataTable(id="jobs_table")
             yield Label(
-                "s stop running · r retry selected · Del clear history",
+                "Core: s stop running · r retry selected · Del clear history · ? full shortcuts",
                 classes="key_hint",
             )
 
@@ -2620,13 +2622,25 @@ class JobsPanel(Static):
         self.load_jobs()
         self._update_buttons()
 
+    def set_status_label(self, text: str) -> None:
+        self.query_one("#jobs_status", Static).update(text)
+
     def load_jobs(self) -> None:
         """Load persisted job history from disk."""
-        try:
-            if JOBS_FILE.exists():
-                self._jobs = json.loads(JOBS_FILE.read_text(encoding="utf-8"))
-        except Exception:
+        if not JOBS_FILE.exists():
             self._jobs = []
+            self.set_status_label("history: none")
+            self._refresh_table()
+            return
+        try:
+            raw = json.loads(JOBS_FILE.read_text(encoding="utf-8"))
+            if not isinstance(raw, list):
+                raise ValueError("job history must be a JSON array")
+            self._jobs = raw
+            self.set_status_label(f"history: {len(self._jobs)} loaded")
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            self._jobs = []
+            self.set_status_label(f"history: unavailable ({exc})")
         self._refresh_table()
 
     def save_jobs(self) -> None:
@@ -2635,8 +2649,8 @@ class JobsPanel(Static):
             JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
             data = self._jobs[-JOBS_MAX:]
             JOBS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+        except OSError as exc:
+            self.set_status_label(f"history: save failed ({exc})")
 
     def add_job_started(
         self, name: str, started: str, mode: str = "", script_path: str = ""
@@ -2744,16 +2758,77 @@ class JobsPanel(Static):
         self.query_one("#jobs_table", DataTable).clear()
         self._update_buttons()
         self.save_jobs()
+        self.set_status_label("history: cleared")
 
 
-class PlaceholderPanel(Static):
-    def __init__(self, title: str) -> None:
-        super().__init__()
-        self._title = title
+_START_ACTIONS: Dict[str, str] = {
+    "start_open_download": "tab_download",
+    "start_open_run": "tab_run",
+    "start_open_chat": "tab_chat",
+    "start_open_browser": "tab_browser",
+    "start_open_maintenance": "tab_maintenance",
+    "start_open_jobs": "tab_jobs",
+    "start_show_help": "show_help",
+    "start_show_palette": "show_command_palette",
+}
+
+
+class StartPanel(Static):
+    def __init__(self) -> None:
+        super().__init__(id="start_panel")
 
     def compose(self) -> ComposeResult:
-        yield Label(self._title)
-        yield Static("Planned for next feature commit.")
+        with Vertical(classes="panel"):
+            yield Label("Quick Start", id="start_title")
+            yield Static(
+                "Core flows first: pick a primary action below, then use ? or Ctrl+P for deeper controls.",
+                id="start_intro",
+            )
+            with Horizontal(classes="row"):
+                yield Button(
+                    "Download Models",
+                    id="start_open_download",
+                    variant="success",
+                    classes="start_action",
+                )
+                yield Button(
+                    "Run / Bench Scripts",
+                    id="start_open_run",
+                    classes="start_action",
+                )
+                yield Button("Open Chat", id="start_open_chat", classes="start_action")
+            with Horizontal(classes="row"):
+                yield Button(
+                    "Browse GGUF",
+                    id="start_open_browser",
+                    classes="start_action",
+                )
+                yield Button(
+                    "Maintenance",
+                    id="start_open_maintenance",
+                    classes="start_action",
+                )
+                yield Button("Jobs", id="start_open_jobs", classes="start_action")
+            with Horizontal(classes="row"):
+                yield Button("Help (?)", id="start_show_help", classes="start_action")
+                yield Button(
+                    "Command Palette (Ctrl+P)",
+                    id="start_show_palette",
+                    classes="start_action",
+                )
+            yield Label(
+                "Navigation: F1-F7 tabs · Alt+1..7 fallback · Alt+←/→ cycle tabs",
+                classes="key_hint",
+            )
+
+    def focus_primary(self) -> None:
+        self.query_one("#start_open_download", Button).focus()
+
+    @on(Button.Pressed, ".start_action")
+    def on_start_action(self, event: Button.Pressed) -> None:
+        action = _START_ACTIONS.get(str(event.button.id or ""))
+        if action:
+            self.app.call_later(self.app.run_action, action)
 
 
 # ---------------------------------------------------------------------------
@@ -2769,13 +2844,25 @@ def _build_help_content() -> str:
                 ("q", "Quit"),
                 ("?", "This help screen"),
                 ("Ctrl+P", "Command palette (all actions)"),
+                ("Alt+1..Alt+7", "Tab switch fallback when F-keys are unreliable"),
+                ("Alt+← / Alt+→", "Previous / next tab"),
                 ("F1", "→ Download tab"),
                 ("F2", "→ Run / Model Ops tab"),
                 ("F3", "→ Chat tab"),
                 ("F4", "→ Maintenance tab"),
-                ("F5", "→ Settings tab"),
+                ("F5", "→ Start tab"),
                 ("F6", "→ Jobs tab"),
                 ("F7", "→ Model Browser tab"),
+            ],
+        ),
+        (
+            "START  (F5)",
+            [
+                ("Download Models", "Go to Download tab"),
+                ("Run / Bench Scripts", "Go to Model Ops tab"),
+                ("Open Chat", "Go to Chat tab"),
+                ("Help (?)", "Open keyboard shortcut help"),
+                ("Command Palette", "Search and run any action"),
             ],
         ),
         (
@@ -2911,12 +2998,12 @@ class ChatHistoryScreen(ModalScreen):
 # ---------------------------------------------------------------------------
 
 PALETTE_COMMANDS: list = [
+    ("→ Start tab", "tab_settings"),
     ("→ Download tab", "tab_download"),
     ("→ Run / Model Ops tab", "tab_run"),
     ("→ Model Browser tab", "tab_browser"),
     ("→ Chat tab", "tab_chat"),
     ("→ Maintenance tab", "tab_maintenance"),
-    ("→ Settings tab", "tab_settings"),
     ("→ Jobs tab", "tab_jobs"),
     ("Model Browser: Scan GGUF files", "browser_scan"),
     ("Model Browser: Focus root path", "browser_focus_path"),
@@ -2996,7 +3083,7 @@ class CommandPaletteScreen(ModalScreen):
             action = str(row_key.value)
             if action:
                 self.dismiss(action)
-        except Exception:
+        except (AttributeError, KeyError, LookupError, ValueError):
             pass
 
 
@@ -3006,7 +3093,7 @@ class CommandPaletteScreen(ModalScreen):
 class MainScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with TabbedContent(initial="download", id="main_tabs"):
+        with TabbedContent(initial="settings", id="main_tabs"):
             with TabPane("Download", id="download"):
                 yield DownloadPanel()
             with TabPane("Model Ops", id="run"):
@@ -3017,8 +3104,8 @@ class MainScreen(Screen):
                 yield ChatPanel()
             with TabPane("Maintenance", id="maintenance"):
                 yield MaintenancePanel()
-            with TabPane("Settings", id="settings"):
-                yield PlaceholderPanel("Toolkit settings")
+            with TabPane("Start", id="settings"):
+                yield StartPanel()
             with TabPane("Jobs", id="jobs"):
                 yield JobsPanel()
         yield Footer()
@@ -3035,9 +3122,19 @@ class L3MSApp(App[None]):
         Binding("f2", "tab_run", "Run", show=True),
         Binding("f3", "tab_chat", "Chat", show=True),
         Binding("f4", "tab_maintenance", "Maint", show=True),
-        Binding("f5", "tab_settings", "Settings", show=True),
+        Binding("f5", "tab_settings", "Start", show=True),
         Binding("f6", "tab_jobs", "Jobs", show=True),
         Binding("f7", "tab_browser", "Browser", show=True),
+        # ── navigation fallbacks (hidden) ──────────────────────────────
+        Binding("alt+1", "tab_download", "Download", show=False),
+        Binding("alt+2", "tab_run", "Run", show=False),
+        Binding("alt+3", "tab_chat", "Chat", show=False),
+        Binding("alt+4", "tab_maintenance", "Maintenance", show=False),
+        Binding("alt+5", "tab_settings", "Start", show=False),
+        Binding("alt+6", "tab_jobs", "Jobs", show=False),
+        Binding("alt+7", "tab_browser", "Browser", show=False),
+        Binding("alt+left", "tab_prev", "Prev Tab", show=False),
+        Binding("alt+right", "tab_next", "Next Tab", show=False),
         # ── Run / Model Ops (hidden – see ? Help) ────────────────────
         Binding("ctrl+r", "run_start", "Start Script", show=False),
         Binding("ctrl+s", "run_stop", "Stop Script", show=False),
@@ -3085,7 +3182,7 @@ class L3MSApp(App[None]):
             if run_panel.running_proc:
                 try:
                     run_panel.running_proc.terminate()
-                except Exception:
+                except ProcessLookupError:
                     pass
             if run_panel.resource_task and not run_panel.resource_task.done():
                 run_panel.resource_task.cancel()
@@ -3097,7 +3194,7 @@ class L3MSApp(App[None]):
             if maint_panel.running_proc:
                 try:
                     maint_panel.running_proc.terminate()
-                except Exception:
+                except ProcessLookupError:
                     pass
             if maint_panel.running_task and not maint_panel.running_task.done():
                 maint_panel.running_task.cancel()
@@ -3180,6 +3277,14 @@ class L3MSApp(App[None]):
         except Exception:
             return None
 
+    def get_start_panel(self) -> Optional[StartPanel]:
+        if not self.screen:
+            return None
+        try:
+            return self.screen.query_one("#start_panel", StartPanel)
+        except Exception:
+            return None
+
     def action_tab_download(self) -> None:
         self.activate_tab("download")
 
@@ -3197,12 +3302,49 @@ class L3MSApp(App[None]):
 
     def action_tab_settings(self) -> None:
         self.activate_tab("settings")
+        panel = self.get_start_panel()
+        if panel:
+            panel.focus_primary()
 
     def action_tab_jobs(self) -> None:
         self.activate_tab("jobs")
 
     def action_tab_browser(self) -> None:
         self.activate_tab("browser")
+
+    def action_tab_next(self) -> None:
+        order = [
+            "download",
+            "run",
+            "chat",
+            "maintenance",
+            "settings",
+            "jobs",
+            "browser",
+        ]
+        active = self.active_tab() or order[0]
+        if active not in order:
+            self.activate_tab(order[0])
+            return
+        idx = (order.index(active) + 1) % len(order)
+        self.activate_tab(order[idx])
+
+    def action_tab_prev(self) -> None:
+        order = [
+            "download",
+            "run",
+            "chat",
+            "maintenance",
+            "settings",
+            "jobs",
+            "browser",
+        ]
+        active = self.active_tab() or order[0]
+        if active not in order:
+            self.activate_tab(order[0])
+            return
+        idx = (order.index(active) - 1) % len(order)
+        self.activate_tab(order[idx])
 
     async def action_run_start(self) -> None:
         tab = self.active_tab()

@@ -76,6 +76,13 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
   - `model_downloader/models_config.json` Qwen3.6 profile now fetches both `UD-Q5_K_XL` and `mmproj-F16`
   - `docs/bench-runbook.md` quickstart + measured pp/tg results (fit winner on RTX 4070 12 GB), including vision serving flow
   - `docs/qwen3-6-35b-a3b-post.md` draft blog post for text + vision setup and benchmark outcomes
+- **Start tab + accessibility navigation pass**:
+  - `Start` tab now opens by default and provides guided core actions (Download, Model Ops, Chat, Browser, Maintenance, Jobs) plus direct Help/Palette entry points
+  - tab navigation fallback keys: `Alt+1..Alt+7` (direct tab switch) and `Alt+←/Alt+→` (cycle tabs)
+  - `l3ms.py --quickstart` prints a no-TUI quick-start guide for first-time users or remote terminals
+  - Jobs panel now surfaces history load/save status instead of silently swallowing history file failures
+  - key-hint copy across panels is standardized around "core actions + ? full shortcuts" to keep dense layouts but improve scanability
+
 - **Gemma-4-26B-A4B workflow support**:
   - `run-models/run-llama-cpp-gemma-4-26b-a4b.sh` run script targeting mainline `vendor/llama.cpp/build/bin/llama-server`
   - `run-models/run-llama-cpp-gemma-4-26b-a4b-vision.sh` dedicated vision preset wiring `mmproj-BF16.gguf`

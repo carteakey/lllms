@@ -25,6 +25,12 @@ python3 -m pip install -r requirements-tui.txt
 python3 l3ms.py
 ```
 
+Show quick-start instructions without opening TUI:
+
+```bash
+python3 l3ms.py --quickstart
+```
+
 ## Interactive CLI Modes
 
 List available scripts:
@@ -53,6 +59,10 @@ python3 l3ms.py --run qwen --extra "--ctx-size 32768"
 
 ## TUI Scope
 
+- `Start` tab:
+  - guided entry buttons for core flows (Download / Model Ops / Chat / Browser / Jobs)
+  - quick access to `?` help and `Ctrl+P` command palette
+  - fallback navigation hints for terminals where F-keys are inconsistent
 - `Download` tab:
   - config load/save/validate/restore
   - model row add/apply/delete
@@ -67,7 +77,7 @@ python3 l3ms.py --run qwen --extra "--ctx-size 32768"
   - scan any local directory for `.gguf` files
   - inspect size, quantization, params, architecture, and modified timestamp in a table
   - filter/sort results and inspect per-file metadata details
-- Additional tabs: `Chat`, `Maintenance`, `Settings`, `Jobs`
+- Additional tabs: `Chat`, `Maintenance`, `Jobs`
 
 ## Keyboard-first Controls
 
@@ -77,9 +87,11 @@ Global:
 - `F2`: Model Ops tab
 - `F3`: Chat tab
 - `F4`: Maintenance tab
-- `F5`: Settings tab
+- `F5`: Start tab
 - `F6`: Jobs tab
 - `F7`: Model Browser tab
+- `Alt+1..Alt+7`: tab fallback when F-keys are unreliable
+- `Alt+←` / `Alt+→`: previous / next tab
 
 Download (active only on Download tab):
 

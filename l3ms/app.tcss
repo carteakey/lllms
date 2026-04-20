@@ -153,10 +153,28 @@ Checkbox {
 }
 
 .key_hint {
-    color: $text-disabled;
-    text-style: dim;
+    color: $text-muted;
     height: auto;
     margin-top: 1;
+}
+
+#start_title {
+    text-style: bold;
+}
+
+#start_intro {
+    border: round $accent;
+    padding: 0 1;
+    margin-bottom: 1;
+}
+
+.start_action {
+    min-width: 22;
+}
+
+Button:focus,
+DataTable:focus {
+    text-style: bold;
 }
 
 /* Maintenance Panel */
@@ -209,6 +227,12 @@ Checkbox {
 #jobs_table {
     height: 1fr;
     min-height: 10;
+}
+
+#jobs_status {
+    width: auto;
+    padding: 0 1;
+    border: round $accent;
 }
 
 /* Chat History Screen */
