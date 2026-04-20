@@ -26,10 +26,10 @@ unit sets it to `%h/repos/l3ms` by default; override via
 
 ```bash
 cd ~/repos/l3ms
-L3MS_ROOT=$(pwd) ~/bin/llama-swap -config ./llama-swap.yaml -watch
+L3MS_ROOT=$(pwd) ~/bin/llama-swap -config ./llama-swap.yaml -watch-config
 ```
 
-`-watch` does a dry load and surfaces macro/env errors. Kill with Ctrl-C once
+`--watch-config` does a dry load and surfaces macro/env errors. Kill with Ctrl-C once
 you see "listening on …".
 
 ## Run as a systemd user service

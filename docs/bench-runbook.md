@@ -35,16 +35,17 @@ Optimise pp only if first-token latency is visibly painful.
 | Model | Quant | Disk | Experts | Active/tok | Best tg (bench) | Best pp |
 |-------|-------|------|---------|------------|---------|---------|
 | Qwen3-Coder-Next (80B.A3B) | UD-Q4\_K\_XL | ~47 GB | 512 | **3B** | 40.6 t/s¹ | **511 t/s²** |
+| Qwen3.6-35B-A3B | UD-Q5\_K\_XL | ~25 GB | 256 | **8B** | **52.3 t/s³** | **971 t/s³** |
 | Qwen3.5-122B-A10B | UD-IQ4\_XS | ~56 GB | 256 | **10B** | 9.8 t/s | 284 t/s |
 
 ¹ N\_CPU\_MOE=40, f16 KV, **512-token bench context only** — bench does not pre-allocate full ctx KV.
   At 64k server context with q8\_0 KV the realistic tg is ~39–40 t/s (fit ngl=49 placement).
 ² fit-params ngl=49, 64k ctx floor + q8\_0 KV; blk 0–7 fully on GPU, blk 8 partial, blk 9–48 on CPU
+³ fit-params (`FIT_CTX=65536`, `FIT_TARGET=512`) with `-ngl 41` and fit-shaped expert offload (`gate_up` included).
 
-The 122B model is **4× slower at tg** than the 80B coder. The reason is active parameter
-count: Qwen3-Coder-Next activates only 3B params per token (80B total, 3B active), while
-Qwen3.5-122B activates 10B params per token (122B total, 10B active). More compute per
-token = fewer tokens per second. No tuning option changes this — it is model architecture.
+Qwen3.6-35B-A3B is currently the fastest decode path in this runbook on a 12 GB card.
+Qwen3.5-122B remains much slower at tg because it activates more parameters per token,
+so no offload pattern can close that architectural gap.
 
 ---
 
@@ -659,7 +660,7 @@ but the quality tradeoff is more visible at q4 precision. Not recommended for co
 
 ---
 
-**Recommended configuration (`run-llama-cpp-qwen3-coder-next-optimized.sh`):**
+**Recommended serving configuration (`llama-swap.yaml` model: `qwen3-coder-next`):**
 
 | Setting | Value | Reason |
 |---------|-------|--------|
@@ -694,8 +695,48 @@ but the quality tradeoff is more visible at q4 precision. Not recommended for co
 # KV quant comparison
 CACHE_TYPE_K=q8_0 CACHE_TYPE_V=q8_0 ./bench-models/bench-llama-cpp-qwen3-coder-next.sh
 
-# Optimized server
-./run-models/run-llama-cpp-qwen3-coder-next-optimized.sh
+# Optimized server path via llama-swap
+curl -s http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen3-coder-next","messages":[{"role":"user","content":"say hi"}]}'
+```
+
+---
+
+### Qwen3.6-35B-A3B UD-Q5\_K\_XL — RTX 4070 12 GB / Intel i5-12600K / 64 GB DDR5
+
+**Architecture:** 40 blocks, 256 experts per MoE layer, 8 active/token, 24.76 GiB on disk.
+
+**Two model-specific gotchas:**
+
+1. Include `gate_up` in expert patterns (`ffn_(up|down|gate_up|gate)_...`) or
+   the offload is incomplete and memory pressure rises unexpectedly.
+2. The integer `-ncmoe` path was not stable for this build/quant profile on
+   12 GB VRAM. Explicit `-ot` patterns or fit-derived placement were reliable.
+
+**Results (512pp + 128tg, 10 threads, FA=1, no-mmap, q8\_0 KV, 1 repetition):**
+
+| Strategy | ngl | flags | pp (t/s) | tg (t/s) | Notes |
+|----------|-----|-------|----------|----------|-------|
+| baseline / `all-cpu-moe` | 99 | `.ffn_(up\|down\|gate_up\|gate)_(ch\|)exps=CPU` | 654.16 | 41.10 | safe baseline |
+| `partial-cpu` | 99 | `blk\.(4\|...)\.ffn_(up\|down\|gate_up\|gate)_(ch\|)exps=CPU` | 746.36 | 44.35 | keep early blocks fully on GPU |
+| `up-down-cpu` | 99 | `.ffn_(up\|down)_(ch\|)exps=CPU` | 865.26 | 48.95 | gate experts on GPU |
+| **fit-params auto** | **41** | `blk.13 down + blk.14-40 (up/down/gate_up/gate)` | **970.77** | **52.33** | **winner** |
+| `up-cpu` | 99 | `.ffn_up_(ch\|)exps=CPU` | OOM | — | fails to load on 12 GB |
+
+**Winner:** fit-derived placement (`bench-llama-cpp-qwen3-6-35b-a3b-fit.sh`).
+Fit chose `-ngl 41` with a split that keeps early blocks dense on GPU and moves
+late-block experts to CPU. This was the best pp/tg combination in this sweep.
+
+**Vision profile added:** use `qwen3-6-35b-a3b-vision` in `llama-swap.yaml` or
+`bench-models/run-llama-cpp-qwen3-6-35b-a3b-vision.sh` for direct runs. The
+vision profile keeps `GGML_CUDA_GRAPH_OPT=0`, `FIT_TARGET=2048`,
+`BATCH_SIZE=256`, `UBATCH_SIZE=512` as safer defaults for 12 GB VRAM.
+
+**To reproduce best result:**
+
+```sh
+REPETITIONS=1 ./bench-models/bench-llama-cpp-qwen3-6-35b-a3b-fit.sh
 ```
 
 ---
@@ -800,8 +841,9 @@ tg dropped to 20.3 t/s. CUDA graph compilation overhead dominates. Not competiti
 
 **Static `-ot` vs `--fit` in the server — memory breakdown comparison:**
 
-The optimized run script (`run-llama-cpp-gpt-oss-120b-optimized.sh`) replaces `--fit` with
-a static `--override-tensor` and sets `--parallel 1`. The VRAM breakdown confirms the win:
+The optimized llama-swap preset (`gpt-oss-120b` in `llama-swap.yaml`) replaces
+`--fit` with a static `--override-tensor` and sets `--parallel 1`. The VRAM
+breakdown confirms the win:
 
 | | VRAM model | VRAM free | Host RAM | tg observed |
 |---|---|---|---|---|
@@ -865,6 +907,45 @@ for s in fused fused-ger fused-mqkv; do
 done
 ```
 
+### Qwen3.6-35B-A3B quickstart
+
+```sh
+# 1) Build/update mainline llama.cpp
+./maintenance/build-llama-cpp.sh
+
+# 2) Download UD-Q5_K_XL + vision projector
+./model_downloader/download_hf_model.py \
+  --repo-id unsloth/Qwen3.6-35B-A3B-GGUF \
+  --allow-patterns '*UD-Q5_K_XL*' '*mmproj-F16*' \
+  --local-dir /mnt/lab/models/unsloth/Qwen3.6-35B-A3B-GGUF \
+  --max-workers 2
+
+# 3) Serve text / bench
+# Serving via llama-swap model IDs: qwen3-6-35b-a3b (text), qwen3-6-35b-a3b-vision (vision)
+curl -s http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen3-6-35b-a3b","messages":[{"role":"user","content":"hi"}]}'
+
+./bench-models/bench-llama-cpp-qwen3-6-35b-a3b.sh
+STRATEGY=up-down-cpu ./bench-models/bench-llama-cpp-qwen3-6-35b-a3b-strategies.sh
+./bench-models/bench-llama-cpp-qwen3-6-35b-a3b-fit.sh
+
+# 4) Vision serve (llama-swap)
+curl -s http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "model":"qwen3-6-35b-a3b-vision",
+    "messages":[{"role":"user","content":[
+      {"type":"text","text":"Describe this image briefly."},
+      {"type":"image_url","image_url":{"url":"https://upload.wikimedia.org/wikipedia/commons/thumb/d/dd/Gfp-wisconsin-madison-the-nature-boardwalk.jpg/640px-Gfp-wisconsin-madison-the-nature-boardwalk.jpg"}}
+    ]}]
+  }'
+
+# Optional direct serve helpers (outside llama-swap)
+PORT=8002 ./bench-models/run-llama-cpp-qwen3-6-35b-a3b.sh
+PORT=8003 ./bench-models/run-llama-cpp-qwen3-6-35b-a3b-vision.sh
+```
+
 ### gpt-oss-puzzle-88B quickstart
 
 ```sh
@@ -878,8 +959,10 @@ done
   --local-dir /home/kchauhan/models/SamPurkis/gpt-oss-puzzle-88B-GGUF \
   --max-workers 2
 
-# 3) Run / bench
-./run-models/run-llama-cpp-gpt-oss-puzzle-88b.sh
+# 3) Serve / bench (llama-swap model ID: gpt-oss-puzzle-88b)
+curl -s http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"gpt-oss-puzzle-88b","messages":[{"role":"user","content":"hi"}]}'
 ./bench-models/bench-llama-cpp-gpt-oss-puzzle-88b.sh
 ./bench-models/bench-llama-cpp-gpt-oss-puzzle-88b-fit.sh
 ```
@@ -936,12 +1019,14 @@ Notes:
 
 ### Per-model winner cheatsheet
 
-| Model | Best bench config | pp (t/s) | tg (t/s) | Optimized run script |
-|-------|------------------|----------|----------|----------------------|
-| **Qwen3-Coder-Next** | fit ngl=49, 64k ctx, q8_0 KV, 512 MiB margin | **502** | **~39–40** | `run-llama-cpp-qwen3-coder-next-optimized.sh` |
-| **gpt-oss-120b** | static -ot ngl=37, q8_0 KV | 428 | 23.4 | `run-llama-cpp-gpt-oss-120b-optimized.sh` |
-| **Qwen3.5-122B** | partial-cpu blk 3+, f16 KV | 284 | 9.8 | `run-llama-cpp-qwen3-5-122b-a10b-thinking-coding.sh` |
-| **Gemma-4-26B-A4B** | fit, 32k ctx, q8_0 KV | _(run bench)_ | _(run bench)_ | `run-llama-cpp-gemma-4-26b-a4b.sh` |
+| Model | Best bench config | pp (t/s) | tg (t/s) | Llama-swap model ID |
+|-------|------------------|----------|----------|---------------------|
+| **Qwen3.6-35B-A3B** | fit ngl=41, 64k ctx, q8_0 KV, fit-shaped `-ot` | **970.8** | **52.3** | `qwen3-6-35b-a3b` |
+| **Qwen3.6-35B-A3B (vision)** | 64k ctx, q8_0 KV, `FIT_TARGET=2048`, batch 256 | _(serve profile)_ | _(serve profile)_ | `qwen3-6-35b-a3b-vision` |
+| **Qwen3-Coder-Next** | fit ngl=49, 64k ctx, q8_0 KV, 512 MiB margin | **502** | **~39–40** | `qwen3-coder-next` |
+| **gpt-oss-120b** | static -ot ngl=37, q8_0 KV | 428 | 23.4 | `gpt-oss-120b` |
+| **Qwen3.5-122B** | partial-cpu blk 3+, f16 KV | 284 | 9.8 | `qwen3-5-122b-thinking-coding` |
+| **Gemma-4-26B-A4B** | fit, 32k ctx, q8_0 KV | _(run bench)_ | _(run bench)_ | `gemma-4-26b-a4b` |
 
 ### KV cache quant — universal recommendation
 
@@ -1024,7 +1109,12 @@ The server process stays alive but the slot is in an error state when OOM occurs
 
 **Option 1 — Disable CUDA graph opt (recommended first try):**
 ```sh
-GGML_CUDA_GRAPH_OPT=0 ./run-models/run-llama-cpp-qwen3-coder-next-optimized.sh
+# In llama-swap.yaml, set model "qwen3-coder-next" env:
+#   - "GGML_CUDA_GRAPH_OPT=0"
+systemctl --user restart llama-swap.service
+curl -s http://localhost:8080/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"qwen3-coder-next","messages":[{"role":"user","content":"say hi"}]}'
 ```
 CUDA graph re-capture at new context depths is a significant VMM consumer. Disabling it removes this pressure at the cost of a small tg regression (typically < 1 t/s).
 

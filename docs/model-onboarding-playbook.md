@@ -109,7 +109,7 @@ bash -n bench-models/bench-llama-cpp-<model>-strategies.sh
 bash -n bench-models/bench-llama-cpp-<model>-fit.sh
 
 # llama-swap dry-load + model ID check
-L3MS_ROOT=$(pwd) ~/bin/llama-swap -config ./llama-swap.yaml -watch &
+L3MS_ROOT=$(pwd) ~/bin/llama-swap -config ./llama-swap.yaml -watch-config &
 sleep 2
 curl -s http://localhost:8080/v1/models | jq '.data[] | select(.id | contains("<model>"))'
 kill %1

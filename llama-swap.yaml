@@ -292,6 +292,56 @@ models:
       --batch-size 1024 --ubatch-size 512
       --prio 2
 
+  "qwen3-6-35b-a3b":
+    name: "Qwen3.6-35B-A3B (UD-Q5_K_XL)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q5_K_XL.gguf
+      --alias "unsloth/Qwen3.6-35B-A3B (UD-Q5_K_XL)"
+      --seed 3407
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
+      --presence-penalty 1.5 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 65536
+      --fit on --fit-ctx 65536 --fit-target 512
+      --parallel 1
+      -ctk q8_0 -ctv q8_0
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12
+      --flash-attn on
+      --batch-size 1024 --ubatch-size 512
+      --prio 2 --no-warmup
+
+  "qwen3-6-35b-a3b-vision":
+    name: "Qwen3.6-35B-A3B (UD-Q5_K_XL, vision/mmproj-F16)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      # vision profile uses safer graph/memory defaults on 12 GB cards
+      - "GGML_CUDA_GRAPH_OPT=0"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q5_K_XL.gguf
+      --mmproj /mnt/lab/models/unsloth/Qwen3.6-35B-A3B-GGUF/mmproj-F16.gguf
+      --alias "unsloth/Qwen3.6-35B-A3B (UD-Q5_K_XL, vision/mmproj-F16)"
+      --seed 3407
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
+      --presence-penalty 1.5 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 65536
+      --fit on --fit-ctx 65536 --fit-target 2048
+      --parallel 1
+      -ctk q8_0 -ctv q8_0
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12
+      --flash-attn on
+      --batch-size 256 --ubatch-size 512
+      --prio 2 --no-warmup
+
   "ik-qwen3-5-35b-a3b":
     name: "Qwen3.5-35B-A3B ik_llama.cpp (UD-Q4_K_L)"
     description: "ik_llama fork binary, --n-cpu-moe 18."

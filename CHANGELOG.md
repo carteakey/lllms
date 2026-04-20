@@ -66,6 +66,16 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
   - `docs/bench-runbook.md` no longer documents that flow.
 
 ### Added
+- **Qwen3.6-35B-A3B workflow support**:
+  - `bench-models/run-llama-cpp-qwen3-6-35b-a3b.sh` direct serve helper for local tuning outside llama-swap
+  - `bench-models/run-llama-cpp-qwen3-6-35b-a3b-vision.sh` vision preset wrapper (`mmproj-F16`, 64k ctx, safer fit/batch defaults)
+  - `bench-models/bench-llama-cpp-qwen3-6-35b-a3b.sh` baseline bench script (safe all-experts-on-CPU default via `-ot`)
+  - `bench-models/bench-llama-cpp-qwen3-6-35b-a3b-strategies.sh` strategy sweep bench script (`all-cpu-moe`, `partial-cpu`, `up-down-cpu`, `up-cpu`)
+  - `bench-models/bench-llama-cpp-qwen3-6-35b-a3b-fit.sh` fit-based bench script
+  - `llama-swap.yaml` model entries `qwen3-6-35b-a3b` (text) and `qwen3-6-35b-a3b-vision` (multimodal)
+  - `model_downloader/models_config.json` Qwen3.6 profile now fetches both `UD-Q5_K_XL` and `mmproj-F16`
+  - `docs/bench-runbook.md` quickstart + measured pp/tg results (fit winner on RTX 4070 12 GB), including vision serving flow
+  - `docs/qwen3-6-35b-a3b-post.md` draft blog post for text + vision setup and benchmark outcomes
 - **Gemma-4-26B-A4B workflow support**:
   - `run-models/run-llama-cpp-gemma-4-26b-a4b.sh` run script targeting mainline `vendor/llama.cpp/build/bin/llama-server`
   - `run-models/run-llama-cpp-gemma-4-26b-a4b-vision.sh` dedicated vision preset wiring `mmproj-BF16.gguf`

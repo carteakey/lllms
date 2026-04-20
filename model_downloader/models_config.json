@@ -69,6 +69,17 @@
     },
     {
       "enabled": true,
+      "repo_id": "unsloth/Qwen3.6-35B-A3B-GGUF",
+      "local_dir": "/mnt/lab/models/unsloth/Qwen3.6-35B-A3B-GGUF",
+      "allow_patterns": ["*UD-Q5_K_XL*", "*mmproj-F16*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": null,
+      "description": "Qwen3.6 35B-A3B UD-Q5_K_XL + mmproj-F16 (vision-capable)"
+    },
+    {
+      "enabled": true,
       "repo_id": "unsloth/Mistral-Small-4-119B-2603-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF",
       "allow_patterns": ["*IQ4_XS*", "*mmproj-F16*"],

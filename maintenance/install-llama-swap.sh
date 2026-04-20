@@ -16,6 +16,31 @@ BIN_DIR="${LLAMA_SWAP_BIN_DIR:-${HOME}/bin}"
 VERSION="${LLAMA_SWAP_VERSION:-latest}"
 REPO="mostlygeek/llama-swap"
 
+http_get() {
+  local url="$1"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --retry 3 "${url}"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO- "${url}"
+  else
+    echo "Need curl or wget" >&2
+    exit 2
+  fi
+}
+
+download_to_file() {
+  local url="$1"
+  local out="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fL --retry 3 -o "${out}" "${url}"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "${out}" "${url}"
+  else
+    echo "Need curl or wget" >&2
+    exit 2
+  fi
+}
+
 uname_os() {
   case "$(uname -s)" in
     Linux)  echo "linux" ;;
@@ -36,9 +61,32 @@ OS="${LLAMA_SWAP_OS:-$(uname_os)}"
 ARCH="${LLAMA_SWAP_ARCH:-$(uname_arch)}"
 
 if [ "${VERSION}" = "latest" ]; then
-  URL="https://github.com/${REPO}/releases/latest/download/llama-swap_${OS}_${ARCH}.tar.gz"
+  release_api="https://api.github.com/repos/${REPO}/releases/latest"
 else
-  URL="https://github.com/${REPO}/releases/download/${VERSION}/llama-swap_${OS}_${ARCH}.tar.gz"
+  release_api="https://api.github.com/repos/${REPO}/releases/tags/${VERSION}"
+fi
+
+release_json="$(http_get "${release_api}")"
+if command -v jq >/dev/null 2>&1; then
+  URL="$(
+    printf '%s' "${release_json}" | jq -r --arg os "${OS}" --arg arch "${ARCH}" '
+      .assets[]?.browser_download_url
+      | select(test("llama-swap(_[0-9]+)?_" + $os + "_" + $arch + "\\.tar\\.gz$"))
+    ' | head -n 1
+  )"
+else
+  URL="$(
+    printf '%s' "${release_json}" \
+      | tr ',' '\n' \
+      | sed -n 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+      | grep -E "llama-swap(_[0-9]+)?_${OS}_${ARCH}\.tar\.gz$" \
+      | head -n 1 || true
+  )"
+fi
+
+if [ -z "${URL}" ]; then
+  echo "Could not find a llama-swap release asset for ${OS}/${ARCH} (version=${VERSION})." >&2
+  exit 1
 fi
 
 TARGET="${BIN_DIR}/llama-swap"
@@ -54,14 +102,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
 
 echo "Downloading ${URL}"
-if command -v curl >/dev/null 2>&1; then
-  curl -fL --retry 3 -o "${tmp}/llama-swap.tar.gz" "${URL}"
-elif command -v wget >/dev/null 2>&1; then
-  wget -O "${tmp}/llama-swap.tar.gz" "${URL}"
-else
-  echo "Need curl or wget" >&2
-  exit 2
-fi
+download_to_file "${URL}" "${tmp}/llama-swap.tar.gz"
 
 tar -xzf "${tmp}/llama-swap.tar.gz" -C "${tmp}"
 
