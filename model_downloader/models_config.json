@@ -168,6 +168,17 @@
     },
     {
       "enabled": false,
+      "repo_id": "unsloth/gemma-4-26B-A4B-it-GGUF",
+      "local_dir": "/mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF",
+      "allow_patterns": ["*gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": 2,
+      "description": "gemma-4-26b-a4b-q6-k-xl: Gemma 4 26B-A4B UD-Q6_K_XL profile. Check quant compatibility and disk footprint."
+    },
+    {
+      "enabled": false,
       "repo_id": "Qwen/Qwen3-32B-GGUF",
       "local_dir": "/mnt/lab/models/qwen/Qwen3-32B-GGUF",
       "allow_patterns": ["*Q6_K*"],

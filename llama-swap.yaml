@@ -660,6 +660,29 @@ models:
       --batch-size 512 --ubatch-size 512
       --prio 2 --no-warmup
 
+  "gemma-4-26b-a4b-q6-k-xl":
+    name: "gemma-4-26B-A4B-it (UD-Q6_K_XL, text, 131k ctx)"
+    description: "UD-Q6_K_XL variant profile for Gemma 4 26B-A4B; bench before optimizing to static placement."
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf
+      --alias "unsloth/gemma-4-26B-A4B-it (UD-Q6_K_XL)"
+      --seed 3407
+      --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 131072
+      --fit on --fit-ctx 131072 --fit-target 512
+      --parallel 1
+      -ctk q8_0 -ctv q8_0
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 1024 --ubatch-size 512
+      --prio 2 --no-warmup
+
   "sarvam-30b":
     name: "sarvam-30B (Q6_K)"
     description: "Requires the PR-20275 llama.cpp build (./maintenance/build-sarvam-llama-cpp.sh)."

@@ -37,6 +37,7 @@ Optimise pp only if first-token latency is visibly painful.
 | Qwen3-Coder-Next (80B.A3B) | UD-Q4\_K\_XL | ~47 GB | 512 | **3B** | 40.6 t/s¹ | **511 t/s²** |
 | Qwen3.6-35B-A3B | UD-Q5\_K\_XL | ~25 GB | 256 | **8B** | **52.3 t/s³** | **971 t/s³** |
 | Qwen3.5-122B-A10B | UD-IQ4\_XS | ~56 GB | 256 | **10B** | 9.8 t/s | 284 t/s |
+| Gemma-4-26B-A4B | Q6\_X\_L | TBD | TBD | TBD | TBD | TBD |
 
 ¹ N\_CPU\_MOE=40, f16 KV, **512-token bench context only** — bench does not pre-allocate full ctx KV.
   At 64k server context with q8\_0 KV the realistic tg is ~39–40 t/s (fit ngl=49 placement).
@@ -579,6 +580,28 @@ Then create the strategies variant and work through the experiment sequence in
 ---
 
 ## 8. Bench Results
+
+### Gemma-4-26B-A4B UD-Q6\_K\_XL — benchmark stub (results pending)
+
+**Architecture notes:** Unsloth refreshed Gemma 4 26B-A4B GGUF variants; this
+profile targets the `UD-Q6_K_XL` quant specifically for validation against the
+existing `UD-Q5_K_XL` baseline.
+
+**Artifacts added for this profile:**
+
+- `llama-swap.yaml` model ID: `gemma-4-26b-a4b-q6-k-xl`
+- Bench scripts:
+  - `bench-models/bench-llama-cpp-gemma-4-26b-a4b-q6-x-l.sh`
+  - `bench-models/bench-llama-cpp-gemma-4-26b-a4b-q6-x-l-strategies.sh`
+  - `bench-models/bench-llama-cpp-gemma-4-26b-a4b-q6-x-l-fit.sh`
+
+**Runbook command set (fill pp/tg after run):**
+
+```sh
+./bench-models/bench-llama-cpp-gemma-4-26b-a4b-q6-x-l.sh
+./bench-models/bench-llama-cpp-gemma-4-26b-a4b-q6-x-l-strategies.sh
+./bench-models/bench-llama-cpp-gemma-4-26b-a4b-q6-x-l-fit.sh
+```
 
 ### Qwen3-Coder-Next UD-Q4\_K\_XL — RTX 4070 12 GB / Intel i5-12600K / 64 GB DDR5
 

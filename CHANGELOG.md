@@ -92,6 +92,11 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
   - `bench-models/bench-llama-cpp-gemma-4-26b-a4b-fit.sh` fit-based bench script
   - `model_downloader/models_config.json` profile for `unsloth/gemma-4-26B-A4B-it-GGUF` (`UD-Q5_K_XL` + `mmproj-BF16`)
   - `docs/bench-runbook.md` quickstart section for Gemma-4-26B-A4B on mainline llama.cpp
+- **gemma-4-26b-a4b-q6-k-xl onboarding**:
+  - `llama-swap.yaml` model entry `gemma-4-26b-a4b-q6-k-xl` using `--fit` defaults for first-pass tuning
+  - `bench-models/bench-llama-cpp-gemma-4-26b-a4b-q6-x-l.sh`, `bench-models/bench-llama-cpp-gemma-4-26b-a4b-q6-x-l-strategies.sh`, `bench-models/bench-llama-cpp-gemma-4-26b-a4b-q6-x-l-fit.sh`
+  - `model_downloader/models_config.json` disabled profile for `unsloth/gemma-4-26B-A4B-it-GGUF` with `*gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf*`
+  - `docs/bench-runbook.md` §1 hardware table placeholder row + §8 benchmark stub for Gemma UD-Q6_K_XL
 - **Gemma vision user service support**:
   - `maintenance/systemd/gemma-vision.service` user-level systemd unit for always-on startup
   - `maintenance/setup-gemma-vision-service.sh` helper for `install/start/stop/restart/enable/disable/status/logs`
