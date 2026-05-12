@@ -233,6 +233,17 @@
       "description": "Sarvam 30B Q6_K GGUF (repo: Sumitc13/sarvam-30b-GGUF; requires SarvamMoE-capable llama.cpp fork/branch)"
     },
     {
+      "enabled": false,
+      "repo_id": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+      "local_dir": "/mnt/lab/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+      "allow_patterns": ["*UD-Q4_K_XL*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": 2,
+      "description": "Qwen 3.6 35B-A3B MTP UD-Q4_K_XL profile"
+    },
+    {
       "enabled": true,
       "repo_id": "limegreenpeper1/sarvam-105B-GGUF",
       "local_dir": "/mnt/lab/models/limegreenpeper1/sarvam-105B-GGUF",
