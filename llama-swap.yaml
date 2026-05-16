@@ -367,6 +367,32 @@ models:
       --batch-size 1024 --ubatch-size 512
       --prio 2 --no-warmup
 
+  "qwen3-6-mtp-vision":
+    name: "Qwen3.6-35B-A3B MTP (UD-Q4_K_XL, vision/mmproj-F16)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=0"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+      --mmproj /mnt/lab/models/unsloth/Qwen3.6-35B-A3B-GGUF/mmproj-F16.gguf
+      --alias "unsloth/Qwen3.6-35B-A3B MTP (vision/mmproj-F16)"
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
+      --presence-penalty 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --chat-template-kwargs '{"preserve_thinking": true}'
+      --ctx-size 131072 --n-predict 32768
+      --fit on --fit-ctx 131072 --fit-target 2048
+      -ctk q8_0 -ctv q8_0
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12
+      --flash-attn on
+      --spec-type draft-mtp --spec-draft-n-max 2
+      --parallel 1
+      --batch-size 256 --ubatch-size 512
+      --prio 2 --no-warmup
+
   "ik-qwen3-5-35b-a3b":
     name: "Qwen3.5-35B-A3B ik_llama.cpp (UD-Q4_K_L)"
     description: "ik_llama fork binary, --n-cpu-moe 18."
