@@ -348,7 +348,7 @@ models:
       - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
-      taskset -c ${cpu_range} ${env.L3MS_ROOT}/vendor/llama.cpp-pr-test-22673/build/bin/llama-server
+      taskset -c ${cpu_range} ${llama_server}
       -m /mnt/lab/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
       --alias "unsloth/Qwen3.6-35B-A3B MTP"
       --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
@@ -362,7 +362,7 @@ models:
       --no-mmap --mlock
       --threads 10 --threads-batch 12
       --flash-attn on
-      --spec-type mtp --spec-draft-n-max 2
+      --spec-type draft-mtp --spec-draft-n-max 2
       --parallel 1
       --batch-size 1024 --ubatch-size 512
       --prio 2 --no-warmup

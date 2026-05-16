@@ -7,6 +7,30 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 ## [Unreleased]
 
 ### Changed
+- **Qwen 3.6 MTP Mainline**: Updated `llama-swap.yaml` configuration to use the mainline `llama-server` and the updated `--spec-type draft-mtp` flag since MTP support is now merged into `llama.cpp` master.
+- **TUI workbench pass**:
+  - Added a persistent command bar with context-specific shortcut hints.
+  - Reworked the Start tab into a compact workbench hub grouped around
+    Operate / Inventory / Command flows.
+  - Upgraded the command palette with a shortcut column and token-based
+    filtering.
+  - Reduced Run/Model Ops table churn by avoiding column rebuilds on every
+    filter refresh.
+  - Moved repeated shortcut hint rows into a reusable `ShortcutStrip`.
+  - Moved llama-swap model refresh onto a named Textual worker and refresh the
+    command bar on direct tab activation.
+- **Maintenance updater**: new `maintenance/update-llama-stack.sh` snapshots
+  the current llama-swap binary and llama.cpp build metadata, updates
+  llama-swap, rebuilds mainline llama.cpp, validates `llama-swap.yaml`, and
+  restarts `llama-swap.service` only if it was already active.
+- **llama.cpp build script**: dropped the removed `llama-sweep-bench` target
+  from the default build target list.
+- **Bench result logging**: fixed fitted `-ot "..."` placement strings so
+  `bench-models/log-result.sh` records JSONL results instead of tripping over
+  shell quotes. Structured results now live under `bench-models/logs/results/`
+  alongside the raw bench logs.
+- **Codex skill**: added `codex-skills/l3ms-prepost` for repeatable
+  before/update/after llama-swap + llama.cpp maintenance checks.
 - **Serving architecture switched to llama-swap**:
   - New `llama-swap.yaml` is the single source of truth for every servable
     model (28 previous `run-models/*.sh` scripts collapsed into YAML entries
