@@ -847,10 +847,10 @@ models:
 
 # ===========================================================================
 # Startup: preload the default so the first request is instant.
-# gemma-4-26b-a4b-vision is the default — small enough to stay resident,
-# vision-capable, and the previous gemma-vision.service entrypoint.
+# gemma-4-26b-mtp-vision is the default — optimized for speed with
+# TurboQuant MTP, vision-capable, and resident for instant response.
 # ===========================================================================
 hooks:
   on_startup:
     preload:
-      - "gemma-4-26b-a4b-vision"
+      - "gemma-4-26b-mtp-vision"
