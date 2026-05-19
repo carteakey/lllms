@@ -115,65 +115,6 @@ models:
       --chat-template-file ${chat_template}
       --host 0.0.0.0 --port ${PORT}
 
-  "gpt-oss-20b":
-    name: "gpt-oss 20B"
-    env:
-      - "LLAMA_SET_ROWS=1"
-    cmd: |
-      ${llama_server}
-      -m /mnt/lab/models/ggml-org/gpt-oss-20b-GGUF/gpt-oss-20b-mxfp4.gguf
-      --n-cpu-moe 4 --ctx-size 32000 --n-gpu-layers 99
-      --temp 1.0 --min-p 0.0 --top-p 1.0 --top-k 20
-      --flash-attn --jinja --reasoning-format none
-      --chat-template-file ${chat_template}
-      --chat-template-kwargs '{"reasoning_effort": "high"}'
-      --host 0.0.0.0 --port ${PORT}
-
-  "gpt-oss-puzzle-88b":
-    name: "gpt-oss-puzzle 88B (optimized, bench-derived static placement)"
-    description: "pp=549 tg=27.0 t/s. Requires the PR-21032 llama.cpp build."
-    env:
-      - "LLAMA_SET_ROWS=1"
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${puzzle_server}
-      -m /home/kchauhan/models/SamPurkis/gpt-oss-puzzle-88B-GGUF/gpt-oss-puzzle-88B.MXFP4_MOE.gguf
-      --alias SamPurkis/gpt-oss-puzzle-88B
-      -ngl 37
-      --override-tensor "blk\.4\.ffn_down.*=CPU,blk\.(5|[6-9]|[0-9][0-9]|[0-9][0-9][0-9])\.ffn_(up|down|gate_up|gate)_(ch|)exps=CPU"
-      --no-mmap
-      -ctk q8_0 -ctv q8_0
-      --ctx-size 32768 --parallel 1
-      --flash-attn on
-      --batch-size 2048 --ubatch-size 512
-      --threads 10 --threads-batch 12
-      --prio 2 --no-warmup
-      --temp 1.0 --min-p 0.0 --top-p 1.0
-      --jinja --reasoning-format none
-      --chat-template-kwargs '{"reasoning_effort":"high"}'
-      --chat-template-file ${chat_template}
-      --host 0.0.0.0 --port ${PORT}
-
-  "gpt-oss-puzzle-88b-legacy":
-    name: "gpt-oss-puzzle 88B (legacy --fit)"
-    description: "Pre-optimized variant using --fit. Keep for regression comparison."
-    unlisted: true
-    env:
-      - "LLAMA_SET_ROWS=1"
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${puzzle_server}
-      -m /home/kchauhan/models/SamPurkis/gpt-oss-puzzle-88B-GGUF/gpt-oss-puzzle-88B.MXFP4_MOE.gguf
-      --alias SamPurkis/gpt-oss-puzzle-88B
-      --fit on --fit-ctx 65536 --fit-target 512
-      --no-mmap
-      -ctk q8_0 -ctv q8_0
-      --threads 10 --threads-batch 12 --flash-attn on
-      --batch-size 2048 --ubatch-size 512 --parallel 1
-      --prio 2 --no-warmup
-      --temp 1.0 --min-p 0.0 --top-p 1.0 --jinja
-      --host 0.0.0.0 --port ${PORT}
-
   # ===========================================================================
   # Qwen3 Coder Next (80B.A3B)
   # ===========================================================================
@@ -247,100 +188,8 @@ models:
       --host 0.0.0.0 --port ${PORT}
 
   # ===========================================================================
-  # Qwen3 30B / 35B
+  # Qwen3.6 MTP
   # ===========================================================================
-
-  "qwen3-30b-a3b":
-    name: "Qwen3-30B-A3B-Instruct-2507 (Q8_0)"
-    cmd: |
-      ${llama_server}
-      -m /mnt/lab/models/qwen/Qwen3-30B-A3B-Instruct-2507-GGUF/Qwen3-30B-A3B-Instruct-2507-Q8_0.gguf
-      --host 127.0.0.1 --port ${PORT}
-      --n-gpu-layers 99
-      --flash-attn --slots --metrics
-      --ubatch-size 512 --batch-size 512
-      --presence-penalty 1.5
-      --cache-type-k q8_0 --cache-type-v q8_0
-      --no-context-shift
-      --ctx-size 32768 --n-predict 32768
-      --temp 0.6 --top-k 20 --top-p 0.95 --min-p 0 --repeat-penalty 1.1
-      --jinja --reasoning-format deepseek
-      --threads 5 --threads-http 5
-      --cache-reuse 256
-      --override-tensor 'blk\.([0-9]*[02468])\.ffn_.*_exps\.=CPU'
-      --no-mmap
-
-  "qwen3-5-35b-a3b":
-    name: "Qwen3.5-35B-A3B (UD-Q4_K_L)"
-    env:
-      - "LLAMA_SET_ROWS=1"
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /mnt/lab/models/unsloth/Qwen3.5-35B-A3B-GGUF/Qwen3.5-35B-A3B-UD-Q4_K_L.gguf
-      --alias "unsloth/Qwen3.5-35B-A3B (UD-Q4_K_L)"
-      --seed 3407
-      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
-      --presence-penalty 1.5 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --ctx-size 65536
-      --fit on --fit-ctx 65536 --fit-target 128
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12
-      --flash-attn on
-      --batch-size 1024 --ubatch-size 512
-      --prio 2
-
-  "qwen3-6-35b-a3b":
-    name: "Qwen3.6-35B-A3B (UD-Q5_K_XL)"
-    env:
-      - "LLAMA_SET_ROWS=1"
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /mnt/lab/models/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q5_K_XL.gguf
-      --alias "unsloth/Qwen3.6-35B-A3B (UD-Q5_K_XL)"
-      --seed 3407
-      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
-      --presence-penalty 1.5 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --ctx-size 65536
-      --fit on --fit-ctx 65536 --fit-target 512
-      --parallel 1
-      -ctk q8_0 -ctv q8_0
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12
-      --flash-attn on
-      --batch-size 1024 --ubatch-size 512
-      --prio 2 --no-warmup
-
-  "qwen3-6-35b-a3b-vision":
-    name: "Qwen3.6-35B-A3B (UD-Q5_K_XL, vision/mmproj-F16)"
-    env:
-      - "LLAMA_SET_ROWS=1"
-      # vision profile uses safer graph/memory defaults on 12 GB cards
-      - "GGML_CUDA_GRAPH_OPT=0"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /mnt/lab/models/unsloth/Qwen3.6-35B-A3B-GGUF/Qwen3.6-35B-A3B-UD-Q5_K_XL.gguf
-      --mmproj /mnt/lab/models/unsloth/Qwen3.6-35B-A3B-GGUF/mmproj-F16.gguf
-      --alias "unsloth/Qwen3.6-35B-A3B (UD-Q5_K_XL, vision/mmproj-F16)"
-      --seed 3407
-      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
-      --presence-penalty 1.5 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --ctx-size 65536
-      --fit on --fit-ctx 65536 --fit-target 2048
-      --parallel 1
-      -ctk q8_0 -ctv q8_0
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12
-      --flash-attn on
-      --batch-size 256 --ubatch-size 512
-      --prio 2 --no-warmup
 
   "qwen3-6-mtp":
     name: "Qwen3.6-35B-A3B MTP (UD-Q4_K_XL)"
@@ -392,129 +241,6 @@ models:
       --parallel 1
       --batch-size 256 --ubatch-size 512
       --prio 2 --no-warmup
-
-  "ik-qwen3-5-35b-a3b":
-    name: "Qwen3.5-35B-A3B ik_llama.cpp (UD-Q4_K_L)"
-    description: "ik_llama fork binary, --n-cpu-moe 18."
-    env:
-      - "LLAMA_SET_ROWS=1"
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${ik_server}
-      -m /mnt/lab/models/unsloth/Qwen3.5-35B-A3B-GGUF/Qwen3.5-35B-A3B-UD-Q4_K_L.gguf
-      --alias "unsloth/Qwen3.5-35B-A3B (UD-Q4_K_L)"
-      --seed 3407
-      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
-      --presence-penalty 1.5 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --ctx-size 65536
-      --n-cpu-moe 18
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12
-      --flash-attn on
-
-  # ===========================================================================
-  # Qwen3.5 122B-A10B (4 preset variants)
-  # ===========================================================================
-
-  "qwen3-5-122b-instruct-general":
-    name: "Qwen3.5-122B-A10B (instruct-general)"
-    env:
-      - "LLAMA_SET_ROWS=1"
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF/UD-Q4_K_XL/Qwen3.5-122B-A10B-UD-Q4_K_XL-00001-of-00003.gguf
-      --alias "unsloth/Qwen3.5-122B-A10B (instruct-general)"
-      --seed 3407
-      --temp 0.7 --top-p 0.8 --top-k 20 --min-p 0.0
-      --presence-penalty 1.5 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --ctx-size 65536
-      --fit on --fit-ctx 65536 --fit-target 128
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12 --flash-attn on
-      --batch-size 1024 --ubatch-size 512
-      --prio 2
-
-  "qwen3-5-122b-instruct-reasoning":
-    name: "Qwen3.5-122B-A10B (instruct-reasoning)"
-    env:
-      - "LLAMA_SET_ROWS=1"
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF/UD-Q4_K_XL/Qwen3.5-122B-A10B-UD-Q4_K_XL-00001-of-00003.gguf
-      --alias "unsloth/Qwen3.5-122B-A10B (instruct-reasoning)"
-      --seed 3407
-      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0
-      --presence-penalty 1.5 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --ctx-size 65536
-      --fit on --fit-ctx 65536 --fit-target 128
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12 --flash-attn on
-      --batch-size 1024 --ubatch-size 512
-      --prio 2
-
-  "qwen3-5-122b-thinking-coding":
-    name: "Qwen3.5-122B-A10B (thinking-coding, IQ4_XS, static -ot)"
-    description: "pp=284 tg=9.8 t/s @ 512pp+128tg. Compute-bound on 10B active/tok."
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF/UD-IQ4_XS/Qwen3.5-122B-A10B-UD-IQ4_XS-00001-of-00003.gguf
-      --alias "unsloth/Qwen3.5-122B-A10B-thinking-coding"
-      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      -ctk q8_0 -ctv q8_0
-      --flash-attn on
-      --ctx-size 65536
-      --no-mmap
-      # routed experts blk 3-47 + shared via (ch|) to CPU. Dropping shared OOMs.
-      --override-tensor "blk\.(3|[4-9]|[0-9][0-9]|[0-9][0-9][0-9])\.ffn_(up|down|gate)_(ch|)exps=CPU"
-      --threads 10 --threads-batch 12
-
-  "qwen3-5-122b-thinking-general":
-    name: "Qwen3.5-122B-A10B (thinking-general)"
-    env:
-      - "LLAMA_SET_ROWS=1"
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF/UD-Q4_K_XL/Qwen3.5-122B-A10B-UD-Q4_K_XL-00001-of-00003.gguf
-      --alias "unsloth/Qwen3.5-122B-A10B (thinking-general)"
-      --seed 3407
-      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0
-      --presence-penalty 1.5 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --ctx-size 65536
-      --fit on --fit-ctx 65536 --fit-target 128
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12 --flash-attn on
-      --batch-size 1024 --ubatch-size 512
-      --prio 2
-
-  "ik-qwen3-5-122b-thinking-coding":
-    name: "Qwen3.5-122B-A10B thinking-coding (ik_llama.cpp, -merge-qkv)"
-    description: "ik_llama fork binary with the -merge-qkv flag. Fork binary is required; the upstream llama-server does not accept -merge-qkv."
-    unlisted: true
-    cmd: |
-      taskset -c ${cpu_range} ${ik_server}
-      -m /mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF/UD-IQ4_XS/Qwen3.5-122B-A10B-UD-IQ4_XS-00001-of-00003.gguf
-      --alias "unsloth/Qwen3.5-122B-A10B-thinking-coding"
-      --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.0
-      --host 0.0.0.0 --port ${PORT}
-      -merge-qkv
-      --jinja
-      -ctk q8_0 -ctv q8_0
-      --flash-attn on
-      --ctx-size 65536 --no-mmap
-      --threads 10 --threads-batch 12
 
   # ===========================================================================
   # Mistral Small 4 119B (5 variants)
@@ -672,7 +398,7 @@ models:
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
-      -m /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf
+      -m /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf
       --alias "unsloth/gemma-4-26B-A4B-it (UD-Q5_K_XL)"
       --seed 3407
       --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0.0 --repeat-penalty 1.0
@@ -695,8 +421,8 @@ models:
       - "GGML_CUDA_GRAPH_OPT=0"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
-      -m /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf
-      --mmproj /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF/mmproj-BF16.gguf
+      -m /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf
+      --mmproj /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF/mmproj-BF16.gguf
       --alias "unsloth/gemma-4-26B-A4B-it (UD-Q5_K_XL)"
       --seed 3407
       --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0.0 --repeat-penalty 1.0
@@ -719,8 +445,8 @@ models:
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
       taskset -c ${cpu_range} ${env.L3MS_ROOT}/vendor/atomic-llama-cpp-turboquant/build/bin/llama-server
-      -m /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf
-      --mtp-head /home/kchauhan/models/AtomicChat/gemma-4-26B-A4B-it-assistant-GGUF/gemma-4-26B-A4B-it-assistant.Q4_K_M.gguf
+      -m /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf
+      --mtp-head /mnt/lab/models/AtomicChat/gemma-4-26B-A4B-it-assistant-GGUF/gemma-4-26B-A4B-it-assistant.Q4_K_M.gguf
       --alias "unsloth/gemma-4-26B-A4B MTP (TurboQuant)"
       --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
       --presence-penalty 0.0 --repeat-penalty 1.0
@@ -746,10 +472,10 @@ models:
       - "GGML_CUDA_GRAPH_OPT=0"
     cmd: |
       taskset -c ${cpu_range} ${env.L3MS_ROOT}/vendor/atomic-llama-cpp-turboquant/build/bin/llama-server
-      -m /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf
-      --mtp-head /home/kchauhan/models/AtomicChat/gemma-4-26B-A4B-it-assistant-GGUF/gemma-4-26B-A4B-it-assistant.Q4_K_M.gguf
-      --mmproj /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF/mmproj-BF16.gguf
-      --alias "unsloth/gemma-4-26B-A4B MTP (vision, TurboQuant)"
+      -m /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf
+      --mtp-head /mnt/lab/models/AtomicChat/gemma-4-26B-A4B-it-assistant-GGUF/gemma-4-26B-A4B-it-assistant.Q4_K_M.gguf
+      --mmproj /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF/mmproj-BF16.gguf
+      --alias "unsloth/Gemma 4 26B-A4B MTP (vision, TurboQuant)"
       --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
       --presence-penalty 0.0 --repeat-penalty 1.0
       --host 0.0.0.0 --port ${PORT}
@@ -790,6 +516,33 @@ models:
       --batch-size 1024 --ubatch-size 512
       --prio 2 --no-warmup
 
+  "gemma-4-26b-mtp-q6":
+    name: "Gemma 4 26B-A4B MTP (UD-Q6_K_XL, TurboQuant)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${env.L3MS_ROOT}/vendor/atomic-llama-cpp-turboquant/build/bin/llama-server
+      -m /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf
+      --mtp-head /mnt/lab/models/AtomicChat/gemma-4-26B-A4B-it-assistant-GGUF/gemma-4-26B-A4B-it-assistant.Q4_K_M.gguf
+      --alias "unsloth/gemma-4-26B-A4B MTP Q6 (TurboQuant)"
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
+      --presence-penalty 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --chat-template-kwargs '{"preserve_thinking": true}'
+      --ctx-size 65536 --n-predict 32768
+      --fit on --fit-ctx 65536 --fit-target 1536
+      -ctk turbo3 -ctv turbo3
+      -ctkd turbo3 -ctvd turbo3
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12
+      --flash-attn on
+      --spec-type mtp --draft-block-size 3 --draft-max 8 --draft-p-min 0.9
+      --parallel 1
+      --batch-size 1024 --ubatch-size 512
+      --prio 2 --no-warmup
+
   "sarvam-30b":
     name: "sarvam-30B (Q6_K)"
     description: "Requires the PR-20275 llama.cpp build (./maintenance/build-sarvam-llama-cpp.sh)."
@@ -806,44 +559,6 @@ models:
       --temp 1.0 --top-p 1.0 --top-k 20 --min-p 0.0 --repeat-penalty 1.0
       --flash-attn on
       --jinja --no-mmap --mlock --prio 2
-
-  # ===========================================================================
-  # Low-resource / test
-  # ===========================================================================
-
-  "qwen3-cpu-only":
-    name: "Qwen3-30B-A3B (CPU-only, pulled via -hf)"
-    description: "No GPU layers. Uses -hf to pull unsloth/Qwen3-30B-A3B-GGUF:q4_k_m."
-    cmd: |
-      ${llama_server}
-      -hf unsloth/Qwen3-30B-A3B-GGUF:q4_k_m
-      --n-gpu-layers 0
-      --jinja --reasoning-format deepseek
-      --flash-attn
-      -sm row
-      --temp 0.6 --top-k 20 --top-p 0.95 --min-p 0
-      --ctx-size 40960 --n-predict 32768
-      --no-context-shift
-      --port ${PORT} --host 0.0.0.0
-      --metrics
-      --alias "Qwen3-30B (CPU Only)"
-
-  "llama-cpp-test":
-    name: "dev/test harness (Qwen3.5-122B MXFP4)"
-    description: "Minimal smoke-test invocation. Not for production."
-    unlisted: true
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF/MXFP4_MOE/Qwen3.5-122B-A10B-MXFP4_MOE-00001-of-00003.gguf
-      --alias "unsloth/Qwen3.5-122B-A10B-thinking-coding"
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      -ctk q8_0 -ctv q8_0
-      --flash-attn on
-      --ctx-size 65536
-      --fit on --fit-ctx 65536 --fit-target 512
-      --no-mmap
-      --threads 10
 
 # ===========================================================================
 # Startup: preload the default so the first request is instant.

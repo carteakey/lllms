@@ -13,7 +13,7 @@
       "description": "OmniCoder 9B Q8_0 — fits entirely in RTX 4070 VRAM"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "unsloth/Qwen3.5-9B-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen3.5-9B-GGUF",
       "allow_patterns": ["*UD*Q6_K*", "*mmproj-F16*"],
@@ -57,7 +57,7 @@
       "description": "Qwen Image 2512 Q3_K_M"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "unsloth/Qwen3.5-35B-A3B-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen3.5-35B-A3B-GGUF",
       "allow_patterns": ["*UD-Q4_K_XL*"],
@@ -112,7 +112,7 @@
       "description": "Qwen3.5 122B-A10B UD-IQ4_XS (already downloaded)"
     },
     {
-      "enabled": false,
+      "enabled": true,
       "repo_id": "unsloth/Qwen3-Coder-Next-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen3-Coder-Next-GGUF",
       "allow_patterns": ["*UD*Q4*XL*"],
@@ -156,26 +156,15 @@
       "description": "GPT OSS Puzzle 88B GGUF (MXFP4_MOE primary profile; requires puzzle PR build flow #21032)"
     },
     {
-      "enabled": false,
+      "enabled": true,
       "repo_id": "unsloth/gemma-4-26B-A4B-it-GGUF",
       "local_dir": "/home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF",
-      "allow_patterns": ["*gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf*", "*mmproj-BF16.gguf*"],
+      "allow_patterns": ["*gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf*", "*mmproj-BF16.gguf*", "*gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf*"],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
       "max_workers": 2,
-      "description": "Gemma 4 26B-A4B UD-Q5_K_XL + mmproj-BF16 (mainline llama.cpp, /home model path)"
-    },
-    {
-      "enabled": false,
-      "repo_id": "unsloth/gemma-4-26B-A4B-it-GGUF",
-      "local_dir": "/mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF",
-      "allow_patterns": ["*gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf*"],
-      "ignore_patterns": [],
-      "revision": "",
-      "force_download": false,
-      "max_workers": 2,
-      "description": "gemma-4-26b-a4b-q6-k-xl: Gemma 4 26B-A4B UD-Q6_K_XL profile. Check quant compatibility and disk footprint."
+      "description": "Gemma 4 26B-A4B UD-Q5/Q6_K_XL + mmproj-BF16"
     },
     {
       "enabled": true,
@@ -222,7 +211,7 @@
       "description": "Qwen3 30B Instruct with Q8 quantization"
     },
     {
-      "enabled": false,
+      "enabled": true,
       "repo_id": "unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF",
       "allow_patterns": ["*UD-Q3_K_XL*"],
@@ -233,7 +222,7 @@
       "description": "NVIDIA Nemotron 3 Super 120B-A12B UD-Q3_K_XL (already downloaded)"
     },
     {
-      "enabled": false,
+      "enabled": true,
       "repo_id": "Sumitc13/sarvam-30b-GGUF",
       "local_dir": "/mnt/lab/models/Sumitc13/sarvam-30b-GGUF",
       "allow_patterns": ["*sarvam-30B-Q6_K.gguf*"],
@@ -244,7 +233,7 @@
       "description": "Sarvam 30B Q6_K GGUF (repo: Sumitc13/sarvam-30b-GGUF; requires SarvamMoE-capable llama.cpp fork/branch)"
     },
     {
-      "enabled": false,
+      "enabled": true,
       "repo_id": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
       "allow_patterns": ["*UD-Q4_K_XL*"],
