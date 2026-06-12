@@ -8,7 +8,7 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 - **Gemma 4 QAT & MTP Integration**:
   - Rebuilt mainline `llama.cpp` using the system GCC 16 compiler to resolve segmentation faults in CUDA template compilation.
   - Added new Gemma 4 26B and 12B QAT & MTP profiles to `llama-swap.yaml` (`gemma-4-26b-qat`, `gemma-4-26b-qat-mtp`, `gemma-4-12b-qat`, `gemma-4-12b-qat-mtp`).
-  - Migrated legacy `gemma-4-26b-mtp`, `gemma-4-26b-mtp-q6`, and `gemma-4-26b-mtp-vision` profiles in `llama-swap.yaml` to run via mainline `llama_server` native MTP instead of the old TurboQuant fork.
+  - Deprecated and removed the older, redundant non-QAT Gemma 4 26B profiles (`gemma-4-26b-a4b`, `gemma-4-26b-a4b-vision`, `gemma-4-26b-mtp`, `gemma-4-26b-mtp-vision`, `gemma-4-26b-a4b-q6-k-xl`, and `gemma-4-26b-mtp-q6`) as the new QAT + MTP configurations fully replace them at double the speed.
   - Created blog posts documenting benchmarks for Gemma 4 26B and 12B under QAT and MTP configurations, showing local speeds up to 100.6 tok/s (26B) and 120.8 tok/s (12B) on an RTX 4070.
 
 ### [2026-05-19]
