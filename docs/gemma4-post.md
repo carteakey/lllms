@@ -1,1 +1,0 @@
-/home/kchauhan/repos/carteakey.dev/src/posts/2026-05-17-running-gemma-4-mtp-locally.md
