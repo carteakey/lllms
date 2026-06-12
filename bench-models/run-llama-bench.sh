@@ -4,6 +4,11 @@
 # Required (no default):
 #   MODEL             - path to .gguf model file
 #
+# Result logging (bench-models/logs/results/<MODEL_KEY>.jsonl):
+#   MODEL_KEY         - short slug for the results file (default: model filename stem)
+#   STRATEGY          - descriptive label for this run (e.g. "all-cpu-moe", "fit", "partial-cpu")
+#   NOTES             - free-text annotation appended to the JSONL record
+#
 # Optional (llama-bench defaults shown):
 #   LLAMA_BENCH       - path to llama-bench binary (default: ../vendor/llama.cpp/build/bin/llama-bench)
 #
@@ -132,3 +137,7 @@ if command -v taskset >/dev/null 2>&1 && [ -n "${CPU_RANGE:-}" ]; then
 else
   "${cmd[@]}" 2>&1 | tee "${LOG_FILE}"
 fi
+
+# --- log structured result ---
+BACKEND="${BACKEND:-llama.cpp}" LOG_FILE="${LOG_FILE}" \
+  "${SCRIPT_DIR}/log-result.sh" || true

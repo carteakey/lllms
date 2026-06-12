@@ -15,6 +15,24 @@ RUN_SCRIPT_GLOB = "run-models/run-llama-cpp-*.sh"
 BENCH_SCRIPT_GLOB = "bench-models/bench-llama-cpp-*.sh"
 
 
+def print_quickstart() -> None:
+    print("L3MS quick start")
+    print()
+    print("  1) Open the TUI")
+    print("     python3 l3ms.py")
+    print("     - Start tab opens first with guided actions")
+    print()
+    print("  2) Run without entering TUI")
+    print("     python3 l3ms.py --run")
+    print("     python3 l3ms.py --bench")
+    print()
+    print("  3) Discover available scripts")
+    print("     python3 l3ms.py --list all")
+    print()
+    print("  4) Pass extra args to selected script")
+    print('     python3 l3ms.py --run qwen --extra "--ctx-size 32768"')
+
+
 def collect_scripts(mode: str) -> List[Path]:
     pattern = RUN_SCRIPT_GLOB if mode == "run" else BENCH_SCRIPT_GLOB
     return sorted([path for path in ROOT.glob(pattern) if path.is_file()])
@@ -148,6 +166,11 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
         choices=["run", "bench", "all"],
         help="List available scripts and exit",
     )
+    group.add_argument(
+        "--quickstart",
+        action="store_true",
+        help="Print a quick-start guide and exit",
+    )
     parser.add_argument(
         "--extra",
         default="",
@@ -158,6 +181,10 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args(sys.argv[1:])
+
+    if args.quickstart:
+        print_quickstart()
+        raise SystemExit(0)
 
     if args.list:
         if args.list in {"run", "all"}:

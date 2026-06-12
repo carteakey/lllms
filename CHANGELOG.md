@@ -4,9 +4,120 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
-## [Unreleased]
+### [2026-06-12]
+- **Gemma 4 QAT & MTP Integration**:
+  - Rebuilt mainline `llama.cpp` using the system GCC 16 compiler to resolve segmentation faults in CUDA template compilation.
+  - Added new Gemma 4 26B and 12B QAT & MTP profiles to `llama-swap.yaml` (`gemma-4-26b-qat`, `gemma-4-26b-qat-mtp`, `gemma-4-12b-qat`, `gemma-4-12b-qat-mtp`).
+  - Migrated legacy `gemma-4-26b-mtp`, `gemma-4-26b-mtp-q6`, and `gemma-4-26b-mtp-vision` profiles in `llama-swap.yaml` to run via mainline `llama_server` native MTP instead of the old TurboQuant fork.
+  - Created blog posts documenting benchmarks for Gemma 4 26B and 12B under QAT and MTP configurations, showing local speeds up to 100.6 tok/s (26B) and 120.8 tok/s (12B) on an RTX 4070.
+
+### [2026-05-19]
+- **MTP Improvements**: Rebuilt `llama.cpp` with [PR #23269](https://github.com/ggml-org/llama.cpp/pull/23269) for enhanced Multi-Token Prediction performance.
+- **Qwen 3.6 35B**: Added Q6_K variant and initialized benchmarking to evaluate performance vs Q4_K_XL.
+- **Documentation**: Updated MTP-related posts with latest upstream status.
+
+
+### Changed
+- **Qwen 3.6 MTP Mainline**: Updated `llama-swap.yaml` configuration to use the mainline `llama-server` and the updated `--spec-type draft-mtp` flag since MTP support is now merged into `llama.cpp` master.
+- **TUI workbench pass**:
+  - Added a persistent command bar with context-specific shortcut hints.
+  - Reworked the Start tab into a compact workbench hub grouped around
+    Operate / Inventory / Command flows.
+  - Upgraded the command palette with a shortcut column and token-based
+    filtering.
+  - Reduced Run/Model Ops table churn by avoiding column rebuilds on every
+    filter refresh.
+  - Moved repeated shortcut hint rows into a reusable `ShortcutStrip`.
+  - Moved llama-swap model refresh onto a named Textual worker and refresh the
+    command bar on direct tab activation.
+- **Maintenance updater**: new `maintenance/update-llama-stack.sh` snapshots
+  the current llama-swap binary and llama.cpp build metadata, updates
+  llama-swap, rebuilds mainline llama.cpp, validates `llama-swap.yaml`, and
+  restarts `llama-swap.service` only if it was already active.
+- **llama.cpp build script**: dropped the removed `llama-sweep-bench` target
+  from the default build target list.
+- **Bench result logging**: fixed fitted `-ot "..."` placement strings so
+  `bench-models/log-result.sh` records JSONL results instead of tripping over
+  shell quotes. Structured results now live under `bench-models/logs/results/`
+  alongside the raw bench logs.
+- **Codex skill**: added `codex-skills/l3ms-prepost` for repeatable
+  before/update/after llama-swap + llama.cpp maintenance checks.
+- **Serving architecture switched to llama-swap**:
+  - New `llama-swap.yaml` is the single source of truth for every servable
+    model (28 previous `run-models/*.sh` scripts collapsed into YAML entries
+    + aliases + reasoning-effort variants).
+  - New `maintenance/systemd/llama-swap.service` user-level unit runs
+    `llama-swap -config llama-swap.yaml -listen :8080`.
+  - Startup preload is `gemma-4-26b-a4b-vision` (previously the dedicated
+    `gemma-vision.service` default).
+  - New `docs/llama-swap-runbook.md` covers install, start/stop, curl,
+    and how to add a model.
+  - **Breaking**: `run-models/` directory removed. Clients previously hitting
+    per-model ports (mostly `:8001`) now hit the single `:8080` endpoint and
+    pass the model ID in the OpenAI `model` field. Update the TUI Chat tab's
+    base URL to `http://<host>:8080/v1`.
+- **TUI Model Ops Run mode now talks to llama-swap**:
+  - New `l3ms/llama_swap.py` HTTP client (`list_models`, `load_model`,
+    `unload_model`, `probe`). `LLAMA_SWAP_URL` env override supported.
+  - Run mode table lists models from `/v1/models` (with state column).
+    Start (`Ctrl+R`) calls `POST /models/load`; Stop (`Ctrl+S`) calls
+    `POST /models/unload`. Editor becomes a read-only detail pane with
+    ready-to-copy curl snippets.
+  - Bench mode is unchanged: still globs `bench-models/*.sh` and spawns
+    subprocesses.
+  - Jobs tab retry: for `run` mode, retries now resolve as model IDs
+    (not script paths).
+  - `l3ms.py --run`: picks a model from llama-swap and POSTs `/models/load`.
+    `l3ms.py --list run`: prints models from `/v1/models`.
+- **Installer**: `maintenance/install-llama-swap.sh` fetches the release
+  binary into `~/bin/` with OS/arch auto-detection and `FORCE` / version
+  pinning. Replaces the copy-paste curl snippet in the runbook.
+
+- **Polish pass on the migration**:
+  - Fix `--fit-ctx 32678` → `32768` typo in `gpt-oss-120b-legacy` and
+    `gpt-oss-120b-low` (copied verbatim from the original shell scripts).
+  - Switch `ik-qwen3-5-122b-thinking-coding` to `${ik_server}` (the original
+    ik- shell script used the vanilla binary — required the ik fork for
+    `-merge-qkv`).
+  - `llama-swap.service` now uses `%h` + env vars (`L3MS_ROOT`,
+    `LLAMA_SWAP_BIN`, `LLAMA_SWAP_LISTEN`) so the unit runs unmodified on any
+    account; documented drop-in override flow in the runbook.
+  - RunPanel in run mode now tracks `loaded_model_id` separately from the
+    cursor; Ctrl+S unloads the model that's actually loaded, not whatever
+    row the user last clicked. Friendly message when nothing is loaded.
+  - Run-mode live resource telemetry restored: `_find_llama_swap_pid` +
+    `ps --ppid` aggregate CPU/RAM of llama-swap upstream processes, polled
+    every 2s. `nvidia-smi` still feeds the GPU column when available.
+  - ChatPanel: replaced the read-only model label with a `Select` populated
+    from `/v1/models` on connect/detect; requests use the selected model ID
+    instead of the hard-coded `"default"` string (which llama-swap rejects).
+  - Jobs-tab retry for run mode now carries the model ID through
+    `JobStarted.script_path` so "retry" reloads the right model.
+- **`gemma-vision.service` retired**:
+  - Unit moved to `maintenance/systemd/archive/gemma-vision.service`.
+  - Installer helper moved to
+    `maintenance/archive/setup-gemma-vision-service.sh`.
+  - `maintenance/archive/README.md` explains the migration + disable steps.
+  - `docs/bench-runbook.md` no longer documents that flow.
 
 ### Added
+- **Qwen3.6-35B-A3B workflow support**:
+  - `bench-models/run-llama-cpp-qwen3-6-35b-a3b.sh` direct serve helper for local tuning outside llama-swap
+  - `bench-models/run-llama-cpp-qwen3-6-35b-a3b-vision.sh` vision preset wrapper (`mmproj-F16`, 64k ctx, safer fit/batch defaults)
+  - `bench-models/bench-llama-cpp-qwen3-6-35b-a3b.sh` baseline bench script (safe all-experts-on-CPU default via `-ot`)
+  - `bench-models/bench-llama-cpp-qwen3-6-35b-a3b-strategies.sh` strategy sweep bench script (`all-cpu-moe`, `partial-cpu`, `up-down-cpu`, `up-cpu`)
+  - `bench-models/bench-llama-cpp-qwen3-6-35b-a3b-fit.sh` fit-based bench script
+  - `llama-swap.yaml` model entries `qwen3-6-35b-a3b` (text) and `qwen3-6-35b-a3b-vision` (multimodal)
+  - `model_downloader/models_config.json` Qwen3.6 profile now fetches both `UD-Q5_K_XL` and `mmproj-F16`
+  - `docs/bench-runbook.md` quickstart + measured pp/tg results (fit winner on RTX 4070 12 GB), including vision serving flow
+  - `docs/qwen3-6-35b-a3b-post.md` draft blog post for text + vision setup and benchmark outcomes
+- **Start tab + accessibility navigation pass**:
+  - `Start` tab now opens by default and provides guided core actions (Download, Model Ops, Chat, Browser, Maintenance, Jobs) plus direct Help/Palette entry points
+  - tab navigation fallback keys: `Alt+1..Alt+7` (direct tab switch) and `Alt+←/Alt+→` (cycle tabs)
+  - `l3ms.py --quickstart` prints a no-TUI quick-start guide for first-time users or remote terminals
+  - Jobs panel now surfaces history load/save status instead of silently swallowing history file failures
+  - key-hint copy across panels is standardized around "core actions + ? full shortcuts" to keep dense layouts but improve scanability
+
 - **Gemma-4-26B-A4B workflow support**:
   - `run-models/run-llama-cpp-gemma-4-26b-a4b.sh` run script targeting mainline `vendor/llama.cpp/build/bin/llama-server`
   - `run-models/run-llama-cpp-gemma-4-26b-a4b-vision.sh` dedicated vision preset wiring `mmproj-BF16.gguf`
@@ -16,6 +127,11 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
   - `bench-models/bench-llama-cpp-gemma-4-26b-a4b-fit.sh` fit-based bench script
   - `model_downloader/models_config.json` profile for `unsloth/gemma-4-26B-A4B-it-GGUF` (`UD-Q5_K_XL` + `mmproj-BF16`)
   - `docs/bench-runbook.md` quickstart section for Gemma-4-26B-A4B on mainline llama.cpp
+- **gemma-4-26b-a4b-q6-k-xl onboarding**:
+  - `llama-swap.yaml` model entry `gemma-4-26b-a4b-q6-k-xl` using `--fit` defaults for first-pass tuning
+  - `bench-models/bench-llama-cpp-gemma-4-26b-a4b-q6-x-l.sh`, `bench-models/bench-llama-cpp-gemma-4-26b-a4b-q6-x-l-strategies.sh`, `bench-models/bench-llama-cpp-gemma-4-26b-a4b-q6-x-l-fit.sh`
+  - `model_downloader/models_config.json` disabled profile for `unsloth/gemma-4-26B-A4B-it-GGUF` with `*gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf*`
+  - `docs/bench-runbook.md` §1 hardware table placeholder row + §8 benchmark stub for Gemma UD-Q6_K_XL
 - **Gemma vision user service support**:
   - `maintenance/systemd/gemma-vision.service` user-level systemd unit for always-on startup
   - `maintenance/setup-gemma-vision-service.sh` helper for `install/start/stop/restart/enable/disable/status/logs`

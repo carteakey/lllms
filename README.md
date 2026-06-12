@@ -25,6 +25,12 @@ python3 -m pip install -r requirements-tui.txt
 python3 l3ms.py
 ```
 
+Show quick-start instructions without opening TUI:
+
+```bash
+python3 l3ms.py --quickstart
+```
+
 ## Interactive CLI Modes
 
 List available scripts:
@@ -53,6 +59,13 @@ python3 l3ms.py --run qwen --extra "--ctx-size 32768"
 
 ## TUI Scope
 
+- Workbench shell:
+  - persistent command bar with context-specific shortcut hints
+  - richer `Ctrl+P` command palette with shortcut column and token filtering
+- `Start` tab:
+  - workbench hub grouped by Operate / Inventory / Command flows
+  - quick access to Help and the command palette
+  - fallback navigation hints for terminals where F-keys are inconsistent
 - `Download` tab:
   - config load/save/validate/restore
   - model row add/apply/delete
@@ -67,19 +80,23 @@ python3 l3ms.py --run qwen --extra "--ctx-size 32768"
   - scan any local directory for `.gguf` files
   - inspect size, quantization, params, architecture, and modified timestamp in a table
   - filter/sort results and inspect per-file metadata details
-- Additional tabs: `Chat`, `Maintenance`, `Settings`, `Jobs`
+- Additional tabs: `Chat`, `Maintenance`, `Jobs`
 
 ## Keyboard-first Controls
 
 Global:
 
+- `Ctrl+P`: command palette
+- `?`: key binding help
 - `F1`: Download tab
 - `F2`: Model Ops tab
 - `F3`: Chat tab
 - `F4`: Maintenance tab
-- `F5`: Settings tab
+- `F5`: Start tab
 - `F6`: Jobs tab
 - `F7`: Model Browser tab
+- `Alt+1..Alt+7`: tab fallback when F-keys are unreliable
+- `Alt+←` / `Alt+→`: previous / next tab
 
 Download (active only on Download tab):
 
@@ -115,13 +132,21 @@ Model Browser (active only on Model Browser tab):
 ## Project Layout
 
 - `model_downloader/`: Hugging Face downloader + model config
-- `run-models/`: one `run-llama-cpp-*.sh` script per model
+- `llama-swap.yaml`: single source of truth for servable models (see `docs/llama-swap-runbook.md`)
 - `bench-models/`: one `bench-llama-cpp-*.sh` script per model
 - `maintenance/`: system/build scripts
-- `maintenance/systemd/`: user service units (optional startup services)
+- `maintenance/systemd/`: user service units (including `llama-swap.service`)
 - `l3ms/`: TUI app + stores
 - `l3ms.py`: launcher (TUI and CLI modes)
+- `docs/llama-swap-runbook.md`: install, start/stop, curl, add-a-model
 - `docs/model-onboarding-playbook.md`: end-to-end checklist for adding new model families
+
+## Serving
+
+Models are served by [llama-swap](https://github.com/mostlygeek/llama-swap) on
+a single OpenAI-compatible endpoint (`http://<host>:8080`). The daemon
+hot-swaps models on demand and exposes every entry in `llama-swap.yaml`
+under `/v1/models`. See `docs/llama-swap-runbook.md`.
 
 ## Downloader CLI (direct)
 

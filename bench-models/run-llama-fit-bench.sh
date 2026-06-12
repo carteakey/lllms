@@ -7,6 +7,11 @@
 # Required (no default):
 #   MODEL             - path to .gguf model file
 #
+# Result logging (bench-models/logs/results/<MODEL_KEY>.jsonl):
+#   MODEL_KEY         - short slug for the results file (default: model filename stem)
+#   STRATEGY          - defaults to "fit" if not set
+#   NOTES             - free-text annotation appended to the JSONL record
+#
 # Optional — fit stage:
 #   LLAMA_FIT         - path to llama-fit-params binary (default: ../vendor/llama.cpp/build/bin/llama-fit-params)
 #   FIT_TARGET        - MiB of free VRAM margin to leave on each GPU (default: 1024)
@@ -217,3 +222,10 @@ LOG_FILE="${LOG_DIR}/$(date +%Y-%m-%d_%H-%M-%S)_${_model_slug}_fit.log"
     "${bench_cmd[@]}" 2>&1
   fi
 } | tee "${LOG_FILE}"
+
+# --- log structured result ---
+BACKEND="${BACKEND:-llama.cpp}" \
+STRATEGY="${STRATEGY:-fit}" \
+OVERRIDE_TENSOR="${bench_line:-}" \
+LOG_FILE="${LOG_FILE}" \
+  "${SCRIPT_DIR}/log-result.sh" || true

@@ -9,6 +9,9 @@
 
 ## 🟡 High Priority
 
+- **Bench-vs-serve flag drift**: bench scripts carry their own copies of
+  `-ngl` / `--override-tensor`. Consider a later pass where bench scripts
+  source shared args from `llama-swap.yaml` (yq) so tuning stays in sync
 - **Benchmark result browser**: UI to view and compare results from
   `bench-results/`; parse timing/throughput from existing `.md` files and
   display in a sortable table — closes the run → bench → compare workflow loop
@@ -67,6 +70,14 @@
 
 ## ✅ Done
 
+- ~~TUI: teach Model Ops about llama-swap~~ — Run mode now reads from
+  `/v1/models`; Start/Stop call `/models/load` and `/models/unload`;
+  editor shows model state + curl snippets. Bench mode unchanged.
+- ~~Chat tab default port~~ — already `8080` (checked post-migration,
+  TODO was stale)
+- ~~Retire `gemma-vision.service`~~ — moved unit + helper to
+  `maintenance/systemd/archive/` and `maintenance/archive/`; llama-swap
+  preloads `gemma-4-26b-a4b-vision` instead
 - ~~Fix `preserve_existing` field loss~~ — removed from schema, no longer needed
 - ~~Add `action_quit` method~~ — implemented with graceful subprocess + task cleanup
 - ~~Add missing Maintenance tab output capture~~ — `run_script` no longer awaits

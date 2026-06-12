@@ -53,13 +53,13 @@ from .script_store import (
     restore_script_version,
     save_script_with_version,
 )
+from . import llama_swap
 
 ROOT = Path(__file__).resolve().parents[1]
 DOWNLOAD_SCRIPT = ROOT / "model_downloader" / "download_hf_model.py"
-RUN_SCRIPT_GLOB = "run-models/run-llama-cpp-*.sh"
-IK_RUN_SCRIPT_GLOB = "run-models/run-ik-llama-cpp-*.sh"
 BENCH_SCRIPT_GLOB = "bench-models/bench-llama-cpp-*.sh"
 MAINTENANCE_SCRIPT_GLOB = "maintenance/*.sh"
+LLAMA_SWAP_CONFIG_PATH = ROOT / "llama-swap.yaml"
 
 _BYTES_PER_GB: int = 1_073_741_824
 _ELAPSED_THRESHOLD_SECS: int = 120
@@ -172,6 +172,11 @@ def _format_parameter_count(param_count: Optional[int]) -> str:
 
 def _format_mtime(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
+
+
+class ShortcutStrip(Static):
+    def __init__(self, text: str) -> None:
+        super().__init__(text, classes="key_hint shortcut_strip")
 
 
 def _read_exact(handle: Any, size: int) -> bytes:
@@ -407,8 +412,7 @@ class DownloadPanel(Static):
                         yield Button("Download Selected", id="btn_download_selected")
                         yield Button("Download Enabled", id="btn_download_enabled")
                     yield Label(
-                        "Keys: Alt+T table, Alt+I editor, Alt+O load, Alt+W save, Alt+V validate, "
-                        "Alt+N add, Alt+A apply, Alt+K delete, Alt+D selected, Alt+E enabled, Alt+Y clear log"
+                        "Core: Alt+D selected · Alt+E enabled · Alt+N add · Alt+A apply · Alt+K delete · ? full shortcuts"
                     )
 
                 with Vertical(classes="right"):
@@ -892,15 +896,20 @@ class RunPanel(Static):
     def __init__(self) -> None:
         super().__init__(id="run_panel")
         self.mode = "run"
-        self.run_scripts: List[Path] = []
+        self.swap_models: List[llama_swap.SwapModel] = []
         self.bench_scripts: List[Path] = []
-        self.filtered: List[Path] = []
+        self.filtered_scripts: List[Path] = []
+        self.filtered_models: List[llama_swap.SwapModel] = []
         self.selected_script: Optional[Path] = None
+        self.selected_model_id: Optional[str] = None
+        # last model we successfully loaded via llama-swap; Stop targets this, not the cursor
+        self.loaded_model_id: Optional[str] = None
         self.running_proc: Optional[asyncio.subprocess.Process] = None
         self.running_task: Optional[asyncio.Task[None]] = None
         self.resource_task: Optional[asyncio.Task[None]] = None
         self.running_started_at: Optional[float] = None
         self._current_job_name: str = "idle"
+        self._installed_table_mode: Optional[str] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel"):
@@ -929,9 +938,8 @@ class RunPanel(Static):
             with Horizontal(classes="row main"):
                 with Vertical(classes="left"):
                     yield DataTable(id="run_scripts_table")
-                    yield Label(
-                        "Keys: Ctrl+F filter, Ctrl+J table, Ctrl+U editor, Ctrl+M toggle mode, "
-                        "Ctrl+R start, Ctrl+S stop, Alt+P save script, Ctrl+L clear log"
+                    yield ShortcutStrip(
+                        "Core: Ctrl+R start · Ctrl+S stop · Ctrl+M mode · Ctrl+F filter · Ctrl+U editor · ? full shortcuts"
                     )
                     yield RichLog(id="run_log", wrap=True, markup=False)
 
@@ -952,10 +960,21 @@ class RunPanel(Static):
     def on_mount(self) -> None:
         table = self.query_one("#run_scripts_table", DataTable)
         table.cursor_type = "row"
-        table.add_columns("#", "script")
+        self._install_table_columns()
         self.refresh_script_inventory()
         self.refresh_binary_selector()
         self.focus_table()
+
+    def _install_table_columns(self) -> None:
+        if self._installed_table_mode == self.mode:
+            return
+        table = self.query_one("#run_scripts_table", DataTable)
+        table.clear(columns=True)
+        if self.mode == "run":
+            table.add_columns("state", "model", "name")
+        else:
+            table.add_columns("#", "script")
+        self._installed_table_mode = self.mode
 
     def set_status(self, message: str) -> None:
         self.query_one("#run_log", RichLog).write(message)
@@ -986,59 +1005,134 @@ class RunPanel(Static):
         )
 
     def refresh_script_inventory(self) -> None:
-        self.run_scripts = sorted(
-            collect_scripts(RUN_SCRIPT_GLOB) + collect_scripts(IK_RUN_SCRIPT_GLOB)
-        )
         self.bench_scripts = collect_scripts(BENCH_SCRIPT_GLOB)
-        self.refresh_table()
+        if self.mode == "run":
+            self._schedule_swap_refresh()
+        else:
+            self.refresh_table()
 
-    def current_scripts(self) -> List[Path]:
-        return self.bench_scripts if self.mode == "bench" else self.run_scripts
+    def _schedule_swap_refresh(self) -> None:
+        self.run_worker(
+            self._load_swap_models(),
+            name="llama-swap-model-refresh",
+            group="run-panel",
+            exclusive=True,
+        )
+
+    async def _load_swap_models(self) -> None:
+        try:
+            models = await llama_swap.list_models()
+        except Exception as exc:
+            self.swap_models = []
+            self.set_status(
+                f"llama-swap unreachable at {llama_swap.DEFAULT_BASE_URL}: {exc}. "
+                "Start llama-swap.service, then click Refresh."
+            )
+        else:
+            self.swap_models = models
+            self.set_status(f"Loaded {len(models)} model(s) from llama-swap")
+        if self.mode == "run":
+            self.refresh_table()
 
     def refresh_table(self) -> None:
+        self._install_table_columns()
         table = self.query_one("#run_scripts_table", DataTable)
-        filter_text = self.query_one("#run_filter", Input).value.strip().lower()
-        scripts = self.current_scripts()
-        self.filtered = []
-
         table.clear()
-        for script in scripts:
+        filter_text = self.query_one("#run_filter", Input).value.strip().lower()
+
+        if self.mode == "run":
+            self.filtered_models = [
+                m for m in self.swap_models
+                if not filter_text or filter_text in m.id.lower() or filter_text in m.name.lower()
+            ]
+            for model in self.filtered_models:
+                table.add_row(model.state, model.id, model.name, key=model.id)
+
+            if self.filtered_models:
+                first = self.filtered_models[0]
+                self.selected_model_id = first.id
+                table.move_cursor(row=0, column=0)
+                self._show_model_details(first)
+                self.set_status(
+                    f"Loaded {len(self.filtered_models)} model(s) from llama-swap "
+                    f"({len(self.swap_models)} total)"
+                )
+            else:
+                self.selected_model_id = None
+                self.query_one("#run_selected_path", Static).update(
+                    "No model selected" if self.swap_models else "llama-swap unavailable — click Refresh"
+                )
+                self.query_one("#run_editor", TextArea).text = ""
+                self.query_one("#run_version_select", Select).set_options([])
+            return
+
+        # bench mode: script-driven (unchanged)
+        self.filtered_scripts = []
+        for script in self.bench_scripts:
             rel = script.relative_to(ROOT).as_posix()
             if filter_text and filter_text not in rel.lower():
                 continue
-            self.filtered.append(script)
-            idx = len(self.filtered) - 1
+            self.filtered_scripts.append(script)
+            idx = len(self.filtered_scripts) - 1
             table.add_row(str(idx), rel, key=str(idx))
 
-        if self.filtered:
-            self.selected_script = self.filtered[0]
+        if self.filtered_scripts:
+            self.selected_script = self.filtered_scripts[0]
             table.move_cursor(row=0, column=0)
             self.load_selected_script_into_editor()
             self.set_status(
-                f"Loaded {len(self.filtered)} {self.mode} script(s) "
-                f"({len(scripts)} total before filter)"
+                f"Loaded {len(self.filtered_scripts)} bench script(s) "
+                f"({len(self.bench_scripts)} total before filter)"
             )
         else:
             self.selected_script = None
             self.query_one("#run_selected_path", Static).update("No script selected")
             self.query_one("#run_editor", TextArea).text = ""
             self.query_one("#run_version_select", Select).set_options([])
-            self.set_status(f"No {self.mode} scripts match current filter")
+            self.set_status("No bench scripts match current filter")
+
+    def _show_model_details(self, model: llama_swap.SwapModel) -> None:
+        self.query_one("#run_selected_path", Static).update(f"{model.id}  —  state: {model.state}")
+        details = [
+            f"# llama-swap model: {model.id}",
+            f"# name:   {model.name}" if model.name else "",
+            f"# state:  {model.state}",
+            f"# desc:   {model.description}" if model.description else "",
+            "",
+            "# Trigger load:",
+            f"curl -X POST {llama_swap.DEFAULT_BASE_URL}/models/load \\",
+            f"     -H 'Content-Type: application/json' \\",
+            f"     -d '{{\"model\": \"{model.id}\"}}'",
+            "",
+            "# Chat:",
+            f"curl {llama_swap.DEFAULT_BASE_URL}/v1/chat/completions \\",
+            f"     -H 'Content-Type: application/json' \\",
+            f"     -d '{{\"model\":\"{model.id}\",\"messages\":[{{\"role\":\"user\",\"content\":\"hi\"}}]}}'",
+            "",
+            "# Unload:",
+            f"curl -X POST {llama_swap.DEFAULT_BASE_URL}/models/unload \\",
+            f"     -H 'Content-Type: application/json' \\",
+            f"     -d '{{\"model\": \"{model.id}\"}}'",
+            "",
+            "# Full definition lives in llama-swap.yaml.",
+        ]
+        self.query_one("#run_editor", TextArea).text = "\n".join(line for line in details if line is not None)
+        self.query_one("#run_version_select", Select).set_options([])
 
     def toggle_mode(self) -> None:
         select = self.query_one("#run_mode", Select)
         self.mode = "bench" if self.mode == "run" else "run"
         select.value = self.mode
-        self.refresh_table()
+        self.refresh_script_inventory()
 
     def selected_model_name(self) -> str:
+        if self.mode == "run":
+            return self.selected_model_id or "idle"
         if self.selected_script is None:
             return "idle"
         name = self.selected_script.stem
         for prefix in (
-            "run-ik-llama-cpp-",
             "bench-ik-llama-cpp-",
-            "run-llama-cpp-",
             "bench-llama-cpp-",
         ):
             if name.startswith(prefix):
@@ -1048,10 +1142,17 @@ class RunPanel(Static):
 
     def _sync_selected_from_cursor(self) -> None:
         table = self.query_one("#run_scripts_table", DataTable)
-        if self.filtered and 0 <= table.cursor_row < len(self.filtered):
-            self.selected_script = self.filtered[table.cursor_row]
+        if self.mode == "run":
+            if self.filtered_models and 0 <= table.cursor_row < len(self.filtered_models):
+                self.selected_model_id = self.filtered_models[table.cursor_row].id
+            return
+        if self.filtered_scripts and 0 <= table.cursor_row < len(self.filtered_scripts):
+            self.selected_script = self.filtered_scripts[table.cursor_row]
 
     def load_selected_script_into_editor(self) -> None:
+        if self.mode == "run":
+            # run mode: editor is a read-only detail pane populated by _show_model_details
+            return
         if self.selected_script is None:
             return
         try:
@@ -1069,6 +1170,11 @@ class RunPanel(Static):
         select.set_options([(name, name) for name in versions])
 
     def save_editor_script(self) -> None:
+        if self.mode == "run":
+            self.set_status(
+                "Run mode is read-only; edit llama-swap.yaml to change a model entry"
+            )
+            return
         self._sync_selected_from_cursor()
         if self.selected_script is None:
             self.set_status("No script selected")
@@ -1086,6 +1192,9 @@ class RunPanel(Static):
         self.set_status("Script saved with version snapshot")
 
     def restore_editor_script(self) -> None:
+        if self.mode == "run":
+            self.set_status("Run mode is read-only; no script versions to restore")
+            return
         self._sync_selected_from_cursor()
         if self.selected_script is None:
             self.set_status("No script selected")
@@ -1111,6 +1220,31 @@ class RunPanel(Static):
             return
 
         self._sync_selected_from_cursor()
+
+        if self.mode == "run":
+            if not self.selected_model_id:
+                self.set_status("No model selected")
+                return
+            model_id = self.selected_model_id
+            self._current_job_name = model_id
+            self.running_started_at = asyncio.get_running_loop().time()
+            self.set_runtime_state(
+                f"Current: {model_id} (run)", "Resources: loading via llama-swap..."
+            )
+            self.post_message(
+                RunPanel.JobStarted(
+                    model_id,
+                    datetime.now().strftime("%H:%M:%S"),
+                    self.mode,
+                    # for run-mode, script_path carries the model ID so Jobs-tab retries work
+                    script_path=model_id,
+                )
+            )
+            self.running_task = asyncio.create_task(self._swap_load(model_id))
+            await self.running_task
+            return
+
+        # bench mode: subprocess launch (unchanged)
         if self.selected_script is None:
             self.set_status("No script selected")
             return
@@ -1147,17 +1281,79 @@ class RunPanel(Static):
         self.running_task = asyncio.create_task(self._stream_command(cmd, env=env))
         await self.running_task
 
+    async def _swap_load(self, model_id: str) -> None:
+        self.set_status(f"POST {llama_swap.DEFAULT_BASE_URL}/models/load  model={model_id}")
+        try:
+            result = await llama_swap.load_model(model_id)
+        except Exception as exc:
+            self.set_status(f"load failed: {exc}")
+            self.set_runtime_state("Current: idle", "Resources: load failed")
+            self.post_message(RunPanel.JobFinished(model_id, "0s", 1, self.mode))
+            self.running_started_at = None
+            return
+        self.set_status(result)
+        self.loaded_model_id = model_id
+        await self._load_swap_models()
+        await self._start_swap_resource_loop()
+        elapsed_secs = 0.0
+        if self.running_started_at is not None:
+            elapsed_secs = asyncio.get_running_loop().time() - self.running_started_at
+        self.running_started_at = None
+        self.set_runtime_state(f"Current: {model_id} (loaded)", "Resources: polling...")
+        elapsed_str = (
+            f"{elapsed_secs:.0f}s"
+            if elapsed_secs < _ELAPSED_THRESHOLD_SECS
+            else f"{elapsed_secs / 60:.1f}m"
+        )
+        self.post_message(RunPanel.JobFinished(model_id, elapsed_str, 0, self.mode))
+
+    async def _swap_unload(self, model_id: str) -> None:
+        self.set_status(f"POST {llama_swap.DEFAULT_BASE_URL}/models/unload  model={model_id}")
+        try:
+            result = await llama_swap.unload_model(model_id)
+        except Exception as exc:
+            self.set_status(f"unload failed: {exc}")
+            return
+        self.set_status(result)
+        if self.loaded_model_id == model_id:
+            self.loaded_model_id = None
+        await self._stop_resource_loop()
+        await self._load_swap_models()
+
+    async def _start_swap_resource_loop(self) -> None:
+        await self._stop_resource_loop()
+        pid = await _find_llama_swap_pid()
+        if pid is None:
+            return
+        self.resource_task = asyncio.create_task(self._swap_resource_loop(pid))
+
+    async def _swap_resource_loop(self, swap_pid: int) -> None:
+        while self.loaded_model_id is not None:
+            try:
+                snapshot = await _resource_snapshot_for_ppid(swap_pid)
+                self.query_one("#run_resources", Static).update(snapshot)
+            except Exception:
+                pass
+            await asyncio.sleep(2)
+
     async def run_script_by_path(self, script_path: str, mode: str) -> None:
         """Select a script by full path and run it. Used by Jobs tab retry."""
+        if mode == "run":
+            # Run-mode retries are now model IDs, not paths. script_path holds the id.
+            self.mode = "run"
+            self.refresh_script_inventory()
+            self.selected_model_id = script_path or None
+            await self.run_script()
+            return
+
         target = Path(script_path)
         if not target.exists():
             self.set_status(f"Script not found for retry: {script_path}")
             return
-        if mode in {"run", "bench"}:
-            self.mode = mode
+        if mode == "bench":
+            self.mode = "bench"
             self.refresh_table()
-        # Try to find it in the visible filtered list and move cursor
-        for i, s in enumerate(self.filtered):
+        for i, s in enumerate(self.filtered_scripts):
             if s == target:
                 self.selected_script = s
                 table = self.query_one("#run_scripts_table", DataTable)
@@ -1165,7 +1361,6 @@ class RunPanel(Static):
                 self.load_selected_script_into_editor()
                 break
         else:
-            # Not visible (different mode or filter) — set directly
             self.selected_script = target
             self.load_selected_script_into_editor()
         await self.run_script()
@@ -1243,9 +1438,10 @@ class RunPanel(Static):
             try:
                 snapshot = await self._resource_snapshot_for_group(pgid)
                 self.query_one("#run_resources", Static).update(snapshot)
-            except Exception:
-                # keep resource loop non-fatal for process execution
-                pass
+            except (OSError, ValueError, RuntimeError):
+                self.query_one("#run_resources", Static).update(
+                    "Resources: unavailable"
+                )
             await asyncio.sleep(1)
 
     async def _stop_resource_loop(self) -> None:
@@ -1298,9 +1494,21 @@ class RunPanel(Static):
         )
 
     async def stop_script(self) -> None:
+        if self.mode == "run":
+            target = self.loaded_model_id
+            if not target:
+                self.set_status(
+                    "No model is loaded via llama-swap; nothing to unload"
+                )
+                return
+            await self._swap_unload(target)
+            self.running_started_at = None
+            self.set_runtime_state("Current: idle", "Resources: unloaded via llama-swap")
+            return
+
         proc = self.running_proc
         if proc is None:
-            self.set_status("No active run/bench process")
+            self.set_status("No active bench process")
             return
 
         self.set_status("Stopping process...")
@@ -1317,33 +1525,40 @@ class RunPanel(Static):
             self.set_runtime_state("Current: idle", "Resources: stopped")
         self.set_status("Process stopped")
 
+    def _handle_row_activated(self, event_key) -> None:
+        key_str = str(event_key.value) if event_key is not None else ""
+        if self.mode == "run":
+            for model in self.filtered_models:
+                if model.id == key_str:
+                    self.selected_model_id = model.id
+                    self._show_model_details(model)
+                    return
+            return
+        try:
+            idx = int(key_str)
+        except (TypeError, ValueError):
+            return
+        if 0 <= idx < len(self.filtered_scripts):
+            self.selected_script = self.filtered_scripts[idx]
+            self.load_selected_script_into_editor()
+
     @on(DataTable.RowHighlighted, "#run_scripts_table")
     def on_script_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        try:
-            idx = int(str(event.row_key.value))
-        except (TypeError, ValueError, AttributeError):
-            return
-        if 0 <= idx < len(self.filtered):
-            self.selected_script = self.filtered[idx]
-            self.load_selected_script_into_editor()
+        self._handle_row_activated(event.row_key)
 
     @on(DataTable.RowSelected, "#run_scripts_table")
     def on_script_selected(self, event: DataTable.RowSelected) -> None:
-        try:
-            idx = int(str(event.row_key.value))
-        except (TypeError, ValueError, AttributeError):
-            return
-        if 0 <= idx < len(self.filtered):
-            self.selected_script = self.filtered[idx]
-            self.load_selected_script_into_editor()
+        self._handle_row_activated(event.row_key)
 
     @on(Select.Changed, "#run_mode")
     def on_mode_changed(self, event: Select.Changed) -> None:
         value = str(event.value or "run")
         if value not in {"run", "bench"}:
             return
+        if value == self.mode:
+            return
         self.mode = value
-        self.refresh_table()
+        self.refresh_script_inventory()
 
     @on(Input.Changed, "#run_filter")
     def on_filter_changed(self, _: Input.Changed) -> None:
@@ -1420,9 +1635,8 @@ class ModelBrowserPanel(Static):
             with Horizontal(classes="row main"):
                 with Vertical(classes="left"):
                     yield DataTable(id="browser_table")
-                    yield Label(
-                        "Keys: Alt+G path, Alt+J table, Alt+R scan",
-                        classes="key_hint",
+                    yield ShortcutStrip(
+                        "Core: Alt+R scan · Alt+G path · Alt+J table · ? full shortcuts"
                     )
                 with Vertical(classes="right"):
                     yield Static("No file selected", id="browser_selected_path")
@@ -1713,6 +1927,88 @@ def parse_port_from_script(content: str) -> Optional[int]:
     return int(m.group(1)) if m else None
 
 
+async def _find_llama_swap_pid() -> Optional[int]:
+    """Return the PID of the llama-swap daemon, or None if not running."""
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "pgrep",
+            "-f",
+            "llama-swap",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        out, _ = await proc.communicate()
+    except Exception:
+        return None
+    for line in out.decode("utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if line.isdigit():
+            return int(line)
+    return None
+
+
+async def _resource_snapshot_for_ppid(parent_pid: int) -> str:
+    """ps-scrape CPU+RAM for the llama-swap children (the upstream llama-server procs)."""
+    proc = await asyncio.create_subprocess_exec(
+        "ps",
+        "-o",
+        "pid=,ppid=,pcpu=,rss=",
+        "-ax",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    out, _ = await proc.communicate()
+    pids: List[int] = []
+    cpu_total = 0.0
+    rss_kib_total = 0
+    for row in out.decode("utf-8", errors="replace").splitlines():
+        parts = row.split()
+        if len(parts) < 4:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+            cpu = float(parts[2])
+            rss = int(parts[3])
+        except ValueError:
+            continue
+        if ppid != parent_pid:
+            continue
+        pids.append(pid)
+        cpu_total += cpu
+        rss_kib_total += rss
+
+    gpu_mem_mib: Optional[int] = None
+    if pids and shutil.which("nvidia-smi"):
+        gpu = await asyncio.create_subprocess_exec(
+            "nvidia-smi",
+            "--query-compute-apps=pid,used_memory",
+            "--format=csv,noheader,nounits",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        gpu_out, _ = await gpu.communicate()
+        gpu_mem_mib = 0
+        for row in gpu_out.decode("utf-8", errors="replace").splitlines():
+            parts = [p.strip() for p in row.split(",")]
+            if len(parts) < 2:
+                continue
+            try:
+                pid = int(parts[0])
+                mem = int(parts[1])
+            except ValueError:
+                continue
+            if pid in pids:
+                gpu_mem_mib += mem
+
+    rss_mib = rss_kib_total / 1024.0
+    gpu_text = f"{gpu_mem_mib} MiB" if gpu_mem_mib is not None else "n/a"
+    return (
+        f"Resources: upstreams={len(pids)} cpu={cpu_total:.1f}% "
+        f"ram={rss_mib:.1f} MiB gpu={gpu_text}"
+    )
+
+
 async def detect_llama_port() -> Optional[int]:
     """Probe running llama-server processes for their port via pgrep."""
     try:
@@ -1728,7 +2024,7 @@ async def detect_llama_port() -> Optional[int]:
         m = re.search(r"--port\s+(\d+)", text)
         if m:
             return int(m.group(1))
-    except Exception:
+    except (OSError, ValueError):
         pass
     # Fallback: probe common ports
     for port in (8080, 8001, 8000, 8888):
@@ -1737,7 +2033,7 @@ async def detect_llama_port() -> Optional[int]:
                 r = await client.get(f"http://localhost:{port}/v1/models")
                 if r.status_code == 200:
                     return port
-        except Exception:
+        except httpx.HTTPError:
             pass
     return None
 
@@ -1760,7 +2056,7 @@ class ChatPanel(Static):
             # Status bar
             with Horizontal(classes="row"):
                 yield Static("◉ disconnected", id="chat_status")
-                yield Static("", id="chat_model_label")
+                yield Select([], id="chat_model_select", prompt="model")
                 yield Input(
                     value=str(self.DEFAULT_PORT),
                     placeholder="port",
@@ -1796,9 +2092,8 @@ class ChatPanel(Static):
                 yield Input(placeholder="Message… (Enter to send)", id="chat_input")
                 yield Button("Send ↵", id="chat_send", variant="success")
 
-            yield Label(
-                "Enter send · Ctrl+X clear · Ctrl+G connect · Ctrl+B detect · Alt+S save chat · Thinking=Qwen3",
-                classes="key_hint",
+            yield ShortcutStrip(
+                "Core: Enter send · Ctrl+G connect · Ctrl+B detect · Ctrl+X clear · Alt+S save · ? full shortcuts"
             )
 
     def on_mount(self) -> None:
@@ -1813,34 +2108,50 @@ class ChatPanel(Static):
         except ValueError:
             port = self.DEFAULT_PORT
 
-        model = await self._probe_model(port)
-        if model:
-            self._set_connected(port, model)
+        models = await self._probe_models(port)
+        if models:
+            self._set_connected(port, models)
         else:
             self._set_disconnected()
 
-    async def _probe_model(self, port: int) -> Optional[str]:
+    async def _probe_models(self, port: int) -> List[str]:
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
                 r = await client.get(f"http://localhost:{port}/v1/models")
                 if r.status_code == 200:
                     data = r.json()
-                    models = data.get("data", [])
-                    return models[0].get("id", "unknown") if models else "unknown"
+                    return [
+                        str(m.get("id"))
+                        for m in data.get("data", [])
+                        if isinstance(m, dict) and m.get("id")
+                    ]
         except Exception:
             pass
-        return None
+        return []
 
-    def _set_connected(self, port: int, model: str) -> None:
+
+    def _set_connected(self, port: int, models: List[str]) -> None:
         self.query_one("#chat_status", Static).update(
             f"[green]◉ localhost:{port}[/green]"
         )
-        self.query_one("#chat_model_label", Static).update(f"[dim]{model}[/dim]")
+        select = self.query_one("#chat_model_select", Select)
+        options = [(m, m) for m in models] if models else []
+        select.set_options(options)
+        if options:
+            current = select.value
+            if not isinstance(current, str) or current not in models:
+                select.value = models[0]
         self.query_one("#chat_port", Input).value = str(port)
 
     def _set_disconnected(self) -> None:
         self.query_one("#chat_status", Static).update("[red]◉ disconnected[/red]")
-        self.query_one("#chat_model_label", Static).update("")
+        self.query_one("#chat_model_select", Select).set_options([])
+
+    def _current_model(self) -> str:
+        value = self.query_one("#chat_model_select", Select).value
+        if isinstance(value, str) and value:
+            return value
+        return "default"
 
     def _current_port(self) -> int:
         try:
@@ -1903,7 +2214,7 @@ class ChatPanel(Static):
             max_tokens = 2048
 
         payload = {
-            "model": "default",
+            "model": self._current_model(),
             "messages": messages,
             "stream": True,
             "temperature": temperature,
@@ -1957,7 +2268,7 @@ class ChatPanel(Static):
             self._history.pop()  # remove the unanswered user message
             preview.display = False
             return
-        except Exception as exc:
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             self._log(f"[red]Error: {exc}[/red]")
             preview.display = False
             return
@@ -2004,7 +2315,7 @@ class ChatPanel(Static):
             history = data.get("history", [])
             if not isinstance(history, list):
                 raise ValueError("invalid history format")
-        except Exception as exc:
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
             self._log(f"[red]Failed to load session: {exc}[/red]")
             return
         self._history = history
@@ -2036,19 +2347,23 @@ class ChatPanel(Static):
         self._log("[dim]Detecting running llama-server…[/dim]")
         port = await detect_llama_port()
         if port:
-            model = await self._probe_model(port)
-            self._set_connected(port, model or "unknown")
-            self._log(f"[green]Detected server on port {port}[/green]")
+            models = await self._probe_models(port)
+            self._set_connected(port, models)
+            self._log(
+                f"[green]Detected server on port {port} — {len(models)} model(s)[/green]"
+            )
         else:
             self._set_disconnected()
             self._log("[yellow]No running llama-server found[/yellow]")
 
     async def do_connect(self) -> None:
         port = self._current_port()
-        model = await self._probe_model(port)
-        if model:
-            self._set_connected(port, model)
-            self._log(f"[green]Connected to localhost:{port} — model: {model}[/green]")
+        models = await self._probe_models(port)
+        if models:
+            self._set_connected(port, models)
+            self._log(
+                f"[green]Connected to localhost:{port} — {len(models)} model(s)[/green]"
+            )
         else:
             self._set_disconnected()
             self._log(f"[red]Could not connect to localhost:{port}[/red]")
@@ -2115,8 +2430,8 @@ class MaintenancePanel(Static):
                         yield Button("Save", id="maint_edit_save", variant="success")
                         yield Button("Reload", id="maint_edit_reload")
                     yield TextArea("", id="maint_editor")
-            yield Label(
-                "Keys: Ctrl+R run · Ctrl+S stop · Ctrl+L clear log", classes="key_hint"
+            yield ShortcutStrip(
+                "Core: Ctrl+R run · Ctrl+S stop · Ctrl+L clear log · ? full shortcuts"
             )
 
     def on_mount(self) -> None:
@@ -2167,7 +2482,7 @@ class MaintenancePanel(Static):
     def _load_script_into_editor(self, path: Path) -> None:
         try:
             content = path.read_text(encoding="utf-8")
-        except Exception as exc:
+        except (OSError, UnicodeDecodeError) as exc:
             self.set_status(f"Failed to load: {exc}")
             return
         rel = path.relative_to(ROOT).as_posix()
@@ -2182,7 +2497,7 @@ class MaintenancePanel(Static):
         try:
             self.selected_script.write_text(content, encoding="utf-8")
             self.set_status(f"Saved {self.selected_script.name}")
-        except Exception as exc:
+        except OSError as exc:
             self.set_status(f"Save failed: {exc}")
 
     async def run_script(self) -> None:
@@ -2302,10 +2617,10 @@ class JobsPanel(Static):
                 yield Button("■ Stop Running", id="jobs_stop", variant="error")
                 yield Button("↺ Retry Selected", id="jobs_retry", variant="primary")
                 yield Button("Clear", id="jobs_clear")
+                yield Static("history: ready", id="jobs_status")
             yield DataTable(id="jobs_table")
-            yield Label(
-                "s stop running · r retry selected · Del clear history",
-                classes="key_hint",
+            yield ShortcutStrip(
+                "Core: s stop running · r retry selected · Del clear history · ? full shortcuts"
             )
 
     def on_mount(self) -> None:
@@ -2315,13 +2630,25 @@ class JobsPanel(Static):
         self.load_jobs()
         self._update_buttons()
 
+    def set_status_label(self, text: str) -> None:
+        self.query_one("#jobs_status", Static).update(text)
+
     def load_jobs(self) -> None:
         """Load persisted job history from disk."""
-        try:
-            if JOBS_FILE.exists():
-                self._jobs = json.loads(JOBS_FILE.read_text(encoding="utf-8"))
-        except Exception:
+        if not JOBS_FILE.exists():
             self._jobs = []
+            self.set_status_label("history: none")
+            self._refresh_table()
+            return
+        try:
+            raw = json.loads(JOBS_FILE.read_text(encoding="utf-8"))
+            if not isinstance(raw, list):
+                raise ValueError("job history must be a JSON array")
+            self._jobs = raw
+            self.set_status_label(f"history: {len(self._jobs)} loaded")
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            self._jobs = []
+            self.set_status_label(f"history: unavailable ({exc})")
         self._refresh_table()
 
     def save_jobs(self) -> None:
@@ -2330,8 +2657,8 @@ class JobsPanel(Static):
             JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
             data = self._jobs[-JOBS_MAX:]
             JOBS_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-        except Exception:
-            pass
+        except OSError as exc:
+            self.set_status_label(f"history: save failed ({exc})")
 
     def add_job_started(
         self, name: str, started: str, mode: str = "", script_path: str = ""
@@ -2439,16 +2766,70 @@ class JobsPanel(Static):
         self.query_one("#jobs_table", DataTable).clear()
         self._update_buttons()
         self.save_jobs()
+        self.set_status_label("history: cleared")
 
 
-class PlaceholderPanel(Static):
-    def __init__(self, title: str) -> None:
-        super().__init__()
-        self._title = title
+_START_ACTIONS: Dict[str, str] = {
+    "start_open_download": "tab_download",
+    "start_open_run": "tab_run",
+    "start_open_chat": "tab_chat",
+    "start_open_browser": "tab_browser",
+    "start_open_maintenance": "tab_maintenance",
+    "start_open_jobs": "tab_jobs",
+    "start_show_help": "show_help",
+    "start_show_palette": "show_command_palette",
+}
+
+
+class StartPanel(Static):
+    def __init__(self) -> None:
+        super().__init__(id="start_panel")
 
     def compose(self) -> ComposeResult:
-        yield Label(self._title)
-        yield Static("Planned for next feature commit.")
+        with Vertical(classes="panel"):
+            yield Label("L3MS Workbench", id="start_title")
+            yield Static(
+                "Script-first local model operations: run, bench, chat, download, inspect, and maintain from one keyboard surface.",
+                id="start_intro",
+            )
+            with Horizontal(classes="row start_grid"):
+                with Vertical(classes="start_column"):
+                    yield Static("[b]Operate[/b]", classes="start_group")
+                    yield Button(
+                        "Model Ops",
+                        id="start_open_run",
+                        variant="success",
+                        classes="start_action",
+                    )
+                    yield Button("Chat", id="start_open_chat", classes="start_action")
+                    yield Button("Jobs", id="start_open_jobs", classes="start_action")
+                with Vertical(classes="start_column"):
+                    yield Static("[b]Inventory[/b]", classes="start_group")
+                    yield Button(
+                        "Download", id="start_open_download", classes="start_action"
+                    )
+                    yield Button("Browser", id="start_open_browser", classes="start_action")
+                    yield Button(
+                        "Maintenance",
+                        id="start_open_maintenance",
+                        classes="start_action",
+                    )
+                with Vertical(classes="start_column"):
+                    yield Static("[b]Command[/b]", classes="start_group")
+                    yield Button("Palette", id="start_show_palette", classes="start_action")
+                    yield Button("Help", id="start_show_help", classes="start_action")
+            yield ShortcutStrip(
+                "F2 Model Ops · F3 Chat · F7 Browser · Ctrl+P Palette · ? Help"
+            )
+
+    def focus_primary(self) -> None:
+        self.query_one("#start_open_download", Button).focus()
+
+    @on(Button.Pressed, ".start_action")
+    def on_start_action(self, event: Button.Pressed) -> None:
+        action = _START_ACTIONS.get(str(event.button.id or ""))
+        if action:
+            self.app.call_later(self.app.run_action, action)
 
 
 # ---------------------------------------------------------------------------
@@ -2464,13 +2845,25 @@ def _build_help_content() -> str:
                 ("q", "Quit"),
                 ("?", "This help screen"),
                 ("Ctrl+P", "Command palette (all actions)"),
+                ("Alt+1..Alt+7", "Tab switch fallback when F-keys are unreliable"),
+                ("Alt+← / Alt+→", "Previous / next tab"),
                 ("F1", "→ Download tab"),
                 ("F2", "→ Run / Model Ops tab"),
                 ("F3", "→ Chat tab"),
                 ("F4", "→ Maintenance tab"),
-                ("F5", "→ Settings tab"),
+                ("F5", "→ Start tab"),
                 ("F6", "→ Jobs tab"),
                 ("F7", "→ Model Browser tab"),
+            ],
+        ),
+        (
+            "START  (F5)",
+            [
+                ("Download Models", "Go to Download tab"),
+                ("Run / Bench Scripts", "Go to Model Ops tab"),
+                ("Open Chat", "Go to Chat tab"),
+                ("Help (?)", "Open keyboard shortcut help"),
+                ("Command Palette", "Search and run any action"),
             ],
         ),
         (
@@ -2605,42 +2998,42 @@ class ChatHistoryScreen(ModalScreen):
 # Command palette
 # ---------------------------------------------------------------------------
 
-PALETTE_COMMANDS: list = [
-    ("→ Download tab", "tab_download"),
-    ("→ Run / Model Ops tab", "tab_run"),
-    ("→ Model Browser tab", "tab_browser"),
-    ("→ Chat tab", "tab_chat"),
-    ("→ Maintenance tab", "tab_maintenance"),
-    ("→ Settings tab", "tab_settings"),
-    ("→ Jobs tab", "tab_jobs"),
-    ("Model Browser: Scan GGUF files", "browser_scan"),
-    ("Model Browser: Focus root path", "browser_focus_path"),
-    ("Model Browser: Focus table", "browser_focus_table"),
-    ("Start script (Run)", "run_start"),
-    ("Stop script (Run)", "run_stop"),
-    ("Toggle run/bench mode", "run_toggle_mode"),
-    ("Save script (Run)", "run_save_script"),
-    ("Focus filter (Run)", "run_focus_filter"),
-    ("Focus script table (Run)", "run_focus_table"),
-    ("Focus script editor (Run)", "run_focus_editor"),
-    ("Clear run log", "run_clear_log"),
-    ("Chat: Connect to server", "chat_connect"),
-    ("Chat: Auto-detect port", "chat_detect"),
-    ("Chat: Clear history", "chat_clear"),
-    ("Chat: Save session", "chat_save"),
-    ("Download selected model", "download_selected"),
-    ("Download all enabled models", "download_enabled"),
-    ("Add new model entry", "download_add"),
-    ("Apply model editor", "download_apply"),
-    ("Delete selected model", "download_delete"),
-    ("Save config to disk", "download_save"),
-    ("Reload config from disk", "download_load"),
-    ("Validate config", "download_validate"),
-    ("Focus model table", "download_focus_table"),
-    ("Focus download editor", "download_focus_editor"),
-    ("Clear download log", "download_clear_log"),
-    ("Show key bindings help", "show_help"),
-    ("Quit", "quit"),
+PALETTE_COMMANDS: list[tuple[str, str, str]] = [
+    ("Start", "Open Start workbench", "tab_settings"),
+    ("F1", "Open Download", "tab_download"),
+    ("F2", "Open Model Ops", "tab_run"),
+    ("F7", "Open Model Browser", "tab_browser"),
+    ("F3", "Open Chat", "tab_chat"),
+    ("F4", "Open Maintenance", "tab_maintenance"),
+    ("F6", "Open Jobs", "tab_jobs"),
+    ("Alt+R", "Model Browser: scan GGUF files", "browser_scan"),
+    ("Alt+G", "Model Browser: focus root path", "browser_focus_path"),
+    ("Alt+J", "Model Browser: focus table", "browser_focus_table"),
+    ("Ctrl+R", "Model Ops: start/load selected item", "run_start"),
+    ("Ctrl+S", "Model Ops: stop/unload active item", "run_stop"),
+    ("Ctrl+M", "Model Ops: toggle run/bench mode", "run_toggle_mode"),
+    ("Alt+P", "Model Ops: save script", "run_save_script"),
+    ("Ctrl+F", "Model Ops: focus filter", "run_focus_filter"),
+    ("Ctrl+J", "Model Ops: focus table", "run_focus_table"),
+    ("Ctrl+U", "Model Ops: focus editor", "run_focus_editor"),
+    ("Ctrl+L", "Model Ops: clear log", "run_clear_log"),
+    ("Ctrl+G", "Chat: connect to server", "chat_connect"),
+    ("Ctrl+B", "Chat: auto-detect port", "chat_detect"),
+    ("Ctrl+X", "Chat: clear history", "chat_clear"),
+    ("Alt+S", "Chat: save session", "chat_save"),
+    ("Alt+D", "Download: selected model", "download_selected"),
+    ("Alt+E", "Download: all enabled models", "download_enabled"),
+    ("Alt+N", "Download: add new model entry", "download_add"),
+    ("Alt+A", "Download: apply editor", "download_apply"),
+    ("Alt+K", "Download: delete selected model", "download_delete"),
+    ("Alt+W", "Download: save config to disk", "download_save"),
+    ("Alt+O", "Download: reload config from disk", "download_load"),
+    ("Alt+V", "Download: validate config", "download_validate"),
+    ("Alt+T", "Download: focus model table", "download_focus_table"),
+    ("Alt+I", "Download: focus editor", "download_focus_editor"),
+    ("Alt+Y", "Download: clear log", "download_clear_log"),
+    ("?", "Show key bindings help", "show_help"),
+    ("q", "Quit", "quit"),
 ]
 
 
@@ -2660,20 +3053,32 @@ class CommandPaletteScreen(ModalScreen):
     def on_mount(self) -> None:
         table = self.query_one("#palette_table", DataTable)
         table.cursor_type = "row"
-        table.add_column("command", width=54)
+        table.add_columns("key", "command")
         self._populate(PALETTE_COMMANDS)
         self.query_one("#palette_input", Input).focus()
 
-    def _populate(self, commands: list) -> None:
+    def _populate(self, commands: list[tuple[str, str, str]]) -> None:
         table = self.query_one("#palette_table", DataTable)
         table.clear()
-        for label, action in commands:
-            table.add_row(label, key=action)
+        for shortcut, label, action in commands:
+            table.add_row(shortcut, label, key=action)
+        if commands:
+            table.move_cursor(row=0, column=0)
 
     @on(Input.Changed, "#palette_input")
     def on_filter(self, event: Input.Changed) -> None:
-        q = event.value.lower()
-        filtered = [(lbl, act) for lbl, act in PALETTE_COMMANDS if q in lbl.lower()]
+        tokens = [token for token in event.value.lower().split() if token]
+        if tokens:
+            filtered = [
+                command
+                for command in PALETTE_COMMANDS
+                if all(
+                    token in " ".join(command).lower()
+                    for token in tokens
+                )
+            ]
+        else:
+            filtered = PALETTE_COMMANDS
         self._populate(filtered)
 
     @on(Input.Submitted, "#palette_input")
@@ -2691,7 +3096,7 @@ class CommandPaletteScreen(ModalScreen):
             action = str(row_key.value)
             if action:
                 self.dismiss(action)
-        except Exception:
+        except (AttributeError, KeyError, LookupError, ValueError):
             pass
 
 
@@ -2701,7 +3106,8 @@ class CommandPaletteScreen(ModalScreen):
 class MainScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-        with TabbedContent(initial="download", id="main_tabs"):
+        yield Static("", id="workbench_bar")
+        with TabbedContent(initial="settings", id="main_tabs"):
             with TabPane("Download", id="download"):
                 yield DownloadPanel()
             with TabPane("Model Ops", id="run"):
@@ -2712,11 +3118,29 @@ class MainScreen(Screen):
                 yield ChatPanel()
             with TabPane("Maintenance", id="maintenance"):
                 yield MaintenancePanel()
-            with TabPane("Settings", id="settings"):
-                yield PlaceholderPanel("Toolkit settings")
+            with TabPane("Start", id="settings"):
+                yield StartPanel()
             with TabPane("Jobs", id="jobs"):
                 yield JobsPanel()
         yield Footer()
+
+    def on_mount(self) -> None:
+        self.app.call_later(self.app.refresh_workbench_bar)
+
+    @on(TabbedContent.TabActivated, "#main_tabs")
+    def on_main_tab_activated(self, _: TabbedContent.TabActivated) -> None:
+        self.app.call_later(self.app.refresh_workbench_bar)
+
+
+WORKBENCH_HINTS = {
+    "settings": "[b]Workbench[/b]  Ctrl+P palette  ? help  F2 ops  F3 chat  F7 browser",
+    "run": "[b]Model Ops[/b]  Ctrl+R start/load  Ctrl+S stop/unload  Ctrl+M mode  Ctrl+F filter",
+    "chat": "[b]Chat[/b]  Ctrl+G connect  Ctrl+B detect  Ctrl+X clear  Alt+S save",
+    "browser": "[b]Model Browser[/b]  Alt+R scan  Alt+G path  Alt+J table",
+    "download": "[b]Download[/b]  Alt+D selected  Alt+E enabled  Alt+N add  Alt+W save",
+    "maintenance": "[b]Maintenance[/b]  Ctrl+R run  Ctrl+S stop  Ctrl+L clear",
+    "jobs": "[b]Jobs[/b]  s stop  r retry  Del clear",
+}
 
 
 class L3MSApp(App[None]):
@@ -2730,9 +3154,19 @@ class L3MSApp(App[None]):
         Binding("f2", "tab_run", "Run", show=True),
         Binding("f3", "tab_chat", "Chat", show=True),
         Binding("f4", "tab_maintenance", "Maint", show=True),
-        Binding("f5", "tab_settings", "Settings", show=True),
+        Binding("f5", "tab_settings", "Start", show=True),
         Binding("f6", "tab_jobs", "Jobs", show=True),
         Binding("f7", "tab_browser", "Browser", show=True),
+        # ── navigation fallbacks (hidden) ──────────────────────────────
+        Binding("alt+1", "tab_download", "Download", show=False),
+        Binding("alt+2", "tab_run", "Run", show=False),
+        Binding("alt+3", "tab_chat", "Chat", show=False),
+        Binding("alt+4", "tab_maintenance", "Maintenance", show=False),
+        Binding("alt+5", "tab_settings", "Start", show=False),
+        Binding("alt+6", "tab_jobs", "Jobs", show=False),
+        Binding("alt+7", "tab_browser", "Browser", show=False),
+        Binding("alt+left", "tab_prev", "Prev Tab", show=False),
+        Binding("alt+right", "tab_next", "Next Tab", show=False),
         # ── Run / Model Ops (hidden – see ? Help) ────────────────────
         Binding("ctrl+r", "run_start", "Start Script", show=False),
         Binding("ctrl+s", "run_stop", "Stop Script", show=False),
@@ -2773,6 +3207,16 @@ class L3MSApp(App[None]):
     def on_mount(self) -> None:
         self.push_screen(MainScreen())
 
+    def refresh_workbench_bar(self) -> None:
+        if not self.screen:
+            return
+        try:
+            bar = self.screen.query_one("#workbench_bar", Static)
+        except Exception:
+            return
+        active = self.active_tab() or "settings"
+        bar.update(WORKBENCH_HINTS.get(active, WORKBENCH_HINTS["settings"]))
+
     async def action_quit(self) -> None:
         """Graceful shutdown: terminate running processes and cancel async tasks."""
         run_panel = self.get_run_panel()
@@ -2780,7 +3224,7 @@ class L3MSApp(App[None]):
             if run_panel.running_proc:
                 try:
                     run_panel.running_proc.terminate()
-                except Exception:
+                except ProcessLookupError:
                     pass
             if run_panel.resource_task and not run_panel.resource_task.done():
                 run_panel.resource_task.cancel()
@@ -2792,7 +3236,7 @@ class L3MSApp(App[None]):
             if maint_panel.running_proc:
                 try:
                     maint_panel.running_proc.terminate()
-                except Exception:
+                except ProcessLookupError:
                     pass
             if maint_panel.running_task and not maint_panel.running_task.done():
                 maint_panel.running_task.cancel()
@@ -2817,6 +3261,7 @@ class L3MSApp(App[None]):
         except Exception:
             return
         tabs.active = tab_id
+        self.refresh_workbench_bar()
 
     def get_run_panel(self) -> Optional[RunPanel]:
         if not self.screen:
@@ -2875,6 +3320,14 @@ class L3MSApp(App[None]):
         except Exception:
             return None
 
+    def get_start_panel(self) -> Optional[StartPanel]:
+        if not self.screen:
+            return None
+        try:
+            return self.screen.query_one("#start_panel", StartPanel)
+        except Exception:
+            return None
+
     def action_tab_download(self) -> None:
         self.activate_tab("download")
 
@@ -2892,12 +3345,49 @@ class L3MSApp(App[None]):
 
     def action_tab_settings(self) -> None:
         self.activate_tab("settings")
+        panel = self.get_start_panel()
+        if panel:
+            panel.focus_primary()
 
     def action_tab_jobs(self) -> None:
         self.activate_tab("jobs")
 
     def action_tab_browser(self) -> None:
         self.activate_tab("browser")
+
+    def action_tab_next(self) -> None:
+        order = [
+            "download",
+            "run",
+            "chat",
+            "maintenance",
+            "settings",
+            "jobs",
+            "browser",
+        ]
+        active = self.active_tab() or order[0]
+        if active not in order:
+            self.activate_tab(order[0])
+            return
+        idx = (order.index(active) + 1) % len(order)
+        self.activate_tab(order[idx])
+
+    def action_tab_prev(self) -> None:
+        order = [
+            "download",
+            "run",
+            "chat",
+            "maintenance",
+            "settings",
+            "jobs",
+            "browser",
+        ]
+        active = self.active_tab() or order[0]
+        if active not in order:
+            self.activate_tab(order[0])
+            return
+        idx = (order.index(active) - 1) % len(order)
+        self.activate_tab(order[idx])
 
     async def action_run_start(self) -> None:
         tab = self.active_tab()

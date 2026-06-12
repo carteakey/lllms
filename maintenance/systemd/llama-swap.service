@@ -1,0 +1,29 @@
+[Unit]
+Description=llama-swap (L3MS model router)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# Override L3MS_ROOT and LLAMA_SWAP_BIN in a drop-in if your layout differs:
+#   systemctl --user edit llama-swap.service
+#   [Service]
+#   Environment=L3MS_ROOT=/path/to/l3ms
+#   Environment=LLAMA_SWAP_BIN=/path/to/llama-swap
+Environment=L3MS_ROOT=%h/repos/l3ms
+Environment=LLAMA_SWAP_BIN=%h/bin/llama-swap
+Environment=LLAMA_SWAP_LISTEN=:8080
+WorkingDirectory=%h/repos/l3ms
+ExecStart=/bin/sh -c '${LLAMA_SWAP_BIN} -config ${L3MS_ROOT}/llama-swap.yaml -listen ${LLAMA_SWAP_LISTEN}'
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+KillSignal=SIGTERM
+KillMode=process
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

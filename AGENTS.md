@@ -9,7 +9,9 @@ Build a keyboard-first, script-first homelab LLM toolkit with strong operational
 ## Engineering Rules
 
 - Prefer deterministic script orchestration over hidden automation.
-- Keep all model/run/bench scripts as editable text, not hard-parameterized UI forms.
+- Serving is declared in `llama-swap.yaml`; benching is declared in
+  `bench-models/*.sh`. Both are editable text, not hard-parameterized UI
+  forms. When serving and benching flags drift, update them together.
 - Treat keyboard control as first-class; mouse workflows are optional.
 - Preserve existing files by default for downloads unless explicitly overridden.
 - Keep version snapshots for both model configs and scripts before writes.

@@ -7,6 +7,11 @@
 # Ignore log files
 /*.log
 
+# Bench raw logs — gitignored (large, redundant; structured results are tracked)
+bench-models/logs/*
+!bench-models/logs/results/
+!bench-models/logs/results/**
+
 # Ignore IDE and editor-specific files
 .idea/
 .vscode/
@@ -30,3 +35,6 @@ cuda-keyring_1.1-1_all.deb
 # Local secrets
 .env
 vendor-forks
+
+# macOS
+.DS_Store
