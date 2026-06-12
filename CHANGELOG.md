@@ -10,6 +10,8 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
   - Added new Gemma 4 26B and 12B QAT & MTP profiles to `llama-swap.yaml` (`gemma-4-26b-qat`, `gemma-4-26b-qat-mtp`, `gemma-4-12b-qat`, `gemma-4-12b-qat-mtp`).
   - Deprecated and removed the older, redundant non-QAT Gemma 4 26B profiles (`gemma-4-26b-a4b`, `gemma-4-26b-a4b-vision`, `gemma-4-26b-mtp`, `gemma-4-26b-mtp-vision`, `gemma-4-26b-a4b-q6-k-xl`, and `gemma-4-26b-mtp-q6`) as the new QAT + MTP configurations fully replace them at double the speed.
   - Created blog posts documenting benchmarks for Gemma 4 26B and 12B under QAT and MTP configurations, showing local speeds up to 100.6 tok/s (26B) and 120.8 tok/s (12B) on an RTX 4070.
+- **TPS Leaderboard & Dashboard**:
+  - Implemented a premium, glassmorphism-based static HTML dashboard (`docs/index.html`) served as a GitHub Page to showcase currently active/served models, performance ranges across tasks, and archived/deprecated models.
 
 ### [2026-05-19]
 - **MTP Improvements**: Rebuilt `llama.cpp` with [PR #23269](https://github.com/ggml-org/llama.cpp/pull/23269) for enhanced Multi-Token Prediction performance.

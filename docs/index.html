@@ -1,0 +1,1534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>L3MS // Homelab LLM Inference Leaderboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #090d16;
+      --panel-dark: rgba(20, 28, 47, 0.6);
+      --panel-border: rgba(255, 255, 255, 0.05);
+      --panel-glow: rgba(0, 242, 254, 0.03);
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --text-dark: #4b5563;
+      
+      /* Neon Accents */
+      --accent-cyan: #00f2fe;
+      --accent-cyan-glow: rgba(0, 242, 254, 0.4);
+      --accent-violet: #8b5cf6;
+      --accent-violet-glow: rgba(139, 92, 246, 0.4);
+      --accent-emerald: #10b981;
+      --accent-emerald-glow: rgba(16, 185, 129, 0.4);
+      --accent-amber: #f59e0b;
+      --accent-pink: #ec4899;
+      --accent-pink-glow: rgba(236, 72, 153, 0.4);
+      
+      --gradient-cyan: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
+      --gradient-violet: linear-gradient(135deg, #7f00ff 0%, #e100ff 100%);
+      --gradient-emerald: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      --gradient-orange: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(at 10% 20%, rgba(127, 0, 255, 0.05) 0px, transparent 50%),
+        radial-gradient(at 90% 10%, rgba(0, 242, 254, 0.05) 0px, transparent 50%),
+        radial-gradient(at 50% 80%, rgba(236, 72, 153, 0.02) 0px, transparent 50%);
+      background-attachment: fixed;
+      color: var(--text-main);
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+    }
+
+    /* --- HEADER SECTION --- */
+    header {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+      border-bottom: 1px solid var(--panel-border);
+      padding-bottom: 2rem;
+      margin-bottom: 2.5rem;
+    }
+
+    @media (min-width: 768px) {
+      header {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+      }
+    }
+
+    .brand {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .brand-title {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 800;
+      font-size: 2.2rem;
+      background: var(--gradient-cyan);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      letter-spacing: -1px;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .brand-title span.slash {
+      color: var(--accent-violet);
+      -webkit-text-fill-color: initial;
+    }
+
+    .brand-subtitle {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 3px;
+      font-weight: 600;
+    }
+
+    /* --- SYSTEM SPECS --- */
+    .system-specs {
+      background: var(--panel-dark);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--panel-border);
+      padding: 1rem 1.25rem;
+      border-radius: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1.5rem;
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+    }
+
+    .spec-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+
+    .spec-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .spec-value {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .spec-value .node-status {
+      width: 8px;
+      height: 8px;
+      background-color: var(--accent-emerald);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--accent-emerald);
+      display: inline-block;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+      70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
+    }
+
+    /* --- NAVIGATION TABS --- */
+    .tabs-nav {
+      display: flex;
+      gap: 0.75rem;
+      background: rgba(15, 23, 42, 0.4);
+      padding: 0.4rem;
+      border-radius: 12px;
+      border: 1px solid var(--panel-border);
+      margin-bottom: 2rem;
+      width: fit-content;
+      box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 0.7rem 1.4rem;
+      font-size: 0.95rem;
+      font-weight: 600;
+      font-family: 'Outfit', sans-serif;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .tab-btn:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .tab-btn.active {
+      background: var(--gradient-violet);
+      color: #fff;
+      box-shadow: 0 4px 20px var(--accent-violet-glow);
+    }
+
+    /* --- TAB PANEL CONTENT --- */
+    .tab-panel {
+      display: none;
+      animation: fadeIn 0.4s ease;
+    }
+
+    .tab-panel.active {
+      display: block;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* --- CONTROLS / FILTERS --- */
+    .dashboard-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    @media (min-width: 768px) {
+      .dashboard-controls {
+        flex-direction: row;
+        justify-content: space-between;
+        align-items: center;
+      }
+    }
+
+    .search-wrapper {
+      position: relative;
+      flex: 1;
+      max-width: 400px;
+    }
+
+    .search-input {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--panel-border);
+      padding: 0.75rem 1rem 0.75rem 2.5rem;
+      border-radius: 10px;
+      color: var(--text-main);
+      font-size: 0.9rem;
+      transition: all 0.3s ease;
+      outline: none;
+    }
+
+    .search-input:focus {
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 12px rgba(0, 242, 254, 0.15);
+      background: rgba(15, 23, 42, 0.8);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 0.9rem;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-muted);
+      pointer-events: none;
+      font-size: 0.9rem;
+    }
+
+    .filter-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .filter-tag {
+      background: rgba(30, 41, 59, 0.4);
+      border: 1px solid var(--panel-border);
+      color: var(--text-muted);
+      padding: 0.4rem 0.8rem;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .filter-tag:hover, .filter-tag.active {
+      color: #fff;
+      background: rgba(139, 92, 246, 0.2);
+      border-color: var(--accent-violet);
+    }
+
+    /* --- CARDS & GLASSMORPHISM --- */
+    .glass-card {
+      background: var(--panel-dark);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--panel-border);
+      border-radius: 16px;
+      padding: 1.5rem;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .glass-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 100%);
+    }
+
+    /* --- TABLE STYLING --- */
+    .table-container {
+      overflow-x: auto;
+      margin-top: 0.5rem;
+    }
+
+    .leaderboard-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.95rem;
+    }
+
+    .leaderboard-table th {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 600;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: var(--text-muted);
+      padding: 1.2rem 1rem;
+      border-bottom: 2px solid rgba(255, 255, 255, 0.05);
+    }
+
+    .leaderboard-table td {
+      padding: 1.2rem 1rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+      vertical-align: middle;
+    }
+
+    .leaderboard-table tbody tr {
+      transition: all 0.2s ease;
+    }
+
+    .leaderboard-table tbody tr:hover {
+      background: rgba(255, 255, 255, 0.015);
+      border-left: 3px solid var(--accent-cyan);
+    }
+
+    /* --- MODEL DETAILS ROW --- */
+    .model-name-cell {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .model-id {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: #fff;
+    }
+
+    .model-desc {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .badge-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      margin-top: 0.2rem;
+    }
+
+    /* --- BADGES --- */
+    .badge {
+      font-size: 0.7rem;
+      padding: 0.2rem 0.5rem;
+      border-radius: 6px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      border: 1px solid transparent;
+    }
+
+    .badge-mtp {
+      background: rgba(16, 185, 129, 0.06);
+      color: var(--accent-emerald);
+      border-color: rgba(16, 185, 129, 0.2);
+    }
+
+    .badge-vision {
+      background: rgba(59, 130, 246, 0.06);
+      color: #3b82f6;
+      border-color: rgba(59, 130, 246, 0.2);
+    }
+
+    .badge-moe {
+      background: rgba(139, 92, 246, 0.06);
+      color: var(--accent-violet);
+      border-color: rgba(139, 92, 246, 0.2);
+    }
+
+    .badge-qat {
+      background: rgba(245, 158, 11, 0.06);
+      color: var(--accent-amber);
+      border-color: rgba(245, 158, 11, 0.2);
+    }
+
+    .badge-preload {
+      background: rgba(236, 72, 153, 0.08);
+      color: var(--accent-pink);
+      border-color: rgba(236, 72, 153, 0.2);
+      box-shadow: 0 0 10px rgba(236, 72, 153, 0.1);
+    }
+
+    .badge-precision {
+      background: rgba(30, 41, 59, 0.5);
+      color: var(--text-muted);
+      border-color: var(--panel-border);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.75rem;
+    }
+
+    /* --- TPS RENDER & BAR --- */
+    .tps-cell {
+      min-width: 180px;
+    }
+
+    .tps-header-wrapper {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      margin-bottom: 0.35rem;
+    }
+
+    .tps-number {
+      font-family: 'Outfit', sans-serif;
+      font-size: 1.3rem;
+      font-weight: 800;
+      color: var(--accent-cyan);
+    }
+
+    .tps-unit {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .tps-bar-bg {
+      height: 6px;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 3px;
+      overflow: hidden;
+      width: 100%;
+    }
+
+    .tps-bar-fill {
+      height: 100%;
+      background: var(--gradient-cyan);
+      border-radius: 3px;
+      width: 0%;
+      transition: width 1.2s cubic-bezier(0.1, 0.8, 0.2, 1);
+    }
+
+    /* --- COMPARISON / RANGES VIEW --- */
+    .comparison-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.5rem;
+    }
+
+    @media (min-width: 992px) {
+      .comparison-grid {
+        grid-template-columns: 280px 1fr;
+      }
+    }
+
+    .selector-pane {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .selector-card {
+      background: rgba(15, 23, 42, 0.4);
+      border: 1px solid var(--panel-border);
+      padding: 1.2rem;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .selector-card:hover {
+      background: rgba(15, 23, 42, 0.6);
+      border-color: rgba(255, 255, 255, 0.1);
+    }
+
+    .selector-card.active {
+      background: rgba(139, 92, 246, 0.1);
+      border-color: var(--accent-violet);
+      box-shadow: 0 0 15px rgba(139, 92, 246, 0.1);
+    }
+
+    .selector-card-title {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 700;
+      font-size: 1rem;
+      color: #fff;
+    }
+
+    .selector-card-desc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    /* --- CHART AND RANGE RENDERING --- */
+    .chart-pane {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .chart-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .chart-title {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 700;
+      font-size: 1.25rem;
+    }
+
+    .comparison-toggle {
+      display: flex;
+      gap: 0.5rem;
+      background: rgba(15, 23, 42, 0.5);
+      padding: 0.3rem;
+      border-radius: 8px;
+      border: 1px solid var(--panel-border);
+    }
+
+    .toggle-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 0.4rem 0.8rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .toggle-btn.active {
+      background: var(--panel-dark);
+      color: var(--accent-cyan);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+
+    .bars-container {
+      display: flex;
+      flex-direction: column;
+      gap: 1.2rem;
+      margin-top: 1rem;
+    }
+
+    .chart-row {
+      display: grid;
+      grid-template-columns: 140px 1fr;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .chart-label {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chart-bar-area {
+      position: relative;
+      height: 32px;
+      display: flex;
+      align-items: center;
+    }
+
+    .chart-bar-bg {
+      position: absolute;
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 4px;
+    }
+
+    /* Range Overlay Bar */
+    .range-bar {
+      position: absolute;
+      height: 12px;
+      background: rgba(139, 92, 246, 0.2);
+      border-radius: 6px;
+      border: 1px solid rgba(139, 92, 246, 0.4);
+      transition: all 0.8s cubic-bezier(0.1, 0.8, 0.2, 1);
+    }
+
+    /* Baseline vs MTP comparison bars */
+    .compare-bar-1 {
+      position: absolute;
+      height: 6px;
+      background: linear-gradient(90deg, #ec4899, #f43f5e);
+      border-radius: 3px;
+      top: 6px;
+      width: 0%;
+      transition: width 0.8s ease;
+    }
+
+    .compare-bar-2 {
+      position: absolute;
+      height: 6px;
+      background: linear-gradient(90deg, #00f2fe, #4facfe);
+      border-radius: 3px;
+      bottom: 6px;
+      width: 0%;
+      transition: width 0.8s ease;
+    }
+
+    .chart-bar-values {
+      position: absolute;
+      right: 0.5rem;
+      font-size: 0.75rem;
+      font-family: 'JetBrains Mono', monospace;
+      font-weight: 600;
+      color: var(--text-main);
+      pointer-events: none;
+    }
+
+    .accept-rate-marker {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.7rem;
+      color: var(--accent-emerald);
+      margin-left: 0.75rem;
+      background: rgba(16, 185, 129, 0.08);
+      padding: 0.1rem 0.3rem;
+      border-radius: 4px;
+    }
+
+    /* --- METRICS PANELS --- */
+    .metrics-summary {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1.25rem;
+      margin-top: 1rem;
+    }
+
+    .metric-card {
+      background: rgba(15, 23, 42, 0.3);
+      border: 1px solid var(--panel-border);
+      padding: 1.25rem;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .metric-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 1px;
+    }
+
+    .metric-val {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 700;
+      font-size: 1.6rem;
+      color: #fff;
+    }
+
+    /* --- ARCHIVED MODELS --- */
+    .archive-list {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .archive-card {
+      background: rgba(20, 28, 47, 0.3);
+      border: 1px solid var(--panel-border);
+      border-left: 4px solid var(--text-dark);
+      border-radius: 12px;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      transition: all 0.2s ease;
+    }
+
+    .archive-card:hover {
+      border-left-color: var(--accent-amber);
+      background: rgba(20, 28, 47, 0.4);
+    }
+
+    .archive-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+    }
+
+    .archive-title {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 700;
+      font-size: 1.1rem;
+      color: var(--text-main);
+    }
+
+    .archive-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      gap: 1rem;
+    }
+
+    .archive-details {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 0.75rem;
+      font-size: 0.85rem;
+      border-top: 1px solid rgba(255,255,255,0.03);
+      padding-top: 0.75rem;
+    }
+
+    @media (min-width: 768px) {
+      .archive-details {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .archive-detail-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.15rem;
+    }
+
+    .archive-detail-label {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .archive-detail-val {
+      color: var(--text-main);
+    }
+
+    .archive-detail-val.replacement {
+      color: var(--accent-cyan);
+      font-weight: 600;
+    }
+
+    /* --- FOOTER --- */
+    footer {
+      margin-top: 5rem;
+      border-top: 1px solid var(--panel-border);
+      padding-top: 2rem;
+      text-align: center;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+    }
+
+    footer a {
+      color: var(--accent-cyan);
+      text-decoration: none;
+      transition: color 0.2s ease;
+    }
+
+    footer a:hover {
+      color: var(--accent-violet);
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    
+    <!-- --- HEADER --- -->
+    <header>
+      <div class="brand">
+        <h1 class="brand-title">L3MS <span class="slash">//</span> BENCHMARKS</h1>
+        <p class="brand-subtitle">Homelab LLM Inference Leaderboard</p>
+      </div>
+      <div class="system-specs">
+        <div class="spec-item">
+          <span class="spec-label">Host Status</span>
+          <span class="spec-value"><span class="node-status"></span> ONLINE</span>
+        </div>
+        <div class="spec-item">
+          <span class="spec-label">GPU Node</span>
+          <span class="spec-value">NVIDIA RTX 4070 Super 12GB</span>
+        </div>
+        <div class="spec-item">
+          <span class="spec-label">CPU Host</span>
+          <span class="spec-value">Intel Core i5-12600K</span>
+        </div>
+        <div class="spec-item">
+          <span class="spec-label">System RAM</span>
+          <span class="spec-value">32GB DDR5-6000</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- --- TABS NAVIGATION --- -->
+    <nav class="tabs-nav">
+      <button class="tab-btn active" data-tab="active-leaderboard">
+        🏆 served models
+      </button>
+      <button class="tab-btn" data-tab="perf-ranges">
+        📊 performance ranges
+      </button>
+      <button class="tab-btn" data-tab="archived-models">
+        📦 archived catalog
+      </button>
+    </nav>
+
+    <!-- ========================================== -->
+    <!-- TAB 1: ACTIVE LEADERBOARD                  -->
+    <!-- ========================================== -->
+    <section class="tab-panel active" id="active-leaderboard">
+      <div class="dashboard-controls">
+        <div class="search-wrapper">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="model-search" class="search-input" placeholder="Search models by ID, quant, size...">
+        </div>
+        <div class="filter-tags">
+          <button class="filter-tag active" data-filter="all">All</button>
+          <button class="filter-tag" data-filter="mtp">MTP Enabled</button>
+          <button class="filter-tag" data-filter="vision">Vision</button>
+          <button class="filter-tag" data-filter="moe">MoE</button>
+          <button class="filter-tag" data-filter="qat">QAT</button>
+        </div>
+      </div>
+
+      <div class="glass-card">
+        <div class="table-container">
+          <table class="leaderboard-table" id="leaderboard-table">
+            <thead>
+              <tr>
+                <th style="width: 50px;">Rank</th>
+                <th>Model Profile</th>
+                <th style="width: 120px;">Context</th>
+                <th style="width: 160px;">Quantization</th>
+                <th class="tps-cell">Performance</th>
+              </tr>
+            </thead>
+            <tbody id="leaderboard-tbody">
+              <!-- Dynamically rendered -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- TAB 2: PERFORMANCE RANGES                  -->
+    <!-- ========================================== -->
+    <section class="tab-panel" id="perf-ranges">
+      <div class="comparison-grid">
+        
+        <div class="selector-pane" id="range-selectors">
+          <!-- Dynamically populated cards -->
+        </div>
+
+        <div class="glass-card chart-pane">
+          <div class="chart-header">
+            <h3 class="chart-title" id="chart-model-title">Loading Model Benchmarks...</h3>
+            <div class="comparison-toggle" id="chart-comparison-toggle" style="display: none;">
+              <button class="toggle-btn" data-mode="range">TPS Range</button>
+              <button class="toggle-btn active" data-mode="compare">Baseline vs MTP</button>
+            </div>
+          </div>
+
+          <div class="bars-container" id="chart-bars">
+            <!-- Dynamically populated CSS bar charts -->
+          </div>
+
+          <div class="metrics-summary" id="chart-metrics">
+            <!-- Dynamically populated stats -->
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- ========================================== -->
+    <!-- TAB 3: ARCHIVED CATALOG                    -->
+    <!-- ========================================== -->
+    <section class="tab-panel" id="archived-models">
+      <div class="glass-card" style="margin-bottom: 2rem;">
+        <h3 class="chart-title" style="margin-bottom: 0.5rem; color: var(--accent-amber);">Archived & Deprecated Models</h3>
+        <p style="font-size: 0.9rem; color: var(--text-muted); max-width: 800px;">
+          These configurations have been disabled in `llama-swap.yaml` and had their GGUF model files removed from disk. This cleanup reclaimed <strong>100+ GB</strong> of storage. Standard non-QAT variants are replaced by quantized models optimized via Quantization-Aware Training (QAT), which run up to 2x faster.
+        </p>
+      </div>
+
+      <div class="archive-list" id="archive-list-container">
+        <!-- Dynamically rendered archived model cards -->
+      </div>
+    </section>
+
+    <!-- --- FOOTER --- -->
+    <footer>
+      <p>L3MS homelab LLM toolset. Built on CachyOS / CUDA. Git repository: <a href="https://github.com/carteakey/l3ms" target="_blank">carteakey/l3ms</a></p>
+      <p style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-dark);">Generated on June 12, 2026</p>
+    </footer>
+
+  </div>
+
+  <script>
+    // ==========================================
+    // DATA DECLARATIONS
+    // ==========================================
+    const servedModels = [
+      {
+        id: "gemma-4-12b-qat-mtp",
+        name: "gemma-4-12B QAT + MTP",
+        quant: "UD-Q4_K_XL (QAT)",
+        context: "131k",
+        tps: 120.80,
+        isMtp: true,
+        isVision: false,
+        isMoe: true, // Gemma 4 MoE structure
+        isQat: true,
+        preload: false,
+        description: "Ultrafast 12B model with native MTP drafting using the official assistant model."
+      },
+      {
+        id: "gemma-4-26b-qat-mtp",
+        name: "gemma-4-26B QAT + MTP",
+        quant: "UD-Q4_K_XL (QAT)",
+        context: "131k",
+        tps: 100.60,
+        isMtp: true,
+        isVision: false,
+        isMoe: true,
+        isQat: true,
+        preload: true,
+        description: "Startup Preload Default. Gemma 4 26B with Q8_0 MTP Assistant draft model."
+      },
+      {
+        id: "qwen3-6-mtp",
+        name: "Qwen3.6-35B-A3B MTP",
+        quant: "UD-Q4_K_XL",
+        context: "131k",
+        tps: 73.97,
+        isMtp: true,
+        isVision: false,
+        isMoe: true,
+        isQat: false,
+        preload: false,
+        description: "Qwen 3.6 35B model utilizing Multi-Token Prediction (MTP) draft execution."
+      },
+      {
+        id: "gemma-4-26b-qat",
+        name: "gemma-4-26B QAT",
+        quant: "UD-Q4_K_XL (QAT)",
+        context: "131k",
+        tps: 69.00,
+        isMtp: false,
+        isVision: false,
+        isMoe: true,
+        isQat: true,
+        preload: false,
+        description: "QAT 26B base text model without Multi-Token Prediction."
+      },
+      {
+        id: "qwen3-6-mtp-vision",
+        name: "Qwen3.6-35B-A3B MTP (Vision)",
+        quant: "UD-Q4_K_XL",
+        context: "131k",
+        tps: 65.00,
+        isMtp: true,
+        isVision: true,
+        isMoe: true,
+        isQat: false,
+        preload: false,
+        description: "Qwen 3.6 35B MTP vision model with CLIP projector file in MTP directory."
+      },
+      {
+        id: "gemma-4-12b-qat",
+        name: "gemma-4-12B QAT",
+        quant: "UD-Q4_K_XL (QAT)",
+        context: "131k",
+        tps: 59.90,
+        isMtp: false,
+        isVision: false,
+        isMoe: true,
+        isQat: true,
+        preload: false,
+        description: "Baseline QAT 12B model without MTP drafting."
+      },
+      {
+        id: "qwen3-6-mtp-q6",
+        name: "Qwen3.6-35B-A3B MTP Q6",
+        quant: "UD-Q6_K",
+        context: "131k",
+        tps: 50.00,
+        isMtp: true,
+        isVision: false,
+        isMoe: true,
+        isQat: false,
+        preload: false,
+        description: "Higher-precision Qwen 3.6 35B MTP configuration."
+      },
+      {
+        id: "qwen3-coder-next",
+        name: "Qwen3-Coder-Next 80B.A3B",
+        quant: "UD-Q4_K_XL",
+        context: "65k",
+        tps: 39.60,
+        isMtp: false,
+        isVision: false,
+        isMoe: true,
+        isQat: false,
+        preload: false,
+        description: "Default coding model; static bench-derived expert placement for high throughput."
+      },
+      {
+        id: "gemma-4-26b-qat-mtp-vision",
+        name: "gemma-4-26B QAT + MTP (Vision)",
+        quant: "UD-Q4_K_XL (QAT)",
+        context: "131k",
+        tps: 39.00,
+        isMtp: true,
+        isVision: true,
+        isMoe: true,
+        isQat: true,
+        preload: false,
+        description: "QAT 26B base with MTP Assistant + CLIP vision support (mmproj-BF16.gguf)."
+      },
+      {
+        id: "gemma-4-12b-qat-mtp-vision",
+        name: "gemma-4-12B QAT + MTP (Vision)",
+        quant: "UD-Q4_K_XL (QAT)",
+        context: "131k",
+        tps: 35.00, // estimated vision mtp speed
+        isMtp: true,
+        isVision: true,
+        isMoe: true,
+        isQat: true,
+        preload: false,
+        description: "QAT 12B base with MTP Assistant + CLIP vision support (mmproj-BF16.gguf)."
+      },
+      {
+        id: "gpt-oss-120b",
+        name: "gpt-oss 120B",
+        quant: "MXFP4",
+        context: "32k",
+        tps: 23.40,
+        isMtp: false,
+        isVision: false,
+        isMoe: true,
+        isQat: false,
+        preload: false,
+        description: "High reasoning production default; static bench-derived CPU/GPU split."
+      },
+      {
+        id: "sarvam-30b",
+        name: "sarvam-30B",
+        quant: "Q6_K",
+        context: "4k",
+        tps: 15.00,
+        isMtp: false,
+        isVision: false,
+        isMoe: false,
+        isQat: false,
+        preload: false,
+        description: "Requires custom PR-20275 llama.cpp build; runs with CPU layer splits."
+      }
+    ];
+
+    const rangeBenchmarks = {
+      "gemma4-12b": {
+        title: "Gemma 4 12B-it QAT Benchmarks",
+        description: "Direct comparison on RTX 4070 (iGPU host config) with and without Multi-Token Prediction (MTP). Average Speedup: 2.0x.",
+        hasComparison: true,
+        metrics: [
+          { title: "Baseline Average", value: "59.9 t/s" },
+          { title: "MTP Peak Speed", value: "135.7 t/s" },
+          { title: "MTP Average Speed", value: "120.8 t/s" },
+          { title: "Draft Accept Rate", value: "65.8%" }
+        ],
+        tasks: [
+          { name: "stepwise_math", baseline: 59.8, mtp: 135.7, accept: "81.8%" },
+          { name: "summarize", baseline: 59.9, mtp: 133.5, accept: "79.8%" },
+          { name: "code_python", baseline: 59.9, mtp: 130.5, accept: "77.3%" },
+          { name: "translation", baseline: 60.0, mtp: 128.6, accept: "75.4%" },
+          { name: "code_cpp", baseline: 60.0, mtp: 120.4, accept: "68.4%" },
+          { name: "long_code_review", baseline: 57.6, mtp: 111.7, accept: "63.4%" },
+          { name: "qa_factual", baseline: 59.9, mtp: 107.2, accept: "57.1%" },
+          { name: "explain_concept", baseline: 59.9, mtp: 105.7, accept: "55.9%" },
+          { name: "creative_short", baseline: 60.0, mtp: 94.0, accept: "45.8%" }
+        ]
+      },
+      "gemma4-26b": {
+        title: "Gemma 4 26B-A4B MoE Benchmarks",
+        description: "Comparing 26B MoE configurations. Due to VRAM size limits, baseline Q5 spills to CPU. Q4 QAT fits fully, unlocking true MTP acceleration.",
+        hasComparison: true,
+        metrics: [
+          { title: "Standard Baseline (Q5)", value: "38.5 t/s" },
+          { title: "QAT Only (Text)", value: "69.0 t/s" },
+          { title: "QAT + MTP (Turbo)", value: "100.6 t/s" },
+          { title: "QAT Speedup Factor", value: "2.61x" }
+        ],
+        tasks: [
+          // Using range comparisons for the active configuration (gemma-4-mtp-turbo-tuned vs gemma-4-baseline)
+          { name: "stepwise_math", baseline: 44.45, mtp: 57.77, accept: "81.6%" },
+          { name: "translation", baseline: 44.59, mtp: 49.60, accept: "82.5%" },
+          { name: "qa_factual", baseline: 44.66, mtp: 49.57, accept: "80.6%" },
+          { name: "code_python", baseline: 44.62, mtp: 45.99, accept: "60.3%" },
+          { name: "code_cpp", baseline: 44.78, mtp: 45.10, accept: "70.5%" },
+          { name: "creative_short", baseline: 45.32, mtp: 40.96, accept: "66.0%" },
+          { name: "summarize", baseline: 44.94, mtp: 32.31, accept: "38.3%" },
+          { name: "long_code_review", baseline: 43.98, mtp: 26.22, accept: "28.2%" },
+          { name: "explain_concept", baseline: 44.74, mtp: 25.80, accept: "31.4%" }
+        ]
+      },
+      "qwen3-6-35b": {
+        title: "Qwen 3.6 35B-A3B MTP Benchmarks",
+        description: "Performance metrics for the Qwen 3.6 35B model. Showcases robust drafting acceptance rates, achieving up to ~74 t/s on local hardware.",
+        hasComparison: true,
+        metrics: [
+          { title: "Baseline Average", value: "51.3 t/s" },
+          { title: "MTP Peak Speed", value: "74.0 t/s" },
+          { title: "MTP Average Speed", value: "68.5 t/s" },
+          { title: "Aggregate Accept Rate", value: "82.7%" }
+        ],
+        tasks: [
+          { name: "code_python", baseline: 51.31, mtp: 73.97, accept: "96.2%" },
+          { name: "qa_factual", baseline: 51.77, mtp: 71.61, accept: "87.7%" },
+          { name: "code_cpp", baseline: 51.24, mtp: 70.15, accept: "85.7%" },
+          { name: "translation", baseline: 51.25, mtp: 69.71, accept: "81.3%" },
+          { name: "stepwise_math", baseline: 51.10, mtp: 69.11, accept: "85.1%" },
+          { name: "explain_concept", baseline: 51.22, mtp: 67.33, accept: "81.9%" },
+          { name: "summarize", baseline: 51.15, mtp: 67.06, accept: "80.0%" },
+          { name: "long_code_review", baseline: 51.04, mtp: 65.03, accept: "77.9%" },
+          { name: "creative_short", baseline: 51.36, mtp: 62.20, accept: "70.3%" }
+        ]
+      }
+    };
+
+    const archivedModels = [
+      {
+        name: "Older Gemma 4 26B (Standard / Non-QAT)",
+        profiles: "gemma-4-26b-a4b, gemma-4-26b-mtp, gemma-4-26b-mtp-q6, etc.",
+        reason: "Replaced by Quantization-Aware Training (QAT) variants. The standard 26B baseline model (~18 GB) exceeded VRAM limits and spilled to CPU RAM (reducing speed to ~38 t/s). QAT models (UD-Q4_K_XL at ~14.2 GB) fit entirely in VRAM, driving speed up to 69 t/s (baseline) and 100+ t/s (MTP).",
+        dateRetired: "June 2026",
+        replacement: "gemma-4-26b-qat-mtp"
+      },
+      {
+        name: "Mistral Small 4 119B MoE Family",
+        profiles: "mistral-small-4-119b, -optimized, -no-vision, -no-vision-thinking, -vision",
+        reason: "Extremely heavy parameters for a 12GB VRAM setup. Even with aggressive CPU offloading and expert filtering via ik_llama.cpp, generation latencies remained high. Deprecated to reclaim ~65 GB of storage.",
+        dateRetired: "May 2026",
+        replacement: "gpt-oss-120b (better expert/reasoning efficiency)"
+      },
+      {
+        name: "NVIDIA Nemotron 3 Super 120B",
+        profiles: "nemotron-super-120b (UD-Q3_K_XL)",
+        reason: "Retired to free up storage space. Standard post-training quantization at 3-bit precision suffered quality loss compared to newer models, and throughput was slow due to high parameter size on a single node.",
+        dateRetired: "April 2026",
+        replacement: "gpt-oss-120b"
+      },
+      {
+        name: "Byteshape Qwen 3.6 35B MTP",
+        profiles: "byteshape/Qwen3.6-35B-A3B-MTP-GGUF",
+        reason: "Unoptimized or redundant relative to the final compiled Qwen 3.6 configurations in the main l3ms model store.",
+        dateRetired: "June 2026",
+        replacement: "qwen3-6-mtp"
+      },
+      {
+        name: "Qwen 3.6 35B Baseline (Non-MTP)",
+        profiles: "unsloth/Qwen3.6-35B-A3B-GGUF",
+        reason: "Deleted base models once MTP profiles were fully validated. The vision projector files (`mmproj-F16.gguf`) were copied and relocated to the active MTP folder to preserve vision processing while recovering ~25 GB of storage.",
+        dateRetired: "June 2026",
+        replacement: "qwen3-6-mtp-vision"
+      },
+      {
+        name: "OmniCoder 9B",
+        profiles: "Tesslate/OmniCoder-9B-GGUF",
+        reason: "Deprecated coding model. Replaced by the far more capable Qwen3-Coder-Next 80B MoE which utilizes expert splitting to maintain 40 t/s local throughput.",
+        dateRetired: "March 2026",
+        replacement: "qwen3-coder-next"
+      }
+    ];
+
+    // ==========================================
+    // APP CONTROLLER & INTERACTION LOGIC
+    // ==========================================
+    let currentTab = "active-leaderboard";
+    let selectedRangeModel = "gemma4-12b";
+    let rangeMode = "compare"; // "compare" or "range"
+
+    document.addEventListener("DOMContentLoaded", () => {
+      initTabs();
+      renderLeaderboard();
+      initLeaderboardFilters();
+      renderRangeSelectors();
+      renderRangeChart();
+      renderArchivedModels();
+      
+      // Auto animate progress bars on load
+      setTimeout(animateProgressBars, 150);
+    });
+
+    // --- TAB SYSTEM ---
+    function initTabs() {
+      const tabButtons = document.querySelectorAll(".tab-btn");
+      tabButtons.forEach(btn => {
+        btn.addEventListener("click", () => {
+          const targetTab = btn.getAttribute("data-tab");
+          
+          tabButtons.forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+
+          document.querySelectorAll(".tab-panel").forEach(panel => {
+            panel.classList.remove("active");
+          });
+          document.getElementById(targetTab).classList.add("active");
+
+          currentTab = targetTab;
+          
+          if (targetTab === "active-leaderboard") {
+            setTimeout(animateProgressBars, 100);
+          } else if (targetTab === "perf-ranges") {
+            setTimeout(animateRangeBars, 100);
+          }
+        });
+      });
+    }
+
+    // --- LEADERBOARD TAB ---
+    function renderLeaderboard(searchTerm = "", activeFilter = "all") {
+      const tbody = document.getElementById("leaderboard-tbody");
+      tbody.innerHTML = "";
+      
+      const maxTps = Math.max(...servedModels.map(m => m.tps));
+
+      // Filter models
+      const filtered = servedModels.filter(model => {
+        const matchesSearch = model.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                              model.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                              model.quant.toLowerCase().includes(searchTerm.toLowerCase());
+        
+        if (!matchesSearch) return false;
+
+        if (activeFilter === "mtp") return model.isMtp;
+        if (activeFilter === "vision") return model.isVision;
+        if (activeFilter === "moe") return model.isMoe;
+        if (activeFilter === "qat") return model.isQat;
+        return true;
+      });
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 3rem;">No active models match the filter.</td></tr>`;
+        return;
+      }
+
+      filtered.forEach((model, index) => {
+        const rank = index + 1;
+        const barPercentage = (model.tps / maxTps) * 100;
+        
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td style="font-family: 'Outfit', sans-serif; font-weight: 700; color: ${rank === 1 ? 'var(--accent-cyan)' : rank === 2 ? 'var(--accent-violet)' : 'var(--text-muted)'}; padding-left: 1.5rem;">
+            #${rank}
+          </td>
+          <td>
+            <div class="model-name-cell">
+              <span class="model-id">${model.name}</span>
+              <span class="model-desc">${model.description}</span>
+              <div class="badge-row">
+                ${model.preload ? '<span class="badge badge-preload">Preloaded</span>' : ''}
+                ${model.isMtp ? '<span class="badge badge-mtp">MTP</span>' : ''}
+                ${model.isVision ? '<span class="badge badge-vision">Vision</span>' : ''}
+                ${model.isMoe ? '<span class="badge badge-moe">MoE</span>' : ''}
+                ${model.isQat ? '<span class="badge badge-qat">QAT</span>' : ''}
+              </div>
+            </div>
+          </td>
+          <td>
+            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;">${model.context}</span>
+          </td>
+          <td>
+            <span class="badge badge-precision">${model.quant}</span>
+          </td>
+          <td class="tps-cell">
+            <div class="tps-header-wrapper">
+              <span class="tps-number">${model.tps.toFixed(2)}</span>
+              <span class="tps-unit">tok/s</span>
+            </div>
+            <div class="tps-bar-bg">
+              <div class="tps-bar-fill" data-percentage="${barPercentage}%"></div>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function animateProgressBars() {
+      const bars = document.querySelectorAll(".tps-bar-fill");
+      bars.forEach(bar => {
+        const targetWidth = bar.getAttribute("data-percentage");
+        bar.style.width = targetWidth;
+      });
+    }
+
+    function initLeaderboardFilters() {
+      const searchInput = document.getElementById("model-search");
+      const filterTags = document.querySelectorAll(".filter-tag");
+
+      const handleFilterChange = () => {
+        const searchTerm = searchInput.value;
+        const activeFilter = document.querySelector(".filter-tag.active").getAttribute("data-filter");
+        renderLeaderboard(searchTerm, activeFilter);
+        setTimeout(animateProgressBars, 50);
+      };
+
+      searchInput.addEventListener("input", handleFilterChange);
+
+      filterTags.forEach(tag => {
+        tag.addEventListener("click", () => {
+          filterTags.forEach(t => t.classList.remove("active"));
+          tag.classList.add("active");
+          handleFilterChange();
+        });
+      });
+    }
+
+    // --- PERFORMANCE RANGES TAB ---
+    function renderRangeSelectors() {
+      const pane = document.getElementById("range-selectors");
+      pane.innerHTML = "";
+
+      Object.keys(rangeBenchmarks).forEach(key => {
+        const bench = rangeBenchmarks[key];
+        const card = document.createElement("div");
+        card.className = `selector-card ${key === selectedRangeModel ? 'active' : ''}`;
+        card.setAttribute("data-key", key);
+        card.innerHTML = `
+          <span class="selector-card-title">${bench.title}</span>
+          <span class="selector-card-desc">${bench.tasks.length} benchmarked tasks</span>
+        `;
+        
+        card.addEventListener("click", () => {
+          document.querySelectorAll(".selector-card").forEach(c => c.classList.remove("active"));
+          card.classList.add("active");
+          selectedRangeModel = key;
+          renderRangeChart();
+        });
+
+        pane.appendChild(card);
+      });
+    }
+
+    function renderRangeChart() {
+      const modelData = rangeBenchmarks[selectedRangeModel];
+      document.getElementById("chart-model-title").innerText = modelData.title;
+      
+      const toggle = document.getElementById("chart-comparison-toggle");
+      if (modelData.hasComparison) {
+        toggle.style.display = "flex";
+      } else {
+        toggle.style.display = "none";
+      }
+
+      // Populate summary metrics
+      const metricsSummary = document.getElementById("chart-metrics");
+      metricsSummary.innerHTML = "";
+      modelData.metrics.forEach(metric => {
+        const card = document.createElement("div");
+        card.className = "metric-card";
+        card.innerHTML = `
+          <span class="metric-title">${metric.title}</span>
+          <span class="metric-val">${metric.value}</span>
+        `;
+        metricsSummary.appendChild(card);
+      });
+
+      // Render chart bars
+      const container = document.getElementById("chart-bars");
+      container.innerHTML = "";
+
+      // Find global maximum for scaling
+      let maxVal = 0;
+      modelData.tasks.forEach(t => {
+        if (t.baseline > maxVal) maxVal = t.baseline;
+        if (t.mtp && t.mtp > maxVal) maxVal = t.mtp;
+      });
+      maxVal = maxVal * 1.1; // 10% breathing room
+
+      modelData.tasks.forEach(task => {
+        const row = document.createElement("div");
+        row.className = "chart-row";
+        
+        let barHtml = "";
+        
+        if (rangeMode === "compare" && task.mtp !== undefined) {
+          const basePct = (task.baseline / maxVal) * 100;
+          const mtpPct = (task.mtp / maxVal) * 100;
+          
+          barHtml = `
+            <div class="chart-bar-bg"></div>
+            <div class="compare-bar-1" data-width="${basePct}%" title="Baseline: ${task.baseline} t/s"></div>
+            <div class="compare-bar-2" data-width="${mtpPct}%" title="MTP: ${task.mtp} t/s"></div>
+            <div class="chart-bar-values">
+              <span style="color: #ec4899; margin-right: 0.5rem;">${task.baseline.toFixed(1)}</span>
+              <span style="color: var(--accent-cyan); font-weight: 700;">${task.mtp.toFixed(1)}</span>
+              <span class="accept-rate-marker">🎯 ${task.accept}</span>
+            </div>
+          `;
+        } else {
+          // Range Mode
+          const minVal = Math.min(task.baseline, task.mtp || task.baseline);
+          const maxValTask = Math.max(task.baseline, task.mtp || task.baseline);
+          
+          const leftPct = (minVal / maxVal) * 100;
+          const widthPct = ((maxValTask - minVal) / maxVal) * 100 || 2; // minimum width of 2% if equal
+          
+          barHtml = `
+            <div class="chart-bar-bg"></div>
+            <div class="range-bar" data-left="${leftPct}%" data-width="${widthPct}%"></div>
+            <div class="chart-bar-values">
+              <span>${minVal.toFixed(1)} - ${maxValTask.toFixed(1)} t/s</span>
+            </div>
+          `;
+        }
+
+        row.innerHTML = `
+          <div class="chart-label" title="${task.name}">${task.name}</div>
+          <div class="chart-bar-area">${barHtml}</div>
+        `;
+        container.appendChild(row);
+      });
+
+      // Bind toggle controls
+      const toggleButtons = document.querySelectorAll("#chart-comparison-toggle .toggle-btn");
+      toggleButtons.forEach(btn => {
+        // remove old listener to prevent duplicates
+        const newBtn = btn.cloneNode(true);
+        btn.parentNode.replaceChild(newBtn, btn);
+        
+        newBtn.classList.toggle("active", newBtn.getAttribute("data-mode") === rangeMode);
+        
+        newBtn.addEventListener("click", () => {
+          rangeMode = newBtn.getAttribute("data-mode");
+          renderRangeChart();
+        });
+      });
+
+      setTimeout(animateRangeBars, 50);
+    }
+
+    function animateRangeBars() {
+      // Animate comparison bars
+      document.querySelectorAll(".compare-bar-1").forEach(bar => {
+        bar.style.width = bar.getAttribute("data-width");
+      });
+      document.querySelectorAll(".compare-bar-2").forEach(bar => {
+        bar.style.width = bar.getAttribute("data-width");
+      });
+      // Animate range bars
+      document.querySelectorAll(".range-bar").forEach(bar => {
+        bar.style.left = bar.getAttribute("data-left");
+        bar.style.width = bar.getAttribute("data-width");
+      });
+    }
+
+    // --- ARCHIVED CATALOG TAB ---
+    function renderArchivedModels() {
+      const container = document.getElementById("archive-list-container");
+      container.innerHTML = "";
+
+      archivedModels.forEach(model => {
+        const card = document.createElement("div");
+        card.className = "archive-card";
+        card.innerHTML = `
+          <div class="archive-card-header">
+            <h4 class="archive-title">${model.name}</h4>
+            <span class="badge" style="background: rgba(75, 85, 99, 0.1); color: var(--text-muted); border-color: rgba(75, 85, 99, 0.2);">Retired</span>
+          </div>
+          <p style="font-size: 0.85rem; color: var(--text-muted);">${model.reason}</p>
+          <div class="archive-details">
+            <div class="archive-detail-item">
+              <span class="archive-detail-label">Profiles Impacted</span>
+              <span class="archive-detail-val" style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">${model.profiles}</span>
+            </div>
+            <div class="archive-detail-item">
+              <span class="archive-detail-label">Date Retired</span>
+              <span class="archive-detail-val">${model.dateRetired}</span>
+            </div>
+            <div class="archive-detail-item" style="grid-column: span 2; border-top: 1px solid rgba(255,255,255,0.02); padding-top: 0.4rem; margin-top: 0.2rem;">
+              <span class="archive-detail-label">Recommended Replacement</span>
+              <span class="archive-detail-val replacement">🚀 ${model.replacement}</span>
+            </div>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+    }
+  </script>
+</body>
+</html>
