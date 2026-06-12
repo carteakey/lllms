@@ -6,32 +6,24 @@
   <title>L3MS // Homelab LLM Inference Leaderboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-dark: #090d16;
-      --panel-dark: rgba(20, 28, 47, 0.6);
-      --panel-border: rgba(255, 255, 255, 0.05);
-      --panel-glow: rgba(0, 242, 254, 0.03);
-      --text-main: #f3f4f6;
-      --text-muted: #9ca3af;
-      --text-dark: #4b5563;
+      --bg: #080808;
+      --panel: #111111;
+      --panel-light: #181818;
+      --border: #2e2e2e;
+      --border-bright: #ffffff;
       
-      /* Neon Accents */
-      --accent-cyan: #00f2fe;
-      --accent-cyan-glow: rgba(0, 242, 254, 0.4);
-      --accent-violet: #8b5cf6;
-      --accent-violet-glow: rgba(139, 92, 246, 0.4);
-      --accent-emerald: #10b981;
-      --accent-emerald-glow: rgba(16, 185, 129, 0.4);
-      --accent-amber: #f59e0b;
-      --accent-pink: #ec4899;
-      --accent-pink-glow: rgba(236, 72, 153, 0.4);
+      /* Brutalist Cyber Colors */
+      --color-green: #00ff66;
+      --color-yellow: #ffff00;
+      --color-pink: #ff007f;
+      --color-blue: #00e5ff;
+      --text-main: #f0f0f0;
+      --text-muted: #7a7a7a;
       
-      --gradient-cyan: linear-gradient(135deg, #00f2fe 0%, #4facfe 100%);
-      --gradient-violet: linear-gradient(135deg, #7f00ff 0%, #e100ff 100%);
-      --gradient-emerald: linear-gradient(135deg, #10b981 0%, #059669 100%);
-      --gradient-orange: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+      --shadow-offset: 4px;
     }
 
     * {
@@ -41,32 +33,29 @@
     }
 
     body {
-      font-family: 'Inter', sans-serif;
-      background-color: var(--bg-dark);
-      background-image: 
-        radial-gradient(at 10% 20%, rgba(127, 0, 255, 0.05) 0px, transparent 50%),
-        radial-gradient(at 90% 10%, rgba(0, 242, 254, 0.05) 0px, transparent 50%),
-        radial-gradient(at 50% 80%, rgba(236, 72, 153, 0.02) 0px, transparent 50%);
-      background-attachment: fixed;
+      font-family: 'JetBrains Mono', monospace;
+      background-color: var(--bg);
       color: var(--text-main);
       min-height: 100vh;
-      line-height: 1.6;
+      line-height: 1.5;
+      padding: 2rem 1rem;
     }
 
     .container {
-      max-width: 1200px;
+      max-width: 1100px;
       margin: 0 auto;
-      padding: 2rem 1.5rem;
     }
 
-    /* --- HEADER SECTION --- */
+    /* --- HEADER --- */
     header {
+      border: 2px solid var(--border-bright);
+      padding: 1.5rem;
+      margin-bottom: 2rem;
+      background: var(--panel);
       display: flex;
       flex-direction: column;
       gap: 1.5rem;
-      border-bottom: 1px solid var(--panel-border);
-      padding-bottom: 2rem;
-      margin-bottom: 2.5rem;
+      box-shadow: var(--shadow-offset) var(--shadow-offset) 0px var(--border);
     }
 
     @media (min-width: 768px) {
@@ -80,143 +69,107 @@
     .brand {
       display: flex;
       flex-direction: column;
-      gap: 0.25rem;
+      gap: 0.5rem;
     }
 
     .brand-title {
-      font-family: 'Outfit', sans-serif;
+      font-size: 1.8rem;
       font-weight: 800;
-      font-size: 2.2rem;
-      background: var(--gradient-cyan);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      color: #fff;
+      text-transform: uppercase;
       letter-spacing: -1px;
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
     }
 
-    .brand-title span.slash {
-      color: var(--accent-violet);
-      -webkit-text-fill-color: initial;
+    .brand-title span.accent {
+      color: var(--color-green);
     }
 
     .brand-subtitle {
-      font-size: 0.85rem;
+      font-size: 0.75rem;
       color: var(--text-muted);
       text-transform: uppercase;
-      letter-spacing: 3px;
-      font-weight: 600;
+      letter-spacing: 2px;
+      font-weight: 700;
     }
 
     /* --- SYSTEM SPECS --- */
     .system-specs {
-      background: var(--panel-dark);
-      backdrop-filter: blur(12px);
-      border: 1px solid var(--panel-border);
-      padding: 1rem 1.25rem;
-      border-radius: 12px;
       display: flex;
       flex-wrap: wrap;
-      gap: 1.5rem;
-      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.2);
+      gap: 1rem 1.5rem;
     }
 
     .spec-item {
       display: flex;
       flex-direction: column;
-      gap: 0.15rem;
     }
 
     .spec-label {
-      font-size: 0.7rem;
+      font-size: 0.65rem;
       text-transform: uppercase;
-      letter-spacing: 1.5px;
       color: var(--text-muted);
-      font-weight: 600;
+      font-weight: 700;
     }
 
     .spec-value {
-      font-size: 0.9rem;
+      font-size: 0.8rem;
       font-weight: 600;
       color: var(--text-main);
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
+      margin-top: 0.1rem;
     }
 
     .spec-value .node-status {
-      width: 8px;
-      height: 8px;
-      background-color: var(--accent-emerald);
-      border-radius: 50%;
-      box-shadow: 0 0 8px var(--accent-emerald);
+      width: 6px;
+      height: 6px;
+      background-color: var(--color-green);
       display: inline-block;
-      animation: pulse 2s infinite;
+      margin-right: 0.3rem;
+      vertical-align: middle;
     }
 
-    @keyframes pulse {
-      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
-      70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(16, 185, 129, 0); }
-      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(16, 185, 129, 0); }
-    }
-
-    /* --- NAVIGATION TABS --- */
+    /* --- TABS --- */
     .tabs-nav {
       display: flex;
-      gap: 0.75rem;
-      background: rgba(15, 23, 42, 0.4);
-      padding: 0.4rem;
-      border-radius: 12px;
-      border: 1px solid var(--panel-border);
+      flex-wrap: wrap;
+      gap: 0.5rem;
       margin-bottom: 2rem;
-      width: fit-content;
-      box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);
     }
 
     .tab-btn {
-      background: transparent;
-      border: none;
+      background: var(--panel);
+      border: 2px solid var(--border);
       color: var(--text-muted);
-      padding: 0.7rem 1.4rem;
-      font-size: 0.95rem;
-      font-weight: 600;
-      font-family: 'Outfit', sans-serif;
-      border-radius: 8px;
+      padding: 0.6rem 1.2rem;
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
       cursor: pointer;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
+      font-family: inherit;
+      transition: none;
     }
 
     .tab-btn:hover {
-      color: var(--text-main);
-      background: rgba(255, 255, 255, 0.03);
+      border-color: var(--border-bright);
+      color: #fff;
     }
 
     .tab-btn.active {
-      background: var(--gradient-violet);
-      color: #fff;
-      box-shadow: 0 4px 20px var(--accent-violet-glow);
+      background: var(--border-bright);
+      color: #000;
+      border-color: var(--border-bright);
+      box-shadow: var(--shadow-offset) var(--shadow-offset) 0px var(--color-green);
     }
 
-    /* --- TAB PANEL CONTENT --- */
+    /* --- TAB PANELS --- */
     .tab-panel {
       display: none;
-      animation: fadeIn 0.4s ease;
     }
 
     .tab-panel.active {
       display: block;
     }
 
-    @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(8px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-
-    /* --- CONTROLS / FILTERS --- */
+    /* --- CONTROLS / SEARCH --- */
     .dashboard-controls {
       display: flex;
       flex-direction: column;
@@ -228,130 +181,106 @@
       .dashboard-controls {
         flex-direction: row;
         justify-content: space-between;
-        align-items: center;
+        align-items: stretch;
       }
     }
 
     .search-wrapper {
-      position: relative;
       flex: 1;
-      max-width: 400px;
+      max-width: 380px;
+      display: flex;
+      border: 2px solid var(--border);
+      background: var(--panel);
+    }
+
+    .search-wrapper:focus-within {
+      border-color: var(--border-bright);
     }
 
     .search-input {
       width: 100%;
-      background: rgba(15, 23, 42, 0.6);
-      border: 1px solid var(--panel-border);
-      padding: 0.75rem 1rem 0.75rem 2.5rem;
-      border-radius: 10px;
+      background: transparent;
+      border: none;
+      padding: 0.6rem 0.8rem;
       color: var(--text-main);
-      font-size: 0.9rem;
-      transition: all 0.3s ease;
+      font-family: inherit;
+      font-size: 0.85rem;
       outline: none;
-    }
-
-    .search-input:focus {
-      border-color: var(--accent-cyan);
-      box-shadow: 0 0 12px rgba(0, 242, 254, 0.15);
-      background: rgba(15, 23, 42, 0.8);
-    }
-
-    .search-icon {
-      position: absolute;
-      left: 0.9rem;
-      top: 50%;
-      transform: translateY(-50%);
-      color: var(--text-muted);
-      pointer-events: none;
-      font-size: 0.9rem;
     }
 
     .filter-tags {
       display: flex;
       flex-wrap: wrap;
-      gap: 0.5rem;
+      gap: 0.4rem;
     }
 
     .filter-tag {
-      background: rgba(30, 41, 59, 0.4);
-      border: 1px solid var(--panel-border);
+      background: var(--panel);
+      border: 2px solid var(--border);
       color: var(--text-muted);
-      padding: 0.4rem 0.8rem;
-      border-radius: 8px;
-      font-size: 0.8rem;
-      font-weight: 500;
+      padding: 0.5rem 0.8rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
       cursor: pointer;
-      transition: all 0.2s ease;
+      font-family: inherit;
     }
 
-    .filter-tag:hover, .filter-tag.active {
+    .filter-tag:hover {
+      border-color: var(--border-bright);
       color: #fff;
-      background: rgba(139, 92, 246, 0.2);
-      border-color: var(--accent-violet);
     }
 
-    /* --- CARDS & GLASSMORPHISM --- */
-    .glass-card {
-      background: var(--panel-dark);
-      backdrop-filter: blur(16px);
-      border: 1px solid var(--panel-border);
-      border-radius: 16px;
+    .filter-tag.active {
+      background: var(--panel-light);
+      border-color: var(--color-green);
+      color: var(--color-green);
+    }
+
+    /* --- BRUTALIST GRID CARD --- */
+    .brutalist-card {
+      background: var(--panel);
+      border: 2px solid var(--border);
       padding: 1.5rem;
-      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-      position: relative;
-      overflow: hidden;
+      box-shadow: var(--shadow-offset) var(--shadow-offset) 0px var(--border);
+      margin-bottom: 1.5rem;
     }
 
-    .glass-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 1px;
-      background: linear-gradient(90deg, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 100%);
-    }
-
-    /* --- TABLE STYLING --- */
+    /* --- LEADERBOARD TABLE --- */
     .table-container {
       overflow-x: auto;
-      margin-top: 0.5rem;
     }
 
     .leaderboard-table {
       width: 100%;
       border-collapse: collapse;
       text-align: left;
-      font-size: 0.95rem;
+      font-size: 0.85rem;
     }
 
     .leaderboard-table th {
-      font-family: 'Outfit', sans-serif;
-      font-weight: 600;
-      font-size: 0.85rem;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 1px;
       color: var(--text-muted);
-      padding: 1.2rem 1rem;
-      border-bottom: 2px solid rgba(255, 255, 255, 0.05);
+      padding: 1rem;
+      border-bottom: 2px solid var(--border-bright);
     }
 
     .leaderboard-table td {
-      padding: 1.2rem 1rem;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-      vertical-align: middle;
+      padding: 1rem;
+      border-bottom: 1px solid var(--border);
     }
 
     .leaderboard-table tbody tr {
-      transition: all 0.2s ease;
+      transition: none;
     }
 
     .leaderboard-table tbody tr:hover {
-      background: rgba(255, 255, 255, 0.015);
-      border-left: 3px solid var(--accent-cyan);
+      background: var(--panel-light);
+      border-left: 2px solid var(--color-green);
     }
 
-    /* --- MODEL DETAILS ROW --- */
+    /* --- CELLS --- */
     .model-name-cell {
       display: flex;
       flex-direction: column;
@@ -359,79 +288,43 @@
     }
 
     .model-id {
-      font-family: 'Outfit', sans-serif;
       font-weight: 700;
-      font-size: 1.1rem;
+      font-size: 0.95rem;
       color: #fff;
     }
 
     .model-desc {
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       color: var(--text-muted);
     }
 
     .badge-row {
       display: flex;
       flex-wrap: wrap;
-      gap: 0.35rem;
-      margin-top: 0.2rem;
+      gap: 0.3rem;
+      margin-top: 0.4rem;
     }
 
-    /* --- BADGES --- */
+    /* --- BRUTALIST BADGES --- */
     .badge {
-      font-size: 0.7rem;
-      padding: 0.2rem 0.5rem;
-      border-radius: 6px;
-      font-weight: 600;
-      display: inline-flex;
-      align-items: center;
+      font-size: 0.65rem;
+      padding: 0.15rem 0.4rem;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      border: 1px solid transparent;
-    }
-
-    .badge-mtp {
-      background: rgba(16, 185, 129, 0.06);
-      color: var(--accent-emerald);
-      border-color: rgba(16, 185, 129, 0.2);
-    }
-
-    .badge-vision {
-      background: rgba(59, 130, 246, 0.06);
-      color: #3b82f6;
-      border-color: rgba(59, 130, 246, 0.2);
-    }
-
-    .badge-moe {
-      background: rgba(139, 92, 246, 0.06);
-      color: var(--accent-violet);
-      border-color: rgba(139, 92, 246, 0.2);
-    }
-
-    .badge-qat {
-      background: rgba(245, 158, 11, 0.06);
-      color: var(--accent-amber);
-      border-color: rgba(245, 158, 11, 0.2);
-    }
-
-    .badge-preload {
-      background: rgba(236, 72, 153, 0.08);
-      color: var(--accent-pink);
-      border-color: rgba(236, 72, 153, 0.2);
-      box-shadow: 0 0 10px rgba(236, 72, 153, 0.1);
-    }
-
-    .badge-precision {
-      background: rgba(30, 41, 59, 0.5);
+      border: 1px solid var(--border);
+      background: #000;
       color: var(--text-muted);
-      border-color: var(--panel-border);
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.75rem;
     }
 
-    /* --- TPS RENDER & BAR --- */
+    .badge-mtp { color: var(--color-green); border-color: var(--color-green); }
+    .badge-vision { color: var(--color-blue); border-color: var(--color-blue); }
+    .badge-moe { color: var(--color-pink); border-color: var(--color-pink); }
+    .badge-qat { color: var(--color-yellow); border-color: var(--color-yellow); }
+    .badge-preload { background: var(--color-pink); color: #000; font-weight: 800; border-color: var(--color-pink); }
+
+    /* --- TPS BARS --- */
     .tps-cell {
-      min-width: 180px;
+      min-width: 170px;
     }
 
     .tps-header-wrapper {
@@ -442,35 +335,31 @@
     }
 
     .tps-number {
-      font-family: 'Outfit', sans-serif;
-      font-size: 1.3rem;
+      font-size: 1.15rem;
       font-weight: 800;
-      color: var(--accent-cyan);
+      color: #fff;
     }
 
     .tps-unit {
-      font-size: 0.75rem;
+      font-size: 0.7rem;
       color: var(--text-muted);
-      font-weight: 500;
     }
 
     .tps-bar-bg {
-      height: 6px;
-      background: rgba(255, 255, 255, 0.04);
-      border-radius: 3px;
-      overflow: hidden;
+      height: 8px;
+      background: #000;
+      border: 1px solid var(--border);
       width: 100%;
     }
 
     .tps-bar-fill {
       height: 100%;
-      background: var(--gradient-cyan);
-      border-radius: 3px;
+      background: var(--color-green);
       width: 0%;
-      transition: width 1.2s cubic-bezier(0.1, 0.8, 0.2, 1);
+      transition: width 0.8s steps(10);
     }
 
-    /* --- COMPARISON / RANGES VIEW --- */
+    /* --- COMPARISON VIEW --- */
     .comparison-grid {
       display: grid;
       grid-template-columns: 1fr;
@@ -479,52 +368,47 @@
 
     @media (min-width: 992px) {
       .comparison-grid {
-        grid-template-columns: 280px 1fr;
+        grid-template-columns: 260px 1fr;
       }
     }
 
     .selector-pane {
       display: flex;
       flex-direction: column;
-      gap: 0.75rem;
+      gap: 0.5rem;
     }
 
     .selector-card {
-      background: rgba(15, 23, 42, 0.4);
-      border: 1px solid var(--panel-border);
-      padding: 1.2rem;
-      border-radius: 12px;
+      background: var(--panel);
+      border: 2px solid var(--border);
+      padding: 1rem;
       cursor: pointer;
-      transition: all 0.2s ease;
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
+      text-transform: uppercase;
     }
 
     .selector-card:hover {
-      background: rgba(15, 23, 42, 0.6);
-      border-color: rgba(255, 255, 255, 0.1);
+      border-color: var(--border-bright);
     }
 
     .selector-card.active {
-      background: rgba(139, 92, 246, 0.1);
-      border-color: var(--accent-violet);
-      box-shadow: 0 0 15px rgba(139, 92, 246, 0.1);
+      border-color: var(--color-green);
+      box-shadow: 2px 2px 0px var(--color-green);
+      background: var(--panel-light);
     }
 
     .selector-card-title {
-      font-family: 'Outfit', sans-serif;
       font-weight: 700;
-      font-size: 1rem;
+      font-size: 0.85rem;
       color: #fff;
     }
 
     .selector-card-desc {
-      font-size: 0.75rem;
+      font-size: 0.65rem;
       color: var(--text-muted);
+      margin-top: 0.2rem;
     }
 
-    /* --- CHART AND RANGE RENDERING --- */
+    /* --- CHART PANE --- */
     .chart-pane {
       display: flex;
       flex-direction: column;
@@ -537,21 +421,20 @@
       align-items: center;
       flex-wrap: wrap;
       gap: 1rem;
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 1rem;
     }
 
     .chart-title {
-      font-family: 'Outfit', sans-serif;
-      font-weight: 700;
-      font-size: 1.25rem;
+      font-size: 1.1rem;
+      text-transform: uppercase;
+      font-weight: 800;
     }
 
     .comparison-toggle {
       display: flex;
-      gap: 0.5rem;
-      background: rgba(15, 23, 42, 0.5);
-      padding: 0.3rem;
-      border-radius: 8px;
-      border: 1px solid var(--panel-border);
+      border: 2px solid var(--border);
+      background: #000;
     }
 
     .toggle-btn {
@@ -559,45 +442,40 @@
       border: none;
       color: var(--text-muted);
       padding: 0.4rem 0.8rem;
-      font-size: 0.8rem;
-      font-weight: 600;
-      border-radius: 6px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
       cursor: pointer;
-      transition: all 0.2s ease;
+      font-family: inherit;
     }
 
     .toggle-btn.active {
-      background: var(--panel-dark);
-      color: var(--accent-cyan);
-      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      background: var(--border-bright);
+      color: #000;
     }
 
     .bars-container {
       display: flex;
       flex-direction: column;
-      gap: 1.2rem;
-      margin-top: 1rem;
+      gap: 1rem;
     }
 
     .chart-row {
       display: grid;
-      grid-template-columns: 140px 1fr;
+      grid-template-columns: 150px 1fr;
       align-items: center;
       gap: 1rem;
     }
 
     .chart-label {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       color: var(--text-muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
+      text-transform: lowercase;
     }
 
     .chart-bar-area {
       position: relative;
-      height: 32px;
+      height: 28px;
       display: flex;
       align-items: center;
     }
@@ -605,48 +483,44 @@
     .chart-bar-bg {
       position: absolute;
       width: 100%;
-      height: 8px;
-      background: rgba(255, 255, 255, 0.03);
-      border-radius: 4px;
+      height: 10px;
+      background: #000;
+      border: 1px solid var(--border);
     }
 
     /* Range Overlay Bar */
     .range-bar {
       position: absolute;
-      height: 12px;
-      background: rgba(139, 92, 246, 0.2);
-      border-radius: 6px;
-      border: 1px solid rgba(139, 92, 246, 0.4);
-      transition: all 0.8s cubic-bezier(0.1, 0.8, 0.2, 1);
+      height: 10px;
+      background: #222;
+      border: 1px solid var(--border-bright);
+      transition: all 0.5s steps(8);
     }
 
-    /* Baseline vs MTP comparison bars */
+    /* Compare Bars */
     .compare-bar-1 {
       position: absolute;
-      height: 6px;
-      background: linear-gradient(90deg, #ec4899, #f43f5e);
-      border-radius: 3px;
-      top: 6px;
+      height: 4px;
+      background: var(--color-pink);
+      top: 5px;
       width: 0%;
-      transition: width 0.8s ease;
+      transition: width 0.5s ease;
     }
 
     .compare-bar-2 {
       position: absolute;
-      height: 6px;
-      background: linear-gradient(90deg, #00f2fe, #4facfe);
-      border-radius: 3px;
-      bottom: 6px;
+      height: 4px;
+      background: var(--color-green);
+      bottom: 5px;
       width: 0%;
-      transition: width 0.8s ease;
+      transition: width 0.5s ease;
     }
 
     .chart-bar-values {
       position: absolute;
       right: 0.5rem;
-      font-size: 0.75rem;
-      font-family: 'JetBrains Mono', monospace;
-      font-weight: 600;
+      font-size: 0.7rem;
+      font-weight: 700;
       color: var(--text-main);
       pointer-events: none;
     }
@@ -654,45 +528,40 @@
     .accept-rate-marker {
       display: inline-flex;
       align-items: center;
-      gap: 0.25rem;
-      font-size: 0.7rem;
-      color: var(--accent-emerald);
-      margin-left: 0.75rem;
-      background: rgba(16, 185, 129, 0.08);
-      padding: 0.1rem 0.3rem;
-      border-radius: 4px;
+      margin-left: 0.5rem;
+      color: var(--color-green);
+      font-size: 0.65rem;
     }
 
-    /* --- METRICS PANELS --- */
+    /* --- METRICS SUMMARY --- */
     .metrics-summary {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 1.25rem;
-      margin-top: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      border-top: 2px solid var(--border);
+      padding-top: 1.5rem;
     }
 
     .metric-card {
-      background: rgba(15, 23, 42, 0.3);
-      border: 1px solid var(--panel-border);
-      padding: 1.25rem;
-      border-radius: 12px;
+      background: var(--panel-light);
+      border: 2px solid var(--border);
+      padding: 1rem;
       display: flex;
       flex-direction: column;
-      gap: 0.25rem;
     }
 
     .metric-title {
-      font-size: 0.75rem;
+      font-size: 0.65rem;
       text-transform: uppercase;
       color: var(--text-muted);
-      letter-spacing: 1px;
+      font-weight: 700;
     }
 
     .metric-val {
-      font-family: 'Outfit', sans-serif;
-      font-weight: 700;
-      font-size: 1.6rem;
+      font-weight: 800;
+      font-size: 1.3rem;
       color: #fff;
+      margin-top: 0.2rem;
     }
 
     /* --- ARCHIVED MODELS --- */
@@ -703,20 +572,13 @@
     }
 
     .archive-card {
-      background: rgba(20, 28, 47, 0.3);
-      border: 1px solid var(--panel-border);
-      border-left: 4px solid var(--text-dark);
-      border-radius: 12px;
+      background: var(--panel);
+      border: 2px solid var(--border);
       padding: 1.25rem;
+      box-shadow: var(--shadow-offset) var(--shadow-offset) 0px var(--border);
       display: flex;
       flex-direction: column;
       gap: 0.75rem;
-      transition: all 0.2s ease;
-    }
-
-    .archive-card:hover {
-      border-left-color: var(--accent-amber);
-      background: rgba(20, 28, 47, 0.4);
     }
 
     .archive-card-header {
@@ -724,29 +586,22 @@
       justify-content: space-between;
       align-items: flex-start;
       flex-wrap: wrap;
-      gap: 0.75rem;
+      gap: 0.5rem;
     }
 
     .archive-title {
-      font-family: 'Outfit', sans-serif;
-      font-weight: 700;
-      font-size: 1.1rem;
-      color: var(--text-main);
-    }
-
-    .archive-meta {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      display: flex;
-      gap: 1rem;
+      font-size: 0.95rem;
+      font-weight: 800;
+      color: #fff;
+      text-transform: uppercase;
     }
 
     .archive-details {
       display: grid;
       grid-template-columns: 1fr;
       gap: 0.75rem;
-      font-size: 0.85rem;
-      border-top: 1px solid rgba(255,255,255,0.03);
+      font-size: 0.75rem;
+      border-top: 1px solid var(--border);
       padding-top: 0.75rem;
     }
 
@@ -763,11 +618,10 @@
     }
 
     .archive-detail-label {
-      font-size: 0.7rem;
+      font-size: 0.6rem;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
       color: var(--text-muted);
-      font-weight: 600;
+      font-weight: 700;
     }
 
     .archive-detail-val {
@@ -775,29 +629,27 @@
     }
 
     .archive-detail-val.replacement {
-      color: var(--accent-cyan);
-      font-weight: 600;
+      color: var(--color-green);
+      font-weight: 700;
     }
 
     /* --- FOOTER --- */
     footer {
-      margin-top: 5rem;
-      border-top: 1px solid var(--panel-border);
-      padding-top: 2rem;
+      margin-top: 4rem;
+      border-top: 2px solid var(--border);
+      padding: 2rem 0;
       text-align: center;
       color: var(--text-muted);
-      font-size: 0.8rem;
+      font-size: 0.75rem;
     }
 
     footer a {
-      color: var(--accent-cyan);
-      text-decoration: none;
-      transition: color 0.2s ease;
+      color: var(--color-blue);
+      text-decoration: underline;
     }
 
     footer a:hover {
-      color: var(--accent-violet);
-      text-decoration: underline;
+      color: var(--color-green);
     }
   </style>
 </head>
@@ -807,8 +659,8 @@
     <!-- --- HEADER --- -->
     <header>
       <div class="brand">
-        <h1 class="brand-title">L3MS <span class="slash">//</span> BENCHMARKS</h1>
-        <p class="brand-subtitle">Homelab LLM Inference Leaderboard</p>
+        <h1 class="brand-title">L3MS <span class="accent">//</span> BENCHMARKS</h1>
+        <p class="brand-subtitle">Homelab LLM Inference Dashboard</p>
       </div>
       <div class="system-specs">
         <div class="spec-item">
@@ -816,12 +668,12 @@
           <span class="spec-value"><span class="node-status"></span> ONLINE</span>
         </div>
         <div class="spec-item">
-          <span class="spec-label">GPU Node</span>
-          <span class="spec-value">NVIDIA RTX 4070 Super 12GB</span>
+          <span class="spec-label">Node GPU</span>
+          <span class="spec-value">RTX 4070 Super 12GB</span>
         </div>
         <div class="spec-item">
-          <span class="spec-label">CPU Host</span>
-          <span class="spec-value">Intel Core i5-12600K</span>
+          <span class="spec-label">Node CPU</span>
+          <span class="spec-value">i5-12600K</span>
         </div>
         <div class="spec-item">
           <span class="spec-label">System RAM</span>
@@ -830,16 +682,16 @@
       </div>
     </header>
 
-    <!-- --- TABS NAVIGATION --- -->
+    <!-- --- TABS --- -->
     <nav class="tabs-nav">
       <button class="tab-btn active" data-tab="active-leaderboard">
-        🏆 served models
+        [1] Served Models
       </button>
       <button class="tab-btn" data-tab="perf-ranges">
-        📊 performance ranges
+        [2] Performance Ranges
       </button>
       <button class="tab-btn" data-tab="archived-models">
-        📦 archived catalog
+        [3] Archived Catalog
       </button>
     </nav>
 
@@ -849,32 +701,31 @@
     <section class="tab-panel active" id="active-leaderboard">
       <div class="dashboard-controls">
         <div class="search-wrapper">
-          <span class="search-icon">🔍</span>
-          <input type="text" id="model-search" class="search-input" placeholder="Search models by ID, quant, size...">
+          <input type="text" id="model-search" class="search-input" placeholder="Search profiles...">
         </div>
         <div class="filter-tags">
           <button class="filter-tag active" data-filter="all">All</button>
-          <button class="filter-tag" data-filter="mtp">MTP Enabled</button>
+          <button class="filter-tag" data-filter="mtp">MTP</button>
           <button class="filter-tag" data-filter="vision">Vision</button>
           <button class="filter-tag" data-filter="moe">MoE</button>
           <button class="filter-tag" data-filter="qat">QAT</button>
         </div>
       </div>
 
-      <div class="glass-card">
+      <div class="brutalist-card">
         <div class="table-container">
           <table class="leaderboard-table" id="leaderboard-table">
             <thead>
               <tr>
                 <th style="width: 50px;">Rank</th>
                 <th>Model Profile</th>
-                <th style="width: 120px;">Context</th>
+                <th style="width: 100px;">Context</th>
                 <th style="width: 160px;">Quantization</th>
                 <th class="tps-cell">Performance</th>
               </tr>
             </thead>
             <tbody id="leaderboard-tbody">
-              <!-- Dynamically rendered -->
+              <!-- Dynamically populated -->
             </tbody>
           </table>
         </div>
@@ -888,24 +739,26 @@
       <div class="comparison-grid">
         
         <div class="selector-pane" id="range-selectors">
-          <!-- Dynamically populated cards -->
+          <!-- Dynamically populated -->
         </div>
 
-        <div class="glass-card chart-pane">
+        <div class="brutalist-card chart-pane">
           <div class="chart-header">
-            <h3 class="chart-title" id="chart-model-title">Loading Model Benchmarks...</h3>
+            <h3 class="chart-title" id="chart-model-title">...</h3>
             <div class="comparison-toggle" id="chart-comparison-toggle" style="display: none;">
-              <button class="toggle-btn" data-mode="range">TPS Range</button>
-              <button class="toggle-btn active" data-mode="compare">Baseline vs MTP</button>
+              <button class="toggle-btn" data-mode="range">Range</button>
+              <button class="toggle-btn active" data-mode="compare">Compare</button>
             </div>
           </div>
 
+          <p id="chart-model-desc" style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;"></p>
+
           <div class="bars-container" id="chart-bars">
-            <!-- Dynamically populated CSS bar charts -->
+            <!-- Dynamically populated -->
           </div>
 
           <div class="metrics-summary" id="chart-metrics">
-            <!-- Dynamically populated stats -->
+            <!-- Dynamically populated -->
           </div>
         </div>
 
@@ -916,30 +769,27 @@
     <!-- TAB 3: ARCHIVED CATALOG                    -->
     <!-- ========================================== -->
     <section class="tab-panel" id="archived-models">
-      <div class="glass-card" style="margin-bottom: 2rem;">
-        <h3 class="chart-title" style="margin-bottom: 0.5rem; color: var(--accent-amber);">Archived & Deprecated Models</h3>
-        <p style="font-size: 0.9rem; color: var(--text-muted); max-width: 800px;">
-          These configurations have been disabled in `llama-swap.yaml` and had their GGUF model files removed from disk. This cleanup reclaimed <strong>100+ GB</strong> of storage. Standard non-QAT variants are replaced by quantized models optimized via Quantization-Aware Training (QAT), which run up to 2x faster.
+      <div class="brutalist-card" style="border-left: 4px solid var(--color-yellow);">
+        <h3 class="chart-title" style="margin-bottom: 0.5rem; color: var(--color-yellow);">Deprecated / Archived Assets</h3>
+        <p style="font-size: 0.8rem; color: var(--text-muted);">
+          Configurations disabled in `llama-swap.yaml` and GGUF files deleted from disk to reclaim ~100+ GB of storage. Standard Post-Training Quantization (PTQ) models are replaced by training-optimized Quantization-Aware Training (QAT) variants which fit VRAM limits and run up to 2x faster.
         </p>
       </div>
 
       <div class="archive-list" id="archive-list-container">
-        <!-- Dynamically rendered archived model cards -->
+        <!-- Dynamically populated -->
       </div>
     </section>
 
     <!-- --- FOOTER --- -->
     <footer>
-      <p>L3MS homelab LLM toolset. Built on CachyOS / CUDA. Git repository: <a href="https://github.com/carteakey/l3ms" target="_blank">carteakey/l3ms</a></p>
-      <p style="margin-top: 0.5rem; font-size: 0.75rem; color: var(--text-dark);">Generated on June 12, 2026</p>
+      <p>L3MS toolkit. Built on CachyOS / CUDA. Source: <a href="https://github.com/carteakey/l3ms" target="_blank">carteakey/l3ms</a></p>
+      <p style="margin-top: 0.5rem; font-size: 0.7rem; color: var(--text-muted);">Generated on June 12, 2026</p>
     </footer>
 
   </div>
 
   <script>
-    // ==========================================
-    // DATA DECLARATIONS
-    // ==========================================
     const servedModels = [
       {
         id: "gemma-4-12b-qat-mtp",
@@ -949,7 +799,7 @@
         tps: 120.80,
         isMtp: true,
         isVision: false,
-        isMoe: true, // Gemma 4 MoE structure
+        isMoe: true,
         isQat: true,
         preload: false,
         description: "Ultrafast 12B model with native MTP drafting using the official assistant model."
@@ -1063,7 +913,7 @@
         name: "gemma-4-12B QAT + MTP (Vision)",
         quant: "UD-Q4_K_XL (QAT)",
         context: "131k",
-        tps: 35.00, // estimated vision mtp speed
+        tps: 35.00,
         isMtp: true,
         isVision: true,
         isMoe: true,
@@ -1102,13 +952,13 @@
     const rangeBenchmarks = {
       "gemma4-12b": {
         title: "Gemma 4 12B-it QAT Benchmarks",
-        description: "Direct comparison on RTX 4070 (iGPU host config) with and without Multi-Token Prediction (MTP). Average Speedup: 2.0x.",
+        description: "Direct comparison on RTX 4070 with and without Multi-Token Prediction (MTP). Average Speedup: 2.0x.",
         hasComparison: true,
         metrics: [
-          { title: "Baseline Average", value: "59.9 t/s" },
-          { title: "MTP Peak Speed", value: "135.7 t/s" },
-          { title: "MTP Average Speed", value: "120.8 t/s" },
-          { title: "Draft Accept Rate", value: "65.8%" }
+          { title: "Baseline Avg", value: "59.9 t/s" },
+          { title: "MTP Peak", value: "135.7 t/s" },
+          { title: "MTP Avg", value: "120.8 t/s" },
+          { title: "Accept Rate", value: "65.8%" }
         ],
         tasks: [
           { name: "stepwise_math", baseline: 59.8, mtp: 135.7, accept: "81.8%" },
@@ -1124,16 +974,15 @@
       },
       "gemma4-26b": {
         title: "Gemma 4 26B-A4B MoE Benchmarks",
-        description: "Comparing 26B MoE configurations. Due to VRAM size limits, baseline Q5 spills to CPU. Q4 QAT fits fully, unlocking true MTP acceleration.",
+        description: "Comparing 26B MoE configurations. Dynamic Q5 base spills to CPU, while Q4 QAT fits entirely in VRAM, enabling actual MTP draft speedups.",
         hasComparison: true,
         metrics: [
-          { title: "Standard Baseline (Q5)", value: "38.5 t/s" },
-          { title: "QAT Only (Text)", value: "69.0 t/s" },
-          { title: "QAT + MTP (Turbo)", value: "100.6 t/s" },
-          { title: "QAT Speedup Factor", value: "2.61x" }
+          { title: "Baseline (Q5)", value: "38.5 t/s" },
+          { title: "QAT Only", value: "69.0 t/s" },
+          { title: "QAT + MTP", value: "100.6 t/s" },
+          { title: "Speedup Factor", value: "2.61x" }
         ],
         tasks: [
-          // Using range comparisons for the active configuration (gemma-4-mtp-turbo-tuned vs gemma-4-baseline)
           { name: "stepwise_math", baseline: 44.45, mtp: 57.77, accept: "81.6%" },
           { name: "translation", baseline: 44.59, mtp: 49.60, accept: "82.5%" },
           { name: "qa_factual", baseline: 44.66, mtp: 49.57, accept: "80.6%" },
@@ -1147,13 +996,13 @@
       },
       "qwen3-6-35b": {
         title: "Qwen 3.6 35B-A3B MTP Benchmarks",
-        description: "Performance metrics for the Qwen 3.6 35B model. Showcases robust drafting acceptance rates, achieving up to ~74 t/s on local hardware.",
+        description: "Evaluations for Qwen 3.6 35B showing strong draft acceptance rates, hitting up to 74 t/s on 12GB hardware.",
         hasComparison: true,
         metrics: [
-          { title: "Baseline Average", value: "51.3 t/s" },
-          { title: "MTP Peak Speed", value: "74.0 t/s" },
-          { title: "MTP Average Speed", value: "68.5 t/s" },
-          { title: "Aggregate Accept Rate", value: "82.7%" }
+          { title: "Baseline Avg", value: "51.3 t/s" },
+          { title: "MTP Peak", value: "74.0 t/s" },
+          { title: "MTP Avg", value: "68.5 t/s" },
+          { title: "Accept Rate", value: "82.7%" }
         ],
         tasks: [
           { name: "code_python", baseline: 51.31, mtp: 73.97, accept: "96.2%" },
@@ -1171,8 +1020,8 @@
 
     const archivedModels = [
       {
-        name: "Older Gemma 4 26B (Standard / Non-QAT)",
-        profiles: "gemma-4-26b-a4b, gemma-4-26b-mtp, gemma-4-26b-mtp-q6, etc.",
+        name: "Gemma 4 26B (Standard / Non-QAT)",
+        profiles: "gemma-4-26b-a4b, gemma-4-26b-mtp, gemma-4-26b-mtp-q6",
         reason: "Replaced by Quantization-Aware Training (QAT) variants. The standard 26B baseline model (~18 GB) exceeded VRAM limits and spilled to CPU RAM (reducing speed to ~38 t/s). QAT models (UD-Q4_K_XL at ~14.2 GB) fit entirely in VRAM, driving speed up to 69 t/s (baseline) and 100+ t/s (MTP).",
         dateRetired: "June 2026",
         replacement: "gemma-4-26b-qat-mtp"
@@ -1214,12 +1063,9 @@
       }
     ];
 
-    // ==========================================
-    // APP CONTROLLER & INTERACTION LOGIC
-    // ==========================================
     let currentTab = "active-leaderboard";
     let selectedRangeModel = "gemma4-12b";
-    let rangeMode = "compare"; // "compare" or "range"
+    let rangeMode = "compare";
 
     document.addEventListener("DOMContentLoaded", () => {
       initTabs();
@@ -1229,11 +1075,9 @@
       renderRangeChart();
       renderArchivedModels();
       
-      // Auto animate progress bars on load
-      setTimeout(animateProgressBars, 150);
+      setTimeout(animateProgressBars, 100);
     });
 
-    // --- TAB SYSTEM ---
     function initTabs() {
       const tabButtons = document.querySelectorAll(".tab-btn");
       tabButtons.forEach(btn => {
@@ -1251,22 +1095,20 @@
           currentTab = targetTab;
           
           if (targetTab === "active-leaderboard") {
-            setTimeout(animateProgressBars, 100);
+            setTimeout(animateProgressBars, 50);
           } else if (targetTab === "perf-ranges") {
-            setTimeout(animateRangeBars, 100);
+            setTimeout(animateRangeBars, 50);
           }
         });
       });
     }
 
-    // --- LEADERBOARD TAB ---
     function renderLeaderboard(searchTerm = "", activeFilter = "all") {
       const tbody = document.getElementById("leaderboard-tbody");
       tbody.innerHTML = "";
       
       const maxTps = Math.max(...servedModels.map(m => m.tps));
 
-      // Filter models
       const filtered = servedModels.filter(model => {
         const matchesSearch = model.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                               model.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -1282,7 +1124,7 @@
       });
 
       if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 3rem;">No active models match the filter.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 3rem;">NO ACTIVE PROFILES FOUND.</td></tr>`;
         return;
       }
 
@@ -1292,15 +1134,15 @@
         
         const tr = document.createElement("tr");
         tr.innerHTML = `
-          <td style="font-family: 'Outfit', sans-serif; font-weight: 700; color: ${rank === 1 ? 'var(--accent-cyan)' : rank === 2 ? 'var(--accent-violet)' : 'var(--text-muted)'}; padding-left: 1.5rem;">
-            #${rank}
+          <td style="font-weight: 800; color: ${rank === 1 ? 'var(--color-green)' : rank === 2 ? 'var(--color-blue)' : 'var(--text-muted)'}; padding-left: 1rem;">
+            [0${rank}]
           </td>
           <td>
             <div class="model-name-cell">
               <span class="model-id">${model.name}</span>
               <span class="model-desc">${model.description}</span>
               <div class="badge-row">
-                ${model.preload ? '<span class="badge badge-preload">Preloaded</span>' : ''}
+                ${model.preload ? '<span class="badge badge-preload">Preload</span>' : ''}
                 ${model.isMtp ? '<span class="badge badge-mtp">MTP</span>' : ''}
                 ${model.isVision ? '<span class="badge badge-vision">Vision</span>' : ''}
                 ${model.isMoe ? '<span class="badge badge-moe">MoE</span>' : ''}
@@ -1309,15 +1151,15 @@
             </div>
           </td>
           <td>
-            <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.85rem;">${model.context}</span>
+            <span>${model.context}</span>
           </td>
           <td>
-            <span class="badge badge-precision">${model.quant}</span>
+            <span class="badge" style="background: transparent; color: var(--text-main); font-family: inherit; font-size: 0.75rem;">${model.quant}</span>
           </td>
           <td class="tps-cell">
             <div class="tps-header-wrapper">
-              <span class="tps-number">${model.tps.toFixed(2)}</span>
-              <span class="tps-unit">tok/s</span>
+              <span class="tps-number">${model.tps.toFixed(1)}</span>
+              <span class="tps-unit">t/s</span>
             </div>
             <div class="tps-bar-bg">
               <div class="tps-bar-fill" data-percentage="${barPercentage}%"></div>
@@ -1329,10 +1171,8 @@
     }
 
     function animateProgressBars() {
-      const bars = document.querySelectorAll(".tps-bar-fill");
-      bars.forEach(bar => {
-        const targetWidth = bar.getAttribute("data-percentage");
-        bar.style.width = targetWidth;
+      document.querySelectorAll(".tps-bar-fill").forEach(bar => {
+        bar.style.width = bar.getAttribute("data-percentage");
       });
     }
 
@@ -1344,7 +1184,7 @@
         const searchTerm = searchInput.value;
         const activeFilter = document.querySelector(".filter-tag.active").getAttribute("data-filter");
         renderLeaderboard(searchTerm, activeFilter);
-        setTimeout(animateProgressBars, 50);
+        setTimeout(animateProgressBars, 20);
       };
 
       searchInput.addEventListener("input", handleFilterChange);
@@ -1358,7 +1198,6 @@
       });
     }
 
-    // --- PERFORMANCE RANGES TAB ---
     function renderRangeSelectors() {
       const pane = document.getElementById("range-selectors");
       pane.innerHTML = "";
@@ -1370,7 +1209,7 @@
         card.setAttribute("data-key", key);
         card.innerHTML = `
           <span class="selector-card-title">${bench.title}</span>
-          <span class="selector-card-desc">${bench.tasks.length} benchmarked tasks</span>
+          <span class="selector-card-desc">${bench.tasks.length} tasks</span>
         `;
         
         card.addEventListener("click", () => {
@@ -1387,6 +1226,7 @@
     function renderRangeChart() {
       const modelData = rangeBenchmarks[selectedRangeModel];
       document.getElementById("chart-model-title").innerText = modelData.title;
+      document.getElementById("chart-model-desc").innerText = modelData.description;
       
       const toggle = document.getElementById("chart-comparison-toggle");
       if (modelData.hasComparison) {
@@ -1395,7 +1235,6 @@
         toggle.style.display = "none";
       }
 
-      // Populate summary metrics
       const metricsSummary = document.getElementById("chart-metrics");
       metricsSummary.innerHTML = "";
       modelData.metrics.forEach(metric => {
@@ -1408,17 +1247,15 @@
         metricsSummary.appendChild(card);
       });
 
-      // Render chart bars
       const container = document.getElementById("chart-bars");
       container.innerHTML = "";
 
-      // Find global maximum for scaling
       let maxVal = 0;
       modelData.tasks.forEach(t => {
         if (t.baseline > maxVal) maxVal = t.baseline;
         if (t.mtp && t.mtp > maxVal) maxVal = t.mtp;
       });
-      maxVal = maxVal * 1.1; // 10% breathing room
+      maxVal = maxVal * 1.05;
 
       modelData.tasks.forEach(task => {
         const row = document.createElement("div");
@@ -1435,24 +1272,23 @@
             <div class="compare-bar-1" data-width="${basePct}%" title="Baseline: ${task.baseline} t/s"></div>
             <div class="compare-bar-2" data-width="${mtpPct}%" title="MTP: ${task.mtp} t/s"></div>
             <div class="chart-bar-values">
-              <span style="color: #ec4899; margin-right: 0.5rem;">${task.baseline.toFixed(1)}</span>
-              <span style="color: var(--accent-cyan); font-weight: 700;">${task.mtp.toFixed(1)}</span>
-              <span class="accept-rate-marker">🎯 ${task.accept}</span>
+              <span style="color: var(--color-pink); margin-right: 0.4rem;">${task.baseline.toFixed(0)}</span>
+              <span style="color: var(--color-green); font-weight: 700;">${task.mtp.toFixed(0)}</span>
+              <span class="accept-rate-marker">[${task.accept}]</span>
             </div>
           `;
         } else {
-          // Range Mode
           const minVal = Math.min(task.baseline, task.mtp || task.baseline);
           const maxValTask = Math.max(task.baseline, task.mtp || task.baseline);
           
           const leftPct = (minVal / maxVal) * 100;
-          const widthPct = ((maxValTask - minVal) / maxVal) * 100 || 2; // minimum width of 2% if equal
+          const widthPct = ((maxValTask - minVal) / maxVal) * 100 || 2;
           
           barHtml = `
             <div class="chart-bar-bg"></div>
             <div class="range-bar" data-left="${leftPct}%" data-width="${widthPct}%"></div>
             <div class="chart-bar-values">
-              <span>${minVal.toFixed(1)} - ${maxValTask.toFixed(1)} t/s</span>
+              <span>${minVal.toFixed(0)}-${maxValTask.toFixed(0)} t/s</span>
             </div>
           `;
         }
@@ -1464,10 +1300,8 @@
         container.appendChild(row);
       });
 
-      // Bind toggle controls
       const toggleButtons = document.querySelectorAll("#chart-comparison-toggle .toggle-btn");
       toggleButtons.forEach(btn => {
-        // remove old listener to prevent duplicates
         const newBtn = btn.cloneNode(true);
         btn.parentNode.replaceChild(newBtn, btn);
         
@@ -1479,25 +1313,22 @@
         });
       });
 
-      setTimeout(animateRangeBars, 50);
+      setTimeout(animateRangeBars, 20);
     }
 
     function animateRangeBars() {
-      // Animate comparison bars
       document.querySelectorAll(".compare-bar-1").forEach(bar => {
         bar.style.width = bar.getAttribute("data-width");
       });
       document.querySelectorAll(".compare-bar-2").forEach(bar => {
         bar.style.width = bar.getAttribute("data-width");
       });
-      // Animate range bars
       document.querySelectorAll(".range-bar").forEach(bar => {
         bar.style.left = bar.getAttribute("data-left");
         bar.style.width = bar.getAttribute("data-width");
       });
     }
 
-    // --- ARCHIVED CATALOG TAB ---
     function renderArchivedModels() {
       const container = document.getElementById("archive-list-container");
       container.innerHTML = "";
@@ -1508,21 +1339,21 @@
         card.innerHTML = `
           <div class="archive-card-header">
             <h4 class="archive-title">${model.name}</h4>
-            <span class="badge" style="background: rgba(75, 85, 99, 0.1); color: var(--text-muted); border-color: rgba(75, 85, 99, 0.2);">Retired</span>
+            <span class="badge" style="border-color: var(--border); color: var(--text-muted);">DEPRECATED</span>
           </div>
-          <p style="font-size: 0.85rem; color: var(--text-muted);">${model.reason}</p>
+          <p style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.4;">${model.reason}</p>
           <div class="archive-details">
             <div class="archive-detail-item">
-              <span class="archive-detail-label">Profiles Impacted</span>
-              <span class="archive-detail-val" style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">${model.profiles}</span>
+              <span class="archive-detail-label">Profiles Retired</span>
+              <span class="archive-detail-val" style="color: var(--color-pink); font-size: 0.7rem;">${model.profiles}</span>
             </div>
             <div class="archive-detail-item">
               <span class="archive-detail-label">Date Retired</span>
               <span class="archive-detail-val">${model.dateRetired}</span>
             </div>
-            <div class="archive-detail-item" style="grid-column: span 2; border-top: 1px solid rgba(255,255,255,0.02); padding-top: 0.4rem; margin-top: 0.2rem;">
+            <div class="archive-detail-item" style="grid-column: span 2; border-top: 1px dashed var(--border); padding-top: 0.4rem; margin-top: 0.2rem;">
               <span class="archive-detail-label">Recommended Replacement</span>
-              <span class="archive-detail-val replacement">🚀 ${model.replacement}</span>
+              <span class="archive-detail-val replacement">==> ${model.replacement}</span>
             </div>
           </div>
         `;
