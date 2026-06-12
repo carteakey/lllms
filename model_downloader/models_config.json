@@ -2,7 +2,7 @@
   "base_models_dir": "/home/kchauhan/models",
   "models": [
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "Tesslate/OmniCoder-9B-GGUF",
       "local_dir": "/mnt/lab/models/Tesslate/OmniCoder-9B-GGUF",
       "allow_patterns": ["*q8_0*"],
@@ -68,7 +68,7 @@
       "description": "Qwen3.5 35B-A3B UD-Q4_K_XL (Q4_K_L already on disk; this adds the XL variant)"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "unsloth/Qwen3.6-35B-A3B-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen3.6-35B-A3B-GGUF",
       "allow_patterns": ["*UD-Q5_K_XL*", "*mmproj-F16*"],
@@ -79,7 +79,7 @@
       "description": "Qwen3.6 35B-A3B UD-Q5_K_XL + mmproj-F16 (vision-capable)"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "unsloth/Mistral-Small-4-119B-2603-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF",
       "allow_patterns": ["*IQ4_XS*", "*mmproj-F16*"],
@@ -167,7 +167,7 @@
       "description": "Gemma 4 26B-A4B UD-Q5/Q6_K_XL + mmproj-BF16"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "AtomicChat/gemma-4-26B-A4B-it-assistant-GGUF",
       "local_dir": "/home/kchauhan/models/AtomicChat/gemma-4-26B-A4B-it-assistant-GGUF",
       "allow_patterns": ["*Q4_K_M.gguf*"],
@@ -211,7 +211,7 @@
       "description": "Qwen3 30B Instruct with Q8 quantization"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF",
       "allow_patterns": ["*UD-Q3_K_XL*"],
@@ -255,7 +255,7 @@
       "description": "Sarvam 105B GGUF default download profile (Q4_K_M) for local validation"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "byteshape/Qwen3.6-35B-A3B-MTP-GGUF",
       "local_dir": "/mnt/lab/models/byteshape/Qwen3.6-35B-A3B-MTP-GGUF",
       "allow_patterns": ["*IQ4_XS*"],

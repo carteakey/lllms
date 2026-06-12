@@ -224,7 +224,7 @@ models:
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
       -m /mnt/lab/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
-      --mmproj /mnt/lab/models/unsloth/Qwen3.6-35B-A3B-GGUF/mmproj-F16.gguf
+      --mmproj /mnt/lab/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/mmproj-F16.gguf
       --alias "unsloth/Qwen3.6-35B-A3B MTP (vision/mmproj-F16)"
       --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
       --presence-penalty 0.0 --repeat-penalty 1.0
@@ -268,153 +268,153 @@ models:
       --prio 2 --no-warmup
 
   # ===========================================================================
-  # Mistral Small 4 119B (5 variants)
+  # [DISABLED] Mistral Small 4 119B (5 variants)
   # ===========================================================================
-
-  "mistral-small-4-119b":
-    name: "Mistral-Small-4-119B-2603 (standard, --fit)"
-    description: "Baseline validation preset. Use -optimized for throughput."
-    env:
-      - "LLAMA_SET_ROWS=1"
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
-      --alias "unsloth/Mistral-Small-4-119B-2603 (standard)"
-      --seed 3407
-      --temp 0.15 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --ctx-size 32768
-      --fit on --fit-ctx 32768 --fit-target 512
-      --no-mmap
-      --threads 10 --threads-batch 12 --flash-attn on --parallel 1
-      -ctk q8_0 -ctv q8_0
-      --batch-size 2048 --ubatch-size 512
-      --chat-template-kwargs '{"reasoning_effort":"none"}'
-      --prio 2 --no-warmup
-
-  "mistral-small-4-119b-optimized":
-    name: "Mistral-Small-4-119B-2603 (optimized, static -ot)"
-    env:
-      - "LLAMA_SET_ROWS=1"
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
-      --alias "unsloth/Mistral-Small-4-119B-2603 (optimized)"
-      --fit off
-      -ngl 9
-      --override-tensor ".ffn_(up|down)_(ch|)exps=CPU"
-      --seed 3407
-      --temp 0.15 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --ctx-size 32768 --parallel 1
-      -ctk q8_0 -ctv q8_0
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12 --flash-attn on
-      --batch-size 2048 --ubatch-size 512
-      --prio 2 --no-warmup
-      --mmproj /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/mmproj-F16.gguf
-
-  "mistral-small-4-119b-no-vision":
-    name: "Mistral-Small-4-119B-2603 (optimized, text-only)"
-    env:
-      - "LLAMA_SET_ROWS=1"
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
-      --alias "unsloth/Mistral-Small-4-119B-2603 (optimized no-vision)"
-      --fit off
-      -ngl 9
-      --override-tensor ".ffn_(up|down)_(ch|)exps=CPU"
-      --seed 3407
-      --temp 0.15 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --ctx-size 32768 --parallel 1
-      -ctk q8_0 -ctv q8_0
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12 --flash-attn on
-      --batch-size 2048 --ubatch-size 512
-      --prio 2 --no-warmup
-
-  "mistral-small-4-119b-no-vision-thinking":
-    name: "Mistral-Small-4-119B-2603 (optimized, text-only, reasoning=high)"
-    env:
-      - "LLAMA_SET_ROWS=1"
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
-      --alias "unsloth/Mistral-Small-4-119B-2603 (optimized no-vision)"
-      --fit off
-      -ngl 9
-      --override-tensor ".ffn_(up|down)_(ch|)exps=CPU"
-      --seed 3407
-      --temp 0.7 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --ctx-size 65536 --parallel 1
-      --no-mmap --mlock
-      --flash-attn on
-      -ctv q8_0 -ctk q8_0
-      --threads 10
-      --chat-template-kwargs '{"reasoning_effort":"high"}'
-      --threads-batch 12
-      --batch-size 2048 --ubatch-size 512
-      --prio 2 --no-warmup
-
-  "mistral-small-4-119b-vision":
-    name: "Mistral-Small-4-119B-2603 (optimized, vision/mmproj)"
-    description: "One fewer GPU layer than non-vision to leave headroom for mmproj path."
-    env:
-      - "LLAMA_SET_ROWS=1"
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
-      --mmproj /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/mmproj-F16.gguf
-      --alias "unsloth/Mistral-Small-4-119B-2603 (optimized vision)"
-      --fit off
-      -ngl 8
-      --override-tensor ".ffn_(up|down)_(ch|)exps=CPU"
-      --seed 3407
-      --temp 0.15 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --ctx-size 32768 --parallel 1
-      -ctk q8_0 -ctv q8_0
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12 --flash-attn on
-      --batch-size 2048 --ubatch-size 512
-      --prio 2 --no-warmup
-
+  #
+  # "mistral-small-4-119b":
+  #   name: "Mistral-Small-4-119B-2603 (standard, --fit)"
+  #   description: "Baseline validation preset. Use -optimized for throughput."
+  #   env:
+  #     - "LLAMA_SET_ROWS=1"
+  #     - "GGML_CUDA_GRAPH_OPT=1"
+  #   cmd: |
+  #     taskset -c ${cpu_range} ${llama_server}
+  #     -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
+  #     --alias "unsloth/Mistral-Small-4-119B-2603 (standard)"
+  #     --seed 3407
+  #     --temp 0.15 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
+  #     --host 0.0.0.0 --port ${PORT}
+  #     --jinja
+  #     --ctx-size 32768
+  #     --fit on --fit-ctx 32768 --fit-target 512
+  #     --no-mmap
+  #     --threads 10 --threads-batch 12 --flash-attn on --parallel 1
+  #     -ctk q8_0 -ctv q8_0
+  #     --batch-size 2048 --ubatch-size 512
+  #     --chat-template-kwargs '{"reasoning_effort":"none"}'
+  #     --prio 2 --no-warmup
+  #
+  # "mistral-small-4-119b-optimized":
+  #   name: "Mistral-Small-4-119B-2603 (optimized, static -ot)"
+  #   env:
+  #     - "LLAMA_SET_ROWS=1"
+  #     - "GGML_CUDA_GRAPH_OPT=1"
+  #   cmd: |
+  #     taskset -c ${cpu_range} ${llama_server}
+  #     -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
+  #     --alias "unsloth/Mistral-Small-4-119B-2603 (optimized)"
+  #     --fit off
+  #     -ngl 9
+  #     --override-tensor ".ffn_(up|down)_(ch|)exps=CPU"
+  #     --seed 3407
+  #     --temp 0.15 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
+  #     --host 0.0.0.0 --port ${PORT}
+  #     --jinja
+  #     --ctx-size 32768 --parallel 1
+  #     -ctk q8_0 -ctv q8_0
+  #     --no-mmap --mlock
+  #     --threads 10 --threads-batch 12 --flash-attn on
+  #     --batch-size 2048 --ubatch-size 512
+  #     --prio 2 --no-warmup
+  #     --mmproj /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/mmproj-F16.gguf
+  #
+  # "mistral-small-4-119b-no-vision":
+  #   name: "Mistral-Small-4-119B-2603 (optimized, text-only)"
+  #   env:
+  #     - "LLAMA_SET_ROWS=1"
+  #     - "GGML_CUDA_GRAPH_OPT=1"
+  #   cmd: |
+  #     taskset -c ${cpu_range} ${llama_server}
+  #     -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
+  #     --alias "unsloth/Mistral-Small-4-119B-2603 (optimized no-vision)"
+  #     --fit off
+  #     -ngl 9
+  #     --override-tensor ".ffn_(up|down)_(ch|)exps=CPU"
+  #     --seed 3407
+  #     --temp 0.15 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
+  #     --host 0.0.0.0 --port ${PORT}
+  #     --jinja
+  #     --ctx-size 32768 --parallel 1
+  #     -ctk q8_0 -ctv q8_0
+  #     --no-mmap --mlock
+  #     --threads 10 --threads-batch 12 --flash-attn on
+  #     --batch-size 2048 --ubatch-size 512
+  #     --prio 2 --no-warmup
+  #
+  # "mistral-small-4-119b-no-vision-thinking":
+  #   name: "Mistral-Small-4-119B-2603 (optimized, text-only, reasoning=high)"
+  #   env:
+  #     - "LLAMA_SET_ROWS=1"
+  #     - "GGML_CUDA_GRAPH_OPT=1"
+  #   cmd: |
+  #     taskset -c ${cpu_range} ${llama_server}
+  #     -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
+  #     --alias "unsloth/Mistral-Small-4-119B-2603 (optimized no-vision)"
+  #     --fit off
+  #     -ngl 9
+  #     --override-tensor ".ffn_(up|down)_(ch|)exps=CPU"
+  #     --seed 3407
+  #     --temp 0.7 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
+  #     --host 0.0.0.0 --port ${PORT}
+  #     --jinja
+  #     --ctx-size 65536 --parallel 1
+  #     --no-mmap --mlock
+  #     --flash-attn on
+  #     -ctv q8_0 -ctk q8_0
+  #     --threads 10
+  #     --chat-template-kwargs '{"reasoning_effort":"high"}'
+  #     --threads-batch 12
+  #     --batch-size 2048 --ubatch-size 512
+  #     --prio 2 --no-warmup
+  #
+  # "mistral-small-4-119b-vision":
+  #   name: "Mistral-Small-4-119B-2603 (optimized, vision/mmproj)"
+  #   description: "One fewer GPU layer than non-vision to leave headroom for mmproj path."
+  #   env:
+  #     - "LLAMA_SET_ROWS=1"
+  #     - "GGML_CUDA_GRAPH_OPT=1"
+  #   cmd: |
+  #     taskset -c ${cpu_range} ${llama_server}
+  #     -m /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/UD-IQ4_XS/Mistral-Small-4-119B-2603-UD-IQ4_XS-00001-of-00003.gguf
+  #     --mmproj /mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF/mmproj-F16.gguf
+  #     --alias "unsloth/Mistral-Small-4-119B-2603 (optimized vision)"
+  #     --fit off
+  #     -ngl 8
+  #     --override-tensor ".ffn_(up|down)_(ch|)exps=CPU"
+  #     --seed 3407
+  #     --temp 0.15 --top-p 0.95 --top-k 40 --min-p 0.0 --repeat-penalty 1.0
+  #     --host 0.0.0.0 --port ${PORT}
+  #     --jinja
+  #     --ctx-size 32768 --parallel 1
+  #     -ctk q8_0 -ctv q8_0
+  #     --no-mmap --mlock
+  #     --threads 10 --threads-batch 12 --flash-attn on
+  #     --batch-size 2048 --ubatch-size 512
+  #     --prio 2 --no-warmup
+ 
   # ===========================================================================
-  # Nemotron / Gemma / Sarvam
+  # [DISABLED] Nemotron / Gemma / Sarvam
   # ===========================================================================
-
-  "nemotron-super-120b":
-    name: "NVIDIA-Nemotron-3-Super-120B-A12B (UD-Q3_K_XL)"
-    env:
-      - "LLAMA_SET_ROWS=1"
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /mnt/lab/models/unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF/UD-Q3_K_XL/NVIDIA-Nemotron-3-Super-120B-A12B-UD-Q3_K_XL-00001-of-00003.gguf
-      --alias "unsloth/NVIDIA-Nemotron-3-Super-120B-A12B (UD-Q3_K_XL)"
-      --seed 3407
-      --temp 0.6 --top-p 0.95 --top-k 40 --min-p 0.05 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --ctx-size 32768
-      --fit on --fit-ctx 32768 --fit-target 512
-      --no-mmap
-      --threads 10 --threads-batch 12 --flash-attn on
-      --batch-size 2048 --ubatch-size 512
-      --prio 2 --no-warmup
+  #
+  # "nemotron-super-120b":
+  #   name: "NVIDIA-Nemotron-3-Super-120B-A12B (UD-Q3_K_XL)"
+  #   env:
+  #     - "LLAMA_SET_ROWS=1"
+  #     - "GGML_CUDA_GRAPH_OPT=1"
+  #   cmd: |
+  #     taskset -c ${cpu_range} ${llama_server}
+  #     -m /mnt/lab/models/unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF/UD-Q3_K_XL/NVIDIA-Nemotron-3-Super-120B-A12B-UD-Q3_K_XL-00001-of-00003.gguf
+  #     --alias "unsloth/NVIDIA-Nemotron-3-Super-120B-A12B (UD-Q3_K_XL)"
+  #     --seed 3407
+  #     --temp 0.6 --top-p 0.95 --top-k 40 --min-p 0.05 --repeat-penalty 1.0
+  #     --host 0.0.0.0 --port ${PORT}
+  #     --jinja
+  #     --ctx-size 32768
+  #     --fit on --fit-ctx 32768 --fit-target 512
+  #     --no-mmap
+  #     --threads 10 --threads-batch 12 --flash-attn on
+  #     --batch-size 2048 --ubatch-size 512
+  #     --prio 2 --no-warmup
   "gemma-4-26b-qat":
     name: "gemma-4-26B QAT (UD-Q4_K_XL, text, 131k ctx)"
     env:
