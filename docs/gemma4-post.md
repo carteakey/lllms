@@ -1,1 +1,1 @@
-/home/kchauhan/repos/carteakey.dev/src/posts/2026-04-03-running-gemma-4-26b-a4b-locally.md
+/home/kchauhan/repos/carteakey.dev/src/posts/2026-05-17-running-gemma-4-mtp-locally.md

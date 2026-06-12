@@ -1,5 +1,6 @@
 Screen {
     layout: vertical;
+    background: $surface;
 }
 
 TabbedContent {
@@ -9,6 +10,7 @@ TabbedContent {
 .panel {
     height: 1fr;
     padding: 1;
+    background: $surface;
 }
 
 .row {
@@ -34,18 +36,21 @@ TabbedContent {
     height: 1fr;
     min-height: 12;
     margin-bottom: 1;
+    border: tall $panel;
 }
 
 #run_scripts_table {
     height: 1fr;
     min-height: 14;
     margin-bottom: 1;
+    border: tall $panel;
 }
 
 #browser_table {
     height: 1fr;
     min-height: 12;
     margin-bottom: 1;
+    border: tall $panel;
 }
 
 Input {
@@ -63,55 +68,63 @@ Checkbox {
 
 #activity_log {
     height: 12;
-    border: round $accent;
+    border: tall $accent;
 }
 
 #run_log {
     height: 14;
-    border: round $accent;
+    border: tall $accent;
 }
 
 #browser_log {
     height: 10;
-    border: round $accent;
+    border: tall $accent;
 }
 
 #run_selected_path {
     margin-bottom: 1;
     padding: 0 1;
-    border: round $accent;
+    border: tall $panel;
 }
 
 #browser_selected_path {
     margin-bottom: 1;
     padding: 0 1;
-    border: round $accent;
+    border: tall $panel;
 }
 
 #run_current_model,
 #run_resources {
     width: 1fr;
     padding: 0 1;
-    border: round $accent;
+    border: tall $panel;
 }
 
 #browser_summary {
     width: auto;
     padding: 0 1;
-    border: round $accent;
+    border: tall $panel;
 }
 
 #run_editor {
     height: 1fr;
     min-height: 16;
-    border: round $accent;
+    border: tall $panel;
 }
 
 #browser_details {
     height: 1fr;
     min-height: 16;
-    border: round $accent;
+    border: tall $panel;
     padding: 0 1;
+}
+
+#workbench_bar {
+    height: 1;
+    padding: 0 1;
+    background: $boost;
+    color: $text;
+    border-bottom: solid $panel;
 }
 
 /* ---- Chat Panel ---- */
@@ -123,7 +136,7 @@ Checkbox {
 #chat_log {
     height: 1fr;
     min-height: 10;
-    border: round $accent;
+    border: tall $panel;
     margin-bottom: 1;
 }
 
@@ -158,23 +171,51 @@ Checkbox {
     margin-top: 1;
 }
 
+.shortcut_strip {
+    height: 1;
+    padding: 0 1;
+    background: $boost;
+    border-left: tall $panel;
+    border-right: tall $panel;
+}
+
 #start_title {
     text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
 }
 
 #start_intro {
-    border: round $accent;
+    border: tall $panel;
     padding: 0 1;
     margin-bottom: 1;
 }
 
 .start_action {
-    min-width: 22;
+    width: 1fr;
+    min-width: 14;
+}
+
+.start_grid {
+    height: auto;
+}
+
+.start_column {
+    width: 1fr;
+    margin-right: 1;
+    border: tall $panel;
+    padding: 0 1 1 1;
+}
+
+.start_group {
+    color: $text-muted;
+    margin-bottom: 1;
 }
 
 Button:focus,
 DataTable:focus {
     text-style: bold;
+    border: tall $accent;
 }
 
 /* Maintenance Panel */
@@ -182,20 +223,21 @@ DataTable:focus {
     height: 1fr;
     min-height: 8;
     margin-bottom: 1;
+    border: tall $panel;
 }
 #maint_log {
     height: 10;
-    border: round $accent;
+    border: tall $accent;
 }
 #maint_editor {
     height: 1fr;
     min-height: 16;
-    border: round $accent;
+    border: tall $panel;
 }
 #maint_selected_path {
     margin-bottom: 1;
     padding: 0 1;
-    border: round $accent;
+    border: tall $panel;
 }
 #maint_status {
     width: 1fr;
@@ -207,7 +249,7 @@ DataTable:focus {
     height: auto;
     min-height: 2;
     max-height: 20;
-    border: round $warning;
+    border: tall $warning;
     padding: 0 1;
     margin-bottom: 1;
     display: none;
@@ -227,12 +269,13 @@ DataTable:focus {
 #jobs_table {
     height: 1fr;
     min-height: 10;
+    border: tall $panel;
 }
 
 #jobs_status {
     width: auto;
     padding: 0 1;
-    border: round $accent;
+    border: tall $panel;
 }
 
 /* Chat History Screen */
@@ -244,7 +287,7 @@ ChatHistoryScreen {
     width: 70;
     height: auto;
     max-height: 80vh;
-    border: round $accent;
+    border: tall $accent;
     background: $surface;
     padding: 0 0 1 0;
     overflow-y: auto;
@@ -282,10 +325,10 @@ CommandPaletteScreen {
 }
 
 #palette_dialog {
-    width: 64;
+    width: 78;
     height: auto;
     max-height: 80vh;
-    border: round $accent;
+    border: tall $accent;
     background: $surface;
     padding: 0 0 1 0;
     overflow-y: auto;
@@ -309,6 +352,7 @@ CommandPaletteScreen {
     height: auto;
     max-height: 40;
     margin: 0 2;
+    border: tall $panel;
 }
 
 #palette_hint {
@@ -326,7 +370,7 @@ HelpScreen {
     width: 58;
     height: auto;
     max-height: 80vh;
-    border: round $accent;
+    border: tall $accent;
     background: $surface;
     padding: 0 0 1 0;
     overflow-y: auto;

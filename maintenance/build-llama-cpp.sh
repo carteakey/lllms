@@ -289,10 +289,10 @@ else
 fi
 
 log "Generating build configuration..."
-cmake .. "${CMAKE_ARGS[@]}"
+CC=/usr/bin/gcc CXX=/usr/bin/g++ cmake .. "${CMAKE_ARGS[@]}"
 
 log "Building llama.cpp tools (Release)..."
-cmake --build . --config Release --target llama-server llama-batched-bench llama-cli llama-bench llama-sweep-bench llama-fit-params --parallel
+CC=/usr/bin/gcc CXX=/usr/bin/g++ cmake --build . --config Release --target llama-server llama-batched-bench llama-cli llama-bench llama-fit-params --parallel 4
 #
 # Copy binaries to root for easy access
 if [ -d "bin" ]; then

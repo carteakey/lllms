@@ -59,9 +59,12 @@ python3 l3ms.py --run qwen --extra "--ctx-size 32768"
 
 ## TUI Scope
 
+- Workbench shell:
+  - persistent command bar with context-specific shortcut hints
+  - richer `Ctrl+P` command palette with shortcut column and token filtering
 - `Start` tab:
-  - guided entry buttons for core flows (Download / Model Ops / Chat / Browser / Jobs)
-  - quick access to `?` help and `Ctrl+P` command palette
+  - workbench hub grouped by Operate / Inventory / Command flows
+  - quick access to Help and the command palette
   - fallback navigation hints for terminals where F-keys are inconsistent
 - `Download` tab:
   - config load/save/validate/restore
@@ -83,6 +86,8 @@ python3 l3ms.py --run qwen --extra "--ctx-size 32768"
 
 Global:
 
+- `Ctrl+P`: command palette
+- `?`: key binding help
 - `F1`: Download tab
 - `F2`: Model Ops tab
 - `F3`: Chat tab

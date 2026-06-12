@@ -18,12 +18,12 @@
 #   TASKS, NOTES
 #
 # Output:
-#   bench-models/results/<MODEL_KEY>.jsonl  — one JSON object per run appended
+#   bench-models/logs/results/<MODEL_KEY>.jsonl  — one JSON object per run appended
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-RESULTS_DIR="${SCRIPT_DIR}/results"
+RESULTS_DIR="${SCRIPT_DIR}/logs/results"
 mkdir -p "${RESULTS_DIR}"
 
 LOG_FILE="${LOG_FILE:-}"
@@ -50,17 +50,27 @@ import re, sys, json
 
 log = open(sys.argv[1]).read()
 
-# Match markdown table data rows (skip header/separator)
-row_re = re.compile(r'^\|[^|]+\|[^|]+\|[^|]+\|[^|]+\|[^|]*\|[^|]*\|[^|]*\|[^|]*\|[^|]*\|\s*(pp|tg)\s+(\d+)\s*\|\s*([\d.]+)\s*±\s*([\d.]+)\s*\|', re.MULTILINE)
-
 results = {"pp_tokens": None, "pp_ts": None, "pp_std": None,
            "tg_tokens": None, "tg_ts": None, "tg_std": None}
 
-for m in row_re.finditer(log):
-    kind, tokens, ts, std = m.group(1), int(m.group(2)), float(m.group(3)), float(m.group(4))
-    results[f"{kind}_tokens"] = tokens
-    results[f"{kind}_ts"]     = ts
-    results[f"{kind}_std"]    = std
+test_re = re.compile(r'^(pp|tg)\s*(\d+)$')
+speed_re = re.compile(r'([\d.]+)\s*±\s*([\d.]+)')
+
+for line in log.splitlines():
+    if not line.startswith("|") or "---" in line:
+        continue
+    cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+    for idx, cell in enumerate(cells):
+        m = test_re.match(cell)
+        if not m or idx + 1 >= len(cells):
+            continue
+        s = speed_re.search(cells[idx + 1])
+        if not s:
+            continue
+        kind, tokens = m.group(1), int(m.group(2))
+        results[f"{kind}_tokens"] = tokens
+        results[f"{kind}_ts"]     = float(s.group(1))
+        results[f"{kind}_std"]    = float(s.group(2))
 
 # Also try the simpler jsonl output format (-o jsonl) if md parse found nothing
 if results["pp_ts"] is None:
@@ -93,45 +103,72 @@ PYEOF
 _ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 _git_sha="$(git -C "${SCRIPT_DIR}/.." rev-parse --short HEAD 2>/dev/null || echo '')"
 _llama_bin="${LLAMA_BENCH:-${SCRIPT_DIR}/../vendor/llama.cpp/build/bin/llama-bench}"
-_llama_ver="$("${_llama_bin}" --version 2>/dev/null | head -1 || echo '')"
+_llama_ver="$(grep -E '^build:' "${LOG_FILE}" | tail -1 || true)"
+if [ -z "${_llama_ver}" ]; then
+  _llama_ver="$("${_llama_bin}" --help 2>&1 | grep -E '^build:' | head -1 || true)"
+fi
 
-python3 - <<PYEOF
+PARSED_JSON="${_parsed}" \
+RESULTS_FILE="${RESULTS_FILE}" \
+RESULT_TS="${_ts}" \
+RESULT_MODEL_KEY="${MODEL_KEY}" \
+RESULT_MODEL="${MODEL:-}" \
+RESULT_BACKEND="${BACKEND:-llama.cpp}" \
+RESULT_STRATEGY="${STRATEGY:-}" \
+RESULT_N_GPU_LAYERS="${N_GPU_LAYERS:-99}" \
+RESULT_N_CPU_MOE="${N_CPU_MOE:-}" \
+RESULT_OVERRIDE_TENSOR="${OVERRIDE_TENSOR:-}" \
+RESULT_FIT_CTX="${FIT_CTX:-}" \
+RESULT_FIT_TARGET="${FIT_TARGET:-}" \
+RESULT_CTX="${TASKS:-${N_PROMPT:-512},${N_GEN:-128}}" \
+RESULT_CACHE_TYPE_K="${CACHE_TYPE_K:-f16}" \
+RESULT_CACHE_TYPE_V="${CACHE_TYPE_V:-f16}" \
+RESULT_THREADS="${THREADS:-6}" \
+RESULT_REPETITIONS="${REPETITIONS:-}" \
+RESULT_GIT_SHA="${_git_sha}" \
+RESULT_LLAMA_VERSION="${_llama_ver}" \
+RESULT_LOG_FILE="${LOG_FILE}" \
+RESULT_NOTES="${NOTES:-}" \
+python3 - <<'PYEOF'
 import json, os, sys
 
-parsed = json.loads("""${_parsed}""")
+def maybe_int(value):
+    return int(value) if value else None
+
+parsed = json.loads(os.environ["PARSED_JSON"])
 
 record = {
-    "ts":            "${_ts}",
-    "model_key":     "${MODEL_KEY}",
-    "model":         "${MODEL:-}",
-    "backend":       "${BACKEND:-llama.cpp}",
-    "strategy":      "${STRATEGY:-}",
-    "ngl":           int("${N_GPU_LAYERS:-99}") if "${N_GPU_LAYERS:-}" else None,
-    "n_cpu_moe":     int("${N_CPU_MOE:-}") if "${N_CPU_MOE:-}" else None,
-    "override_tensor": "${OVERRIDE_TENSOR:-}",
-    "fit_ctx":       int("${FIT_CTX:-}") if "${FIT_CTX:-}" else None,
-    "fit_target":    int("${FIT_TARGET:-}") if "${FIT_TARGET:-}" else None,
-    "ctx":           "${TASKS:-${N_PROMPT:-512},${N_GEN:-128}}",
-    "ctk":           "${CACHE_TYPE_K:-f16}",
-    "ctv":           "${CACHE_TYPE_V:-f16}",
-    "threads":       int("${THREADS:-6}") if "${THREADS:-}" else None,
-    "repetitions":   int("${REPETITIONS:-}") if "${REPETITIONS:-}" else None,
+    "ts":            os.environ["RESULT_TS"],
+    "model_key":     os.environ["RESULT_MODEL_KEY"],
+    "model":         os.environ["RESULT_MODEL"],
+    "backend":       os.environ["RESULT_BACKEND"],
+    "strategy":      os.environ["RESULT_STRATEGY"],
+    "ngl":           maybe_int(os.environ["RESULT_N_GPU_LAYERS"]),
+    "n_cpu_moe":     maybe_int(os.environ["RESULT_N_CPU_MOE"]),
+    "override_tensor": os.environ["RESULT_OVERRIDE_TENSOR"],
+    "fit_ctx":       maybe_int(os.environ["RESULT_FIT_CTX"]),
+    "fit_target":    maybe_int(os.environ["RESULT_FIT_TARGET"]),
+    "ctx":           os.environ["RESULT_CTX"],
+    "ctk":           os.environ["RESULT_CACHE_TYPE_K"],
+    "ctv":           os.environ["RESULT_CACHE_TYPE_V"],
+    "threads":       maybe_int(os.environ["RESULT_THREADS"]),
+    "repetitions":   maybe_int(os.environ["RESULT_REPETITIONS"]),
     "pp_tokens":     parsed.get("pp_tokens"),
     "pp_ts":         parsed.get("pp_ts"),
     "pp_std":        parsed.get("pp_std"),
     "tg_tokens":     parsed.get("tg_tokens"),
     "tg_ts":         parsed.get("tg_ts"),
     "tg_std":        parsed.get("tg_std"),
-    "git_sha":       "${_git_sha}",
-    "llama_version": "${_llama_ver}",
-    "log_file":      "${LOG_FILE}",
-    "notes":         "${NOTES:-}",
+    "git_sha":       os.environ["RESULT_GIT_SHA"],
+    "llama_version": os.environ["RESULT_LLAMA_VERSION"],
+    "log_file":      os.environ["RESULT_LOG_FILE"],
+    "notes":         os.environ["RESULT_NOTES"],
 }
 
 # Drop None values to keep records compact
 record = {k: v for k, v in record.items() if v not in (None, "")}
 
-results_file = "${RESULTS_FILE}"
+results_file = os.environ["RESULTS_FILE"]
 with open(results_file, "a") as f:
     f.write(json.dumps(record) + "\n")
 

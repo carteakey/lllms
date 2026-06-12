@@ -4,7 +4,7 @@
 # Required (no default):
 #   MODEL             - path to .gguf model file
 #
-# Result logging (bench-models/results/<MODEL_KEY>.jsonl):
+# Result logging (bench-models/logs/results/<MODEL_KEY>.jsonl):
 #   MODEL_KEY         - short slug for the results file (default: model filename stem)
 #   STRATEGY          - descriptive label for this run (e.g. "fused", "fused-mqkv", "fused-muge")
 #   NOTES             - free-text annotation appended to the JSONL record

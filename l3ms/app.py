@@ -174,6 +174,11 @@ def _format_mtime(timestamp: float) -> str:
     return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
 
 
+class ShortcutStrip(Static):
+    def __init__(self, text: str) -> None:
+        super().__init__(text, classes="key_hint shortcut_strip")
+
+
 def _read_exact(handle: Any, size: int) -> bytes:
     if size < 0:
         raise ValueError("negative read size")
@@ -904,7 +909,7 @@ class RunPanel(Static):
         self.resource_task: Optional[asyncio.Task[None]] = None
         self.running_started_at: Optional[float] = None
         self._current_job_name: str = "idle"
-        self._swap_refresh_task: Optional[asyncio.Task[None]] = None
+        self._installed_table_mode: Optional[str] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel"):
@@ -933,7 +938,7 @@ class RunPanel(Static):
             with Horizontal(classes="row main"):
                 with Vertical(classes="left"):
                     yield DataTable(id="run_scripts_table")
-                    yield Label(
+                    yield ShortcutStrip(
                         "Core: Ctrl+R start · Ctrl+S stop · Ctrl+M mode · Ctrl+F filter · Ctrl+U editor · ? full shortcuts"
                     )
                     yield RichLog(id="run_log", wrap=True, markup=False)
@@ -961,12 +966,15 @@ class RunPanel(Static):
         self.focus_table()
 
     def _install_table_columns(self) -> None:
+        if self._installed_table_mode == self.mode:
+            return
         table = self.query_one("#run_scripts_table", DataTable)
         table.clear(columns=True)
         if self.mode == "run":
             table.add_columns("state", "model", "name")
         else:
             table.add_columns("#", "script")
+        self._installed_table_mode = self.mode
 
     def set_status(self, message: str) -> None:
         self.query_one("#run_log", RichLog).write(message)
@@ -1004,9 +1012,12 @@ class RunPanel(Static):
             self.refresh_table()
 
     def _schedule_swap_refresh(self) -> None:
-        if self._swap_refresh_task and not self._swap_refresh_task.done():
-            return
-        self._swap_refresh_task = asyncio.create_task(self._load_swap_models())
+        self.run_worker(
+            self._load_swap_models(),
+            name="llama-swap-model-refresh",
+            group="run-panel",
+            exclusive=True,
+        )
 
     async def _load_swap_models(self) -> None:
         try:
@@ -1026,6 +1037,7 @@ class RunPanel(Static):
     def refresh_table(self) -> None:
         self._install_table_columns()
         table = self.query_one("#run_scripts_table", DataTable)
+        table.clear()
         filter_text = self.query_one("#run_filter", Input).value.strip().lower()
 
         if self.mode == "run":
@@ -1623,9 +1635,8 @@ class ModelBrowserPanel(Static):
             with Horizontal(classes="row main"):
                 with Vertical(classes="left"):
                     yield DataTable(id="browser_table")
-                    yield Label(
-                        "Core: Alt+R scan · Alt+G path · Alt+J table · ? full shortcuts",
-                        classes="key_hint",
+                    yield ShortcutStrip(
+                        "Core: Alt+R scan · Alt+G path · Alt+J table · ? full shortcuts"
                     )
                 with Vertical(classes="right"):
                     yield Static("No file selected", id="browser_selected_path")
@@ -2081,9 +2092,8 @@ class ChatPanel(Static):
                 yield Input(placeholder="Message… (Enter to send)", id="chat_input")
                 yield Button("Send ↵", id="chat_send", variant="success")
 
-            yield Label(
-                "Core: Enter send · Ctrl+G connect · Ctrl+B detect · Ctrl+X clear · Alt+S save · ? full shortcuts",
-                classes="key_hint",
+            yield ShortcutStrip(
+                "Core: Enter send · Ctrl+G connect · Ctrl+B detect · Ctrl+X clear · Alt+S save · ? full shortcuts"
             )
 
     def on_mount(self) -> None:
@@ -2420,9 +2430,8 @@ class MaintenancePanel(Static):
                         yield Button("Save", id="maint_edit_save", variant="success")
                         yield Button("Reload", id="maint_edit_reload")
                     yield TextArea("", id="maint_editor")
-            yield Label(
-                "Core: Ctrl+R run · Ctrl+S stop · Ctrl+L clear log · ? full shortcuts",
-                classes="key_hint",
+            yield ShortcutStrip(
+                "Core: Ctrl+R run · Ctrl+S stop · Ctrl+L clear log · ? full shortcuts"
             )
 
     def on_mount(self) -> None:
@@ -2610,9 +2619,8 @@ class JobsPanel(Static):
                 yield Button("Clear", id="jobs_clear")
                 yield Static("history: ready", id="jobs_status")
             yield DataTable(id="jobs_table")
-            yield Label(
-                "Core: s stop running · r retry selected · Del clear history · ? full shortcuts",
-                classes="key_hint",
+            yield ShortcutStrip(
+                "Core: s stop running · r retry selected · Del clear history · ? full shortcuts"
             )
 
     def on_mount(self) -> None:
@@ -2779,46 +2787,39 @@ class StartPanel(Static):
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel"):
-            yield Label("Quick Start", id="start_title")
+            yield Label("L3MS Workbench", id="start_title")
             yield Static(
-                "Core flows first: pick a primary action below, then use ? or Ctrl+P for deeper controls.",
+                "Script-first local model operations: run, bench, chat, download, inspect, and maintain from one keyboard surface.",
                 id="start_intro",
             )
-            with Horizontal(classes="row"):
-                yield Button(
-                    "Download Models",
-                    id="start_open_download",
-                    variant="success",
-                    classes="start_action",
-                )
-                yield Button(
-                    "Run / Bench Scripts",
-                    id="start_open_run",
-                    classes="start_action",
-                )
-                yield Button("Open Chat", id="start_open_chat", classes="start_action")
-            with Horizontal(classes="row"):
-                yield Button(
-                    "Browse GGUF",
-                    id="start_open_browser",
-                    classes="start_action",
-                )
-                yield Button(
-                    "Maintenance",
-                    id="start_open_maintenance",
-                    classes="start_action",
-                )
-                yield Button("Jobs", id="start_open_jobs", classes="start_action")
-            with Horizontal(classes="row"):
-                yield Button("Help (?)", id="start_show_help", classes="start_action")
-                yield Button(
-                    "Command Palette (Ctrl+P)",
-                    id="start_show_palette",
-                    classes="start_action",
-                )
-            yield Label(
-                "Navigation: F1-F7 tabs · Alt+1..7 fallback · Alt+←/→ cycle tabs",
-                classes="key_hint",
+            with Horizontal(classes="row start_grid"):
+                with Vertical(classes="start_column"):
+                    yield Static("[b]Operate[/b]", classes="start_group")
+                    yield Button(
+                        "Model Ops",
+                        id="start_open_run",
+                        variant="success",
+                        classes="start_action",
+                    )
+                    yield Button("Chat", id="start_open_chat", classes="start_action")
+                    yield Button("Jobs", id="start_open_jobs", classes="start_action")
+                with Vertical(classes="start_column"):
+                    yield Static("[b]Inventory[/b]", classes="start_group")
+                    yield Button(
+                        "Download", id="start_open_download", classes="start_action"
+                    )
+                    yield Button("Browser", id="start_open_browser", classes="start_action")
+                    yield Button(
+                        "Maintenance",
+                        id="start_open_maintenance",
+                        classes="start_action",
+                    )
+                with Vertical(classes="start_column"):
+                    yield Static("[b]Command[/b]", classes="start_group")
+                    yield Button("Palette", id="start_show_palette", classes="start_action")
+                    yield Button("Help", id="start_show_help", classes="start_action")
+            yield ShortcutStrip(
+                "F2 Model Ops · F3 Chat · F7 Browser · Ctrl+P Palette · ? Help"
             )
 
     def focus_primary(self) -> None:
@@ -2997,42 +2998,42 @@ class ChatHistoryScreen(ModalScreen):
 # Command palette
 # ---------------------------------------------------------------------------
 
-PALETTE_COMMANDS: list = [
-    ("→ Start tab", "tab_settings"),
-    ("→ Download tab", "tab_download"),
-    ("→ Run / Model Ops tab", "tab_run"),
-    ("→ Model Browser tab", "tab_browser"),
-    ("→ Chat tab", "tab_chat"),
-    ("→ Maintenance tab", "tab_maintenance"),
-    ("→ Jobs tab", "tab_jobs"),
-    ("Model Browser: Scan GGUF files", "browser_scan"),
-    ("Model Browser: Focus root path", "browser_focus_path"),
-    ("Model Browser: Focus table", "browser_focus_table"),
-    ("Start script (Run)", "run_start"),
-    ("Stop script (Run)", "run_stop"),
-    ("Toggle run/bench mode", "run_toggle_mode"),
-    ("Save script (Run)", "run_save_script"),
-    ("Focus filter (Run)", "run_focus_filter"),
-    ("Focus script table (Run)", "run_focus_table"),
-    ("Focus script editor (Run)", "run_focus_editor"),
-    ("Clear run log", "run_clear_log"),
-    ("Chat: Connect to server", "chat_connect"),
-    ("Chat: Auto-detect port", "chat_detect"),
-    ("Chat: Clear history", "chat_clear"),
-    ("Chat: Save session", "chat_save"),
-    ("Download selected model", "download_selected"),
-    ("Download all enabled models", "download_enabled"),
-    ("Add new model entry", "download_add"),
-    ("Apply model editor", "download_apply"),
-    ("Delete selected model", "download_delete"),
-    ("Save config to disk", "download_save"),
-    ("Reload config from disk", "download_load"),
-    ("Validate config", "download_validate"),
-    ("Focus model table", "download_focus_table"),
-    ("Focus download editor", "download_focus_editor"),
-    ("Clear download log", "download_clear_log"),
-    ("Show key bindings help", "show_help"),
-    ("Quit", "quit"),
+PALETTE_COMMANDS: list[tuple[str, str, str]] = [
+    ("Start", "Open Start workbench", "tab_settings"),
+    ("F1", "Open Download", "tab_download"),
+    ("F2", "Open Model Ops", "tab_run"),
+    ("F7", "Open Model Browser", "tab_browser"),
+    ("F3", "Open Chat", "tab_chat"),
+    ("F4", "Open Maintenance", "tab_maintenance"),
+    ("F6", "Open Jobs", "tab_jobs"),
+    ("Alt+R", "Model Browser: scan GGUF files", "browser_scan"),
+    ("Alt+G", "Model Browser: focus root path", "browser_focus_path"),
+    ("Alt+J", "Model Browser: focus table", "browser_focus_table"),
+    ("Ctrl+R", "Model Ops: start/load selected item", "run_start"),
+    ("Ctrl+S", "Model Ops: stop/unload active item", "run_stop"),
+    ("Ctrl+M", "Model Ops: toggle run/bench mode", "run_toggle_mode"),
+    ("Alt+P", "Model Ops: save script", "run_save_script"),
+    ("Ctrl+F", "Model Ops: focus filter", "run_focus_filter"),
+    ("Ctrl+J", "Model Ops: focus table", "run_focus_table"),
+    ("Ctrl+U", "Model Ops: focus editor", "run_focus_editor"),
+    ("Ctrl+L", "Model Ops: clear log", "run_clear_log"),
+    ("Ctrl+G", "Chat: connect to server", "chat_connect"),
+    ("Ctrl+B", "Chat: auto-detect port", "chat_detect"),
+    ("Ctrl+X", "Chat: clear history", "chat_clear"),
+    ("Alt+S", "Chat: save session", "chat_save"),
+    ("Alt+D", "Download: selected model", "download_selected"),
+    ("Alt+E", "Download: all enabled models", "download_enabled"),
+    ("Alt+N", "Download: add new model entry", "download_add"),
+    ("Alt+A", "Download: apply editor", "download_apply"),
+    ("Alt+K", "Download: delete selected model", "download_delete"),
+    ("Alt+W", "Download: save config to disk", "download_save"),
+    ("Alt+O", "Download: reload config from disk", "download_load"),
+    ("Alt+V", "Download: validate config", "download_validate"),
+    ("Alt+T", "Download: focus model table", "download_focus_table"),
+    ("Alt+I", "Download: focus editor", "download_focus_editor"),
+    ("Alt+Y", "Download: clear log", "download_clear_log"),
+    ("?", "Show key bindings help", "show_help"),
+    ("q", "Quit", "quit"),
 ]
 
 
@@ -3052,20 +3053,32 @@ class CommandPaletteScreen(ModalScreen):
     def on_mount(self) -> None:
         table = self.query_one("#palette_table", DataTable)
         table.cursor_type = "row"
-        table.add_column("command", width=54)
+        table.add_columns("key", "command")
         self._populate(PALETTE_COMMANDS)
         self.query_one("#palette_input", Input).focus()
 
-    def _populate(self, commands: list) -> None:
+    def _populate(self, commands: list[tuple[str, str, str]]) -> None:
         table = self.query_one("#palette_table", DataTable)
         table.clear()
-        for label, action in commands:
-            table.add_row(label, key=action)
+        for shortcut, label, action in commands:
+            table.add_row(shortcut, label, key=action)
+        if commands:
+            table.move_cursor(row=0, column=0)
 
     @on(Input.Changed, "#palette_input")
     def on_filter(self, event: Input.Changed) -> None:
-        q = event.value.lower()
-        filtered = [(lbl, act) for lbl, act in PALETTE_COMMANDS if q in lbl.lower()]
+        tokens = [token for token in event.value.lower().split() if token]
+        if tokens:
+            filtered = [
+                command
+                for command in PALETTE_COMMANDS
+                if all(
+                    token in " ".join(command).lower()
+                    for token in tokens
+                )
+            ]
+        else:
+            filtered = PALETTE_COMMANDS
         self._populate(filtered)
 
     @on(Input.Submitted, "#palette_input")
@@ -3093,6 +3106,7 @@ class CommandPaletteScreen(ModalScreen):
 class MainScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
+        yield Static("", id="workbench_bar")
         with TabbedContent(initial="settings", id="main_tabs"):
             with TabPane("Download", id="download"):
                 yield DownloadPanel()
@@ -3109,6 +3123,24 @@ class MainScreen(Screen):
             with TabPane("Jobs", id="jobs"):
                 yield JobsPanel()
         yield Footer()
+
+    def on_mount(self) -> None:
+        self.app.call_later(self.app.refresh_workbench_bar)
+
+    @on(TabbedContent.TabActivated, "#main_tabs")
+    def on_main_tab_activated(self, _: TabbedContent.TabActivated) -> None:
+        self.app.call_later(self.app.refresh_workbench_bar)
+
+
+WORKBENCH_HINTS = {
+    "settings": "[b]Workbench[/b]  Ctrl+P palette  ? help  F2 ops  F3 chat  F7 browser",
+    "run": "[b]Model Ops[/b]  Ctrl+R start/load  Ctrl+S stop/unload  Ctrl+M mode  Ctrl+F filter",
+    "chat": "[b]Chat[/b]  Ctrl+G connect  Ctrl+B detect  Ctrl+X clear  Alt+S save",
+    "browser": "[b]Model Browser[/b]  Alt+R scan  Alt+G path  Alt+J table",
+    "download": "[b]Download[/b]  Alt+D selected  Alt+E enabled  Alt+N add  Alt+W save",
+    "maintenance": "[b]Maintenance[/b]  Ctrl+R run  Ctrl+S stop  Ctrl+L clear",
+    "jobs": "[b]Jobs[/b]  s stop  r retry  Del clear",
+}
 
 
 class L3MSApp(App[None]):
@@ -3175,6 +3207,16 @@ class L3MSApp(App[None]):
     def on_mount(self) -> None:
         self.push_screen(MainScreen())
 
+    def refresh_workbench_bar(self) -> None:
+        if not self.screen:
+            return
+        try:
+            bar = self.screen.query_one("#workbench_bar", Static)
+        except Exception:
+            return
+        active = self.active_tab() or "settings"
+        bar.update(WORKBENCH_HINTS.get(active, WORKBENCH_HINTS["settings"]))
+
     async def action_quit(self) -> None:
         """Graceful shutdown: terminate running processes and cancel async tasks."""
         run_panel = self.get_run_panel()
@@ -3219,6 +3261,7 @@ class L3MSApp(App[None]):
         except Exception:
             return
         tabs.active = tab_id
+        self.refresh_workbench_bar()
 
     def get_run_panel(self) -> Optional[RunPanel]:
         if not self.screen:

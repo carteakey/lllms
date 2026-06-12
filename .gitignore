@@ -7,11 +7,10 @@
 # Ignore log files
 /*.log
 
-# Bench raw logs — gitignored (large, redundant; structured results go in bench-models/results/)
-bench-models/logs/
-# Keep the results dir itself tracked (JSONL records are small and valuable)
-!bench-models/results/
-!bench-models/results/.gitkeep
+# Bench raw logs — gitignored (large, redundant; structured results are tracked)
+bench-models/logs/*
+!bench-models/logs/results/
+!bench-models/logs/results/**
 
 # Ignore IDE and editor-specific files
 .idea/

@@ -236,7 +236,7 @@
       "enabled": true,
       "repo_id": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
-      "allow_patterns": ["*UD-Q4_K_XL*"],
+      "allow_patterns": ["*UD-Q4_K_XL*", "*UD-Q6_K.gguf*"],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -253,6 +253,39 @@
       "force_download": false,
       "max_workers": 2,
       "description": "Sarvam 105B GGUF default download profile (Q4_K_M) for local validation"
+    },
+    {
+      "enabled": true,
+      "repo_id": "byteshape/Qwen3.6-35B-A3B-MTP-GGUF",
+      "local_dir": "/mnt/lab/models/byteshape/Qwen3.6-35B-A3B-MTP-GGUF",
+      "allow_patterns": ["*IQ4_XS*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": 2,
+      "description": "ByteShape Qwen 3.6 35B MTP IQ4_XS (recommended by Reddit post for 110 tok/s)"
+    },
+    {
+      "enabled": true,
+      "repo_id": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+      "local_dir": "/home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-qat-GGUF",
+      "allow_patterns": ["*qat-UD-Q4_K_XL.gguf*", "*mtp-gemma-4-26B-A4B-it.gguf*", "*MTP/gemma-4-26B-A4B-it-Q8_0-MTP.gguf*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": 2,
+      "description": "Gemma 4 26B QAT UD-Q4_K_XL + MTP Assistant"
+    },
+    {
+      "enabled": true,
+      "repo_id": "unsloth/gemma-4-12B-it-qat-GGUF",
+      "local_dir": "/home/kchauhan/models/unsloth/gemma-4-12B-it-qat-GGUF",
+      "allow_patterns": ["*qat-UD-Q4_K_XL.gguf*", "*mtp-gemma-4-12B-it.gguf*", "*MTP/gemma-4-12B-it-Q8_0-MTP.gguf*"],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": 2,
+      "description": "Gemma 4 12B QAT UD-Q4_K_XL + MTP Assistant"
     }
   ]
 }

@@ -4,7 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.
 
-## [Unreleased]
+### [2026-06-12]
+- **Gemma 4 QAT & MTP Integration**:
+  - Rebuilt mainline `llama.cpp` using the system GCC 16 compiler to resolve segmentation faults in CUDA template compilation.
+  - Added new Gemma 4 26B and 12B QAT & MTP profiles to `llama-swap.yaml` (`gemma-4-26b-qat`, `gemma-4-26b-qat-mtp`, `gemma-4-12b-qat`, `gemma-4-12b-qat-mtp`).
+  - Migrated legacy `gemma-4-26b-mtp`, `gemma-4-26b-mtp-q6`, and `gemma-4-26b-mtp-vision` profiles in `llama-swap.yaml` to run via mainline `llama_server` native MTP instead of the old TurboQuant fork.
+  - Created blog posts documenting benchmarks for Gemma 4 26B and 12B under QAT and MTP configurations, showing local speeds up to 100.6 tok/s (26B) and 120.8 tok/s (12B) on an RTX 4070.
+
+### [2026-05-19]
+- **MTP Improvements**: Rebuilt `llama.cpp` with [PR #23269](https://github.com/ggml-org/llama.cpp/pull/23269) for enhanced Multi-Token Prediction performance.
+- **Qwen 3.6 35B**: Added Q6_K variant and initialized benchmarking to evaluate performance vs Q4_K_XL.
+- **Documentation**: Updated MTP-related posts with latest upstream status.
+
 
 ### Changed
 - **Qwen 3.6 MTP Mainline**: Updated `llama-swap.yaml` configuration to use the mainline `llama-server` and the updated `--spec-type draft-mtp` flag since MTP support is now merged into `llama.cpp` master.

@@ -242,6 +242,31 @@ models:
       --batch-size 256 --ubatch-size 512
       --prio 2 --no-warmup
 
+  "qwen3-6-mtp-q6":
+    name: "Qwen3.6-35B-A3B MTP (UD-Q6_K)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q6_K.gguf
+      --alias "unsloth/Qwen3.6-35B-A3B MTP (Q6_K)"
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
+      --presence-penalty 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --chat-template-kwargs '{"preserve_thinking": true}'
+      --ctx-size 131072 --n-predict 32768
+      --fit on --fit-ctx 131072 --fit-target 1536
+      -ctk q8_0 -ctv q8_0
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12
+      --flash-attn on
+      --spec-type draft-mtp --spec-draft-n-max 2
+      --parallel 1
+      --batch-size 1024 --ubatch-size 512
+      --prio 2 --no-warmup
+
   # ===========================================================================
   # Mistral Small 4 119B (5 variants)
   # ===========================================================================
@@ -439,15 +464,15 @@ models:
       --prio 2 --no-warmup
 
   "gemma-4-26b-mtp":
-    name: "Gemma 4 26B-A4B MTP (UD-Q5_K_XL, TurboQuant)"
+    name: "Gemma 4 26B-A4B MTP (UD-Q5_K_XL, Mainline)"
     env:
       - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
-      taskset -c ${cpu_range} ${env.L3MS_ROOT}/vendor/atomic-llama-cpp-turboquant/build/bin/llama-server
+      taskset -c ${cpu_range} ${llama_server}
       -m /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf
-      --mtp-head /mnt/lab/models/AtomicChat/gemma-4-26B-A4B-it-assistant-GGUF/gemma-4-26B-A4B-it-assistant.Q4_K_M.gguf
-      --alias "unsloth/gemma-4-26B-A4B MTP (TurboQuant)"
+      --spec-draft-model /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-qat-GGUF/mtp-gemma-4-26B-A4B-it.gguf
+      --alias "unsloth/gemma-4-26B-A4B MTP"
       --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
       --presence-penalty 0.0 --repeat-penalty 1.0
       --host 0.0.0.0 --port ${PORT}
@@ -455,27 +480,26 @@ models:
       --chat-template-kwargs '{"preserve_thinking": true}'
       --ctx-size 131072 --n-predict 32768
       --fit on --fit-ctx 131072 --fit-target 1536
-      -ctk turbo3 -ctv turbo3
-      -ctkd turbo3 -ctvd turbo3
+      -ctk f16 -ctv f16
       --no-mmap --mlock
       --threads 10 --threads-batch 12
       --flash-attn on
-      --spec-type mtp --draft-block-size 3 --draft-max 8 --draft-p-min 0.9
+      --spec-type draft-mtp --spec-draft-n-max 2
       --parallel 1
       --batch-size 1024 --ubatch-size 512
       --prio 2 --no-warmup
 
   "gemma-4-26b-mtp-vision":
-    name: "Gemma 4 26B-A4B MTP (UD-Q5_K_XL, vision, TurboQuant)"
+    name: "Gemma 4 26B-A4B MTP (UD-Q5_K_XL, vision, Mainline)"
     env:
       - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=0"
     cmd: |
-      taskset -c ${cpu_range} ${env.L3MS_ROOT}/vendor/atomic-llama-cpp-turboquant/build/bin/llama-server
+      taskset -c ${cpu_range} ${llama_server}
       -m /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf
-      --mtp-head /mnt/lab/models/AtomicChat/gemma-4-26B-A4B-it-assistant-GGUF/gemma-4-26B-A4B-it-assistant.Q4_K_M.gguf
+      --spec-draft-model /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-qat-GGUF/mtp-gemma-4-26B-A4B-it.gguf
       --mmproj /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF/mmproj-BF16.gguf
-      --alias "unsloth/Gemma 4 26B-A4B MTP (vision, TurboQuant)"
+      --alias "unsloth/Gemma 4 26B-A4B MTP (vision)"
       --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
       --presence-penalty 0.0 --repeat-penalty 1.0
       --host 0.0.0.0 --port ${PORT}
@@ -483,12 +507,11 @@ models:
       --chat-template-kwargs '{"preserve_thinking": true}'
       --ctx-size 131072 --n-predict 32768
       --fit on --fit-ctx 131072 --fit-target 2048
-      -ctk turbo3 -ctv turbo3
-      -ctkd turbo3 -ctvd turbo3
+      -ctk f16 -ctv f16
       --no-mmap --mlock
       --threads 10 --threads-batch 12
       --flash-attn on
-      --spec-type mtp --draft-block-size 3 --draft-max 8 --draft-p-min 0.9
+      --spec-type draft-mtp --spec-draft-n-max 2
       --parallel 1
       --batch-size 256 --ubatch-size 512
       --prio 2 --no-warmup
@@ -517,15 +540,15 @@ models:
       --prio 2 --no-warmup
 
   "gemma-4-26b-mtp-q6":
-    name: "Gemma 4 26B-A4B MTP (UD-Q6_K_XL, TurboQuant)"
+    name: "Gemma 4 26B-A4B MTP (UD-Q6_K_XL, Mainline)"
     env:
       - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
-      taskset -c ${cpu_range} ${env.L3MS_ROOT}/vendor/atomic-llama-cpp-turboquant/build/bin/llama-server
+      taskset -c ${cpu_range} ${llama_server}
       -m /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF/gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf
-      --mtp-head /mnt/lab/models/AtomicChat/gemma-4-26B-A4B-it-assistant-GGUF/gemma-4-26B-A4B-it-assistant.Q4_K_M.gguf
-      --alias "unsloth/gemma-4-26B-A4B MTP Q6 (TurboQuant)"
+      --spec-draft-model /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-qat-GGUF/mtp-gemma-4-26B-A4B-it.gguf
+      --alias "unsloth/gemma-4-26B-A4B MTP Q6"
       --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
       --presence-penalty 0.0 --repeat-penalty 1.0
       --host 0.0.0.0 --port ${PORT}
@@ -533,12 +556,107 @@ models:
       --chat-template-kwargs '{"preserve_thinking": true}'
       --ctx-size 65536 --n-predict 32768
       --fit on --fit-ctx 65536 --fit-target 1536
-      -ctk turbo3 -ctv turbo3
-      -ctkd turbo3 -ctvd turbo3
+      -ctk f16 -ctv f16
       --no-mmap --mlock
       --threads 10 --threads-batch 12
       --flash-attn on
-      --spec-type mtp --draft-block-size 3 --draft-max 8 --draft-p-min 0.9
+      --spec-type draft-mtp --spec-draft-n-max 2
+      --parallel 1
+      --batch-size 1024 --ubatch-size 512
+      --prio 2 --no-warmup
+
+  "gemma-4-26b-qat":
+    name: "gemma-4-26B QAT (UD-Q4_K_XL, text, 131k ctx)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-qat-GGUF/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+      --alias "unsloth/gemma-4-26B-A4B QAT (UD-Q4_K_XL)"
+      --seed 3407
+      --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 131072
+      --fit on --fit-ctx 131072 --fit-target 512
+      --parallel 1
+      -ctk q8_0 -ctv q8_0
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 1024 --ubatch-size 512
+      --prio 2 --no-warmup
+
+  "gemma-4-26b-qat-mtp":
+    name: "gemma-4-26B QAT + MTP (UD-Q4_K_XL + Assistant, 131k ctx)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-qat-GGUF/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+      --spec-draft-model /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-qat-GGUF/mtp-gemma-4-26B-A4B-it.gguf
+      --alias "unsloth/gemma-4-26B-A4B QAT + MTP"
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
+      --presence-penalty 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --chat-template-kwargs '{"preserve_thinking": true}'
+      --ctx-size 131072 --n-predict 32768
+      --fit on --fit-ctx 131072 --fit-target 1536
+      -ctk f16 -ctv f16
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12
+      --flash-attn on
+      --spec-type draft-mtp --spec-draft-n-max 2
+      --parallel 1
+      --batch-size 1024 --ubatch-size 512
+      --prio 2 --no-warmup
+
+  "gemma-4-12b-qat":
+    name: "gemma-4-12B QAT (UD-Q4_K_XL, text, 131k ctx)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/gemma-4-12B-it-qat-GGUF/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf
+      --alias "unsloth/gemma-4-12B QAT"
+      --seed 3407
+      --temp 1.0 --top-p 0.95 --top-k 64 --min-p 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --ctx-size 131072
+      --fit on --fit-ctx 131072 --fit-target 512
+      --parallel 1
+      -ctk q8_0 -ctv q8_0
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12 --flash-attn on
+      --batch-size 1024 --ubatch-size 512
+      --prio 2 --no-warmup
+
+  "gemma-4-12b-qat-mtp":
+    name: "gemma-4-12B QAT + MTP (UD-Q4_K_XL + Assistant, 131k ctx)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=1"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/gemma-4-12B-it-qat-GGUF/gemma-4-12B-it-qat-UD-Q4_K_XL.gguf
+      --spec-draft-model /mnt/lab/models/unsloth/gemma-4-12B-it-qat-GGUF/mtp-gemma-4-12B-it.gguf
+      --alias "unsloth/gemma-4-12B QAT + MTP"
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
+      --presence-penalty 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --chat-template-kwargs '{"preserve_thinking": true}'
+      --ctx-size 131072 --n-predict 32768
+      --fit on --fit-ctx 131072 --fit-target 1536
+      -ctk f16 -ctv f16
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12
+      --flash-attn on
+      --spec-type draft-mtp --spec-draft-n-max 4
       --parallel 1
       --batch-size 1024 --ubatch-size 512
       --prio 2 --no-warmup
