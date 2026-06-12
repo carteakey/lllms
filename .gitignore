@@ -24,6 +24,7 @@ bench-models/logs/*
 gpt-oss-120b-post.md
 qwen3-coder-next-post.md
 docs/*-post.md
+docs/local-llm-optimization.md
 
 llama.cpp
 
