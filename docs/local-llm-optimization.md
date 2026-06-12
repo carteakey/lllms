@@ -30,6 +30,8 @@ The scope is intentionally wide. We start from "should I even run locally?" and 
 | --- | --- |
 | **GGUF** | File format for quantized LLM weights used by llama.cpp. Stores weights, metadata, and tokenizer in a single binary. |
 | **Quantization** | Reducing weight numerical precision (FP16 → Q4, etc.) to shrink model size and accelerate compute. More bits = higher quality, larger file. |
+| **QAT (Quantization-Aware Training)** | Training/fine-tuning a model with quantization noise injected. Allows near-lossless 8-bit intelligence at a 4-bit memory size. |
+| **MTP (Multi-Token Prediction)** | Speculative decoding method native to MTP-trained models (e.g. Gemma 4). Uses a companion draft model to generate multiple candidate tokens in parallel, which the base model validates in one GPU step. |
 | **PP / Prompt Processing** | Tokens per second during the prefill phase — how fast the model reads your input. GPU-bound. |
 | **TG / Token Generation** | Tokens per second during autoregressive decode — how fast you see output stream. Memory-bandwidth-bound. **This is what the user feels.** |
 | **KV Cache** | Buffer storing attention Key/Value tensors for all prior context tokens. Grows linearly with context length. Lives in VRAM. |
@@ -331,6 +333,14 @@ Keep your build updated. Pull and rebuild regularly — especially before benchm
 **UD (Unsloth Dynamic) quants**: allocate higher bits to attention-sensitive layers and lower bits to robust layers. Better perplexity than uniform quants at the same average bit width. Generally the best choice when available.
 
 **Rule of thumb**: use the highest quant that fits your VRAM + RAM budget. Q5_K_XL or UD-Q5_K_XL is a strong default. Drop to Q4 only when necessary.
+
+### 6.3 Quantization-Aware Training (QAT)
+
+Standard Post-Training Quantization (PTQ) quantizes weights *after* the model is fully trained. When going down to 4-bit, this rounding process throws away critical precision, leading to significant regressions in reasoning, logic, and acrostic constraints. 
+
+Quantization-Aware Training (QAT) bypasses this degradation by modeling low-precision rounding noise *during* the training or fine-tuning process. This enables the model weights to adapt to the low-bit limits.
+* **Accuracy Recovery**: QAT 4-bit models (like Gemma 4 12B/26B `UD-Q4_K_XL`) exhibit perplexity and reasoning metrics virtually identical to standard 8-bit (`Q8_0`) quants.
+* **VRAM Savings**: A 26B MoE model in standard Q8_0 or dynamic Q5 consumes ~18 GB, spilling heavily to system RAM on a 12GB card. The QAT Q4 model size drops to ~14.2 GB, allowing the vast majority of the model layers to load directly into VRAM for full GPU speed.
 
 ---
 
@@ -685,9 +695,39 @@ Tested on mxfp4 and Q4 models: **slower** than default. GGML MMQ has native mxfp
 
 ---
 
-## 15. Vision / Multimodal
+## 15. Speculative Decoding & MTP (Multi-Token Prediction)
 
-### 15.1 `--mmproj`
+Autoregressive token generation (TG) is memory-bandwidth bound: the GPU must read all active model weights from memory for every single token it generates. Speculative decoding bypasses this bottleneck by utilizing a lightweight "draft" model to guess upcoming tokens, which the base model verifies in a single forward pass.
+
+On models trained with Multi-Token Prediction (MTP) heads (like Gemma 4 or Qwen 3.6), we use native MTP speculative drafting to achieve massive speedups.
+
+### 15.1 MTP Drafting Configuration Flags
+
+Instead of pairing the base model with an unrelated draft model, mainline `llama.cpp` supports native companion MTP draft models:
+* `--spec-draft-model`: Path to the companion MTP GGUF file (e.g. `mtp-gemma-4-26B-A4B-it.gguf` ~460MB).
+* `--spec-type draft-mtp`: Tells llama-server to run in MTP verification mode.
+* `--spec-draft-n-max`: The maximum candidate sequence length drafted per iteration.
+  * For larger models (e.g., Gemma 4 26B), set to `2`. Higher values introduce computational overhead that hurts TG.
+  * For lighter models (e.g., Gemma 4 12B), set to `4` to capture longer draft runs.
+
+### 15.2 The KV Cache constraint (`-ctk f16 -ctv f16`)
+
+MTP draft verification relies on high-fidelity attention metrics to validate proposed tokens. Quantizing the KV cache (`-ctk q8_0 -ctv q8_0`) introduces quantization noise that degrades the draft acceptance rate to near zero on models like Gemma 4.
+* **MTP Speculative Rule**: If using MTP speculative drafting, you **must** leave the KV cache at full precision (`-ctk f16 -ctv f16`).
+* Switching to `f16` KV cache increases VRAM usage but maintains draft acceptance rates of 70%+, resulting in a massive net speedup.
+
+### 15.3 Speculative Performance Gains
+
+Tested on a single RTX 4070 12GB:
+* Gemma 4 26B Baseline: 38.5 tok/s
+* Gemma 4 26B QAT + MTP: **100.60 tok/s** (2.6x speedup)
+* Gemma 4 12B QAT + MTP: **120.80 tok/s** (2.0x speedup)
+
+---
+
+## 16. Vision / Multimodal
+
+### 16.1 `--mmproj`
 
 Path to the multimodal projector file:
 
@@ -697,7 +737,7 @@ Path to the multimodal projector file:
 
 Typically 1–3 GB. Allocates in VRAM at startup alongside the model.
 
-### 15.2 OOM Failure Modes on Constrained VRAM
+### 16.2 OOM Failure Modes on Constrained VRAM
 
 **Failure 1 — mmproj allocation**: the projector needs contiguous VRAM at load time. If `--fit-target` left only a small margin, the allocation fails. Symptom: crash at model load (not during inference).
 
@@ -707,7 +747,7 @@ Fix: use `--fit-target 2048` for vision models.
 
 Fix: use `--ubatch-size 512` or higher.
 
-### 15.3 Safe Vision Profile (12 GB VRAM)
+### 16.3 Safe Vision Profile (12 GB VRAM)
 
 ```bash
 llama-server \
@@ -726,11 +766,11 @@ Separate text and vision servers on different ports if running both workloads fr
 
 ---
 
-## 16. ik_llama.cpp Fork [Advanced]
+## 17. ik_llama.cpp Fork [Advanced]
 
 [ikawrakow/ik_llama.cpp](https://github.com/ikawrakow/ik_llama.cpp) is a fork with MoE-specific kernel optimizations not yet upstream. Worth evaluating once you've hit the ceiling on stock llama.cpp.
 
-### 16.1 Key Flags
+### 17.1 Key Flags
 
 | Flag | Effect | Cost |
 | --- | --- | --- |
@@ -739,7 +779,7 @@ Separate text and vision servers on different ports if running both workloads fr
 | `-mqkv` (merge-qkv) | Merges Q, K, V projections | Small TG gain; no RAM cost |
 | `-ger` (grouped-expert-routing) | Groups token-expert assignments for cache locality | Variable; sweep to confirm |
 
-### 16.2 Real Numbers (Qwen3-Coder-Next, RTX 4070 12 GB)
+### 17.2 Real Numbers (Qwen3-Coder-Next, RTX 4070 12 GB)
 
 | Config | pp512 (t/s) | tg128 (t/s) | Notes |
 | --- | ---: | ---: | --- |
@@ -751,14 +791,14 @@ Separate text and vision servers on different ports if running both workloads fr
 
 On gpt-oss-120b, ik_llama was also tested: CUDA graph compilation overhead dominated; PP collapsed to ~98 t/s (vs 428 upstream) and TG dropped to 20 t/s (vs 28 upstream). Not competitive for that model. Performance is model-architecture-dependent.
 
-### 16.3 When to Use
+### 17.3 When to Use
 
 - **Use ik_llama** if TG is your sole bottleneck, you have RAM headroom, and PP regression is acceptable (generation-heavy agent loops)
 - **Stay on upstream** for RAG, long-prompt workloads, or when PP matters. Upstream also has better startup predictability and no extra RAM cost.
 
 ---
 
-## 17. Diagnostic Checklist
+## 18. Diagnostic Checklist
 
 Run before benchmarking or when TG is unexpectedly low.
 
@@ -815,28 +855,31 @@ sudo tuned-adm active
 
 ---
 
-## 18. Optimization Priority Checklist
+## 19. Optimization Priority Checklist
 
 Ordered by typical impact. Each item one line; link to section for detail.
 
 | # | Action | Impact | Section |
 | --- | --- | --- | --- |
 | 1 | **Enable XMP/EXPO in BIOS** | 2–3× TG on MoE | §3.1 |
-| 2 | **Run Linux** or tune Windows power plan | ~15–20% TPS | §4 |
-| 3 | **Replace `power-profiles-daemon` with `tuned-ppd`** | Eliminates intermittent 20–30% TG drop | §4.4 |
-| 4 | **Build llama.cpp from source; keep updated** | MoE kernel improvements per release | §5.2 |
-| 5 | **Use `--fit on`** for VRAM-optimal layer placement | Major TG; no manual tuning | §7.4 |
-| 6 | **Use `-ctk q8_0 -ctv q8_0`** | Frees KV VRAM → extra GPU layers → +TG | §8.2 |
-| 7 | **Set `--parallel 1`** for single-user homelab | Reclaims KV VRAM for weights | §8.3 |
-| 8 | **Pin to P-cores** with `taskset -c` | +20–30% TG on Intel hybrid | §11.3 |
-| 9 | **Enable `--flash-attn on`** | Required for large-context stability | §8.4 |
-| 10 | **Enable `--no-mmap`** | Eliminates TG jitter from page faults | §12.1 |
-| 11 | **Enable `--mlock`** | Prevents mid-session swap degradation | §12.2 |
-| 12 | **Go headless** (`systemctl isolate multi-user.target`) | Frees 200–400 MB RAM + compositor VRAM | §4.4 |
-| 13 | **iGPU for display** (motherboard HDMI) | Frees 500–1000 MB VRAM | §3.2 |
-| 14 | **Set `LLAMA_SET_ROWS=1`** | Cache locality for MoE expert access | §14.1 |
-| 15 | **Set `GGML_CUDA_GRAPH_OPT=1`** (fixed-depth only) | Reduces CUDA dispatch overhead | §14.1 |
-| 16 | **Evaluate ik_llama.cpp** (generation-heavy) | +TG at cost of PP | §16 |
+| 2 | **Use MTP speculative drafting** | 2.0x–2.6x TG speedup | §15.1 |
+| 3 | **Use QAT low-bit models** (e.g. Q4 QAT) | Recovers 8-bit quality at 4-bit VRAM size | §6.3 |
+| 4 | **Run Linux** or tune Windows power plan | ~15–20% TPS | §4 |
+| 5 | **Replace `power-profiles-daemon` with `tuned-ppd`** | Eliminates intermittent 20–30% TG drop | §4.4 |
+| 6 | **Build llama.cpp from source; keep updated** | MoE kernel improvements per release | §5.2 |
+| 7 | **Use `--fit on`** for VRAM-optimal layer placement | Major TG; no manual tuning | §7.4 |
+| 8 | **Use `-ctk q8_0 -ctv q8_0`** (Non-speculative only) | Frees KV VRAM → extra GPU layers → +TG | §8.2 |
+| 9 | **Keep KV cache at `f16` for MTP spec drafting** | Necessary to keep draft acceptance rate high | §15.2 |
+| 10 | **Set `--parallel 1`** for single-user homelab | Reclaims KV VRAM for weights | §8.3 |
+| 11 | **Pin to P-cores** with `taskset -c` | +20–30% TG on Intel hybrid | §11.3 |
+| 12 | **Enable `--flash-attn on`** | Required for large-context stability | §8.4 |
+| 13 | **Enable `--no-mmap`** | Eliminates TG jitter from page faults | §12.1 |
+| 14 | **Enable `--mlock`** | Prevents mid-session swap degradation | §12.2 |
+| 15 | **Go headless** (`systemctl isolate multi-user.target`) | Frees 200–400 MB RAM + compositor VRAM | §4.4 |
+| 16 | **iGPU for display** (motherboard HDMI) | Frees 500–1000 MB VRAM | §3.2 |
+| 17 | **Set `LLAMA_SET_ROWS=1`** | Cache locality for MoE expert access | §14.1 |
+| 18 | **Set `GGML_CUDA_GRAPH_OPT=1`** (fixed-depth only) | Reduces CUDA dispatch overhead | §14.1 |
+| 19 | **Evaluate ik_llama.cpp** (generation-heavy) | +TG at cost of PP | §17 |
 
 ---
 
@@ -844,6 +887,7 @@ Ordered by typical impact. Each item one line; link to section for detail.
 
 | Date | Note |
 | --- | --- |
+| 2026-06-12 | Updated optimization priority checklist, renumbered sections, and added dedicated guides for QAT quantization and MTP speculative decoding. |
 | 2026-04-04 | Initial post — synthesized from l3ms scripts, bench-runbook, and model posts. |
 
 ## References
