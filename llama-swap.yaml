@@ -613,6 +613,33 @@ models:
       --batch-size 1024 --ubatch-size 512
       --prio 2 --no-warmup
 
+  "gemma-4-26b-qat-mtp-vision":
+    name: "Gemma 4 26B QAT + MTP (UD-Q4_K_XL + Assistant, vision, Mainline)"
+    env:
+      - "LLAMA_SET_ROWS=1"
+      - "GGML_CUDA_GRAPH_OPT=0"
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-qat-GGUF/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+      --spec-draft-model /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-qat-GGUF/mtp-gemma-4-26B-A4B-it.gguf
+      --mmproj /mnt/lab/models/unsloth/gemma-4-26B-A4B-it-GGUF/mmproj-BF16.gguf
+      --alias "unsloth/Gemma 4 26B QAT + MTP (vision)"
+      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
+      --presence-penalty 0.0 --repeat-penalty 1.0
+      --host 0.0.0.0 --port ${PORT}
+      --jinja
+      --chat-template-kwargs '{"preserve_thinking": true}'
+      --ctx-size 131072 --n-predict 32768
+      --fit on --fit-ctx 131072 --fit-target 2048
+      -ctk f16 -ctv f16
+      --no-mmap --mlock
+      --threads 10 --threads-batch 12
+      --flash-attn on
+      --spec-type draft-mtp --spec-draft-n-max 2
+      --parallel 1
+      --batch-size 256 --ubatch-size 512
+      --prio 2 --no-warmup
+
   "gemma-4-12b-qat":
     name: "gemma-4-12B QAT (UD-Q4_K_XL, text, 131k ctx)"
     env:
@@ -680,10 +707,10 @@ models:
 
 # ===========================================================================
 # Startup: preload the default so the first request is instant.
-# gemma-4-26b-mtp-vision is the default — optimized for speed with
-# TurboQuant MTP, vision-capable, and resident for instant response.
+# gemma-4-26b-qat-mtp is the default — optimized for speed with
+# QAT UD-Q4_K_XL base and MTP Assistant draft model, giving 100.6 tok/s.
 # ===========================================================================
 hooks:
   on_startup:
     preload:
-      - "gemma-4-26b-mtp-vision"
+      - "gemma-4-26b-qat-mtp"
