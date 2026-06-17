@@ -1,5 +1,14 @@
 # Changelog
 
+### [2026-06-16]
+- **Qwen 3.6 MTP Optimization & Cleanup**:
+  - Benchmarked Qwen 3.6 35B MTP configurations on RTX 4070 (`UD-Q4_K_XL` and `UD-Q6_K` variants).
+  - Aligned `llama-swap.yaml` and benching scripts with optimal `spec-draft-n-max` parameters (n-max=2 for `UD-Q4_K_XL` yielding **60.3 tok/s**; n-max=2 for `UD-Q6_K` yielding **43.1 tok/s**).
+  - Fixed hanging issue in `bench-llama-qwen3-6-reddit-baseline.sh` and `bench-ik-qwen3-6-reddit-test.sh` by adding `-st` (single-turn) flag.
+  - Evaluated `nothink` variants (`enable_thinking: false`) and confirmed they generate slightly slower (**58.0 tok/s** on Q4; **40.9 tok/s** on Q6) due to less structured output reducing speculative decoding acceptance rates compared to thinking mode.
+  - Safely archived (took version snapshots of) and removed 5 obsolete non-MTP Qwen3.6 bench and run scripts from the codebase.
+  - Removed the obsolete `unsloth/Qwen3.6-35B-A3B-GGUF` model download profile from `models_config.json`.
+
 All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog, and this project follows Semantic Versioning.

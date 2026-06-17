@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Baseline script: llama.cpp @ 89 tok/s
-# Flags: --fit on --fit-target 512 --ctx-size 131072 --spec-type draft-mtp --spec-draft-p-min 0.75 --spec-draft-n-max 3
+# Flags: --fit on --fit-target 512 --ctx-size 131072 --spec-type draft-mtp --spec-draft-p-min 0.75 --spec-draft-n-max 2
 
 # Fallback to llama-cli if llama-server is missing
 LLAMA_BIN="vendor/llama.cpp/build/bin/llama-cli"
@@ -24,7 +24,8 @@ taskset -c 0-11 $LLAMA_BIN \
   --cache-type-v-draft q8_0 \
   --spec-type draft-mtp \
   --spec-draft-p-min 0.75 \
-  --spec-draft-n-max 3 \
+  --spec-draft-n-max 2 \
+  -st \
   --no-mmap \
   --mlock \
   --threads 8 \

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Test script based on Reddit post: Qwen3.6-35B-A3B-UD-Q4_K_XL @ 110 tok/s
-# Flags: --fit --fit-margin 1664 --ctx-size 131072 --multi-token-prediction --draft-p-min 0.75 --draft-max 3
+# Flags: --fit --fit-margin 1664 --ctx-size 131072 --multi-token-prediction --draft-p-min 0.75 --draft-max 2
 
 IK_BIN="vendor/ik_llama.cpp/build/bin/llama-cli"
 MODEL="/mnt/lab/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf"
@@ -23,7 +23,8 @@ taskset -c 0-11 $IK_BIN \
   --cache-type-v-draft q8_0 \
   --multi-token-prediction \
   --draft-p-min 0.75 \
-  --draft-max 3 \
+  --draft-max 2 \
+  -st \
   --no-mmap \
   --mlock \
   --threads 8 \

@@ -5,18 +5,23 @@
       "enabled": false,
       "repo_id": "Tesslate/OmniCoder-9B-GGUF",
       "local_dir": "/mnt/lab/models/Tesslate/OmniCoder-9B-GGUF",
-      "allow_patterns": ["*q8_0*"],
+      "allow_patterns": [
+        "*q8_0*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
       "max_workers": null,
-      "description": "OmniCoder 9B Q8_0 — fits entirely in RTX 4070 VRAM"
+      "description": "OmniCoder 9B Q8_0 \u2014 fits entirely in RTX 4070 VRAM"
     },
     {
       "enabled": false,
       "repo_id": "unsloth/Qwen3.5-9B-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen3.5-9B-GGUF",
-      "allow_patterns": ["*UD*Q6_K*", "*mmproj-F16*"],
+      "allow_patterns": [
+        "*UD*Q6_K*",
+        "*mmproj-F16*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -27,7 +32,9 @@
       "enabled": true,
       "repo_id": "unsloth/Qwen-Image-Edit-2511-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen-Image-Edit-2511-GGUF",
-      "allow_patterns": ["*Q3_K_L*"],
+      "allow_patterns": [
+        "*Q3_K_L*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -38,7 +45,9 @@
       "enabled": true,
       "repo_id": "unsloth/LTX-2.3-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/LTX-2.3-GGUF",
-      "allow_patterns": ["ltx-2.3-22b-dev-Q3_K_M.gguf"],
+      "allow_patterns": [
+        "ltx-2.3-22b-dev-Q3_K_M.gguf"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -49,7 +58,9 @@
       "enabled": true,
       "repo_id": "unsloth/Qwen-Image-2512-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen-Image-2512-GGUF",
-      "allow_patterns": ["qwen-image-2512-Q3_K_M.gguf"],
+      "allow_patterns": [
+        "qwen-image-2512-Q3_K_M.gguf"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -60,7 +71,9 @@
       "enabled": false,
       "repo_id": "unsloth/Qwen3.5-35B-A3B-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen3.5-35B-A3B-GGUF",
-      "allow_patterns": ["*UD-Q4_K_XL*"],
+      "allow_patterns": [
+        "*UD-Q4_K_XL*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -69,20 +82,12 @@
     },
     {
       "enabled": false,
-      "repo_id": "unsloth/Qwen3.6-35B-A3B-GGUF",
-      "local_dir": "/mnt/lab/models/unsloth/Qwen3.6-35B-A3B-GGUF",
-      "allow_patterns": ["*UD-Q5_K_XL*", "*mmproj-F16*"],
-      "ignore_patterns": [],
-      "revision": "",
-      "force_download": false,
-      "max_workers": null,
-      "description": "Qwen3.6 35B-A3B UD-Q5_K_XL + mmproj-F16 (vision-capable)"
-    },
-    {
-      "enabled": false,
       "repo_id": "unsloth/Mistral-Small-4-119B-2603-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Mistral-Small-4-119B-2603-GGUF",
-      "allow_patterns": ["*IQ4_XS*", "*mmproj-F16*"],
+      "allow_patterns": [
+        "*IQ4_XS*",
+        "*mmproj-F16*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -93,7 +98,9 @@
       "enabled": false,
       "repo_id": "unsloth/GLM-4.7-Flash-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/GLM-4.7-Flash-GGUF",
-      "allow_patterns": ["*Flash-Q6_K*"],
+      "allow_patterns": [
+        "*Flash-Q6_K*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -104,7 +111,9 @@
       "enabled": false,
       "repo_id": "unsloth/Qwen3.5-122B-A10B-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen3.5-122B-A10B-GGUF",
-      "allow_patterns": ["*UD*IQ4*X*"],
+      "allow_patterns": [
+        "*UD*IQ4*X*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -115,7 +124,9 @@
       "enabled": true,
       "repo_id": "unsloth/Qwen3-Coder-Next-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen3-Coder-Next-GGUF",
-      "allow_patterns": ["*UD*Q4*XL*"],
+      "allow_patterns": [
+        "*UD*Q4*XL*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -126,7 +137,9 @@
       "enabled": false,
       "repo_id": "ggml-org/gpt-oss-20b-GGUF",
       "local_dir": "/mnt/lab/models/ggml-org/gpt-oss-20b-GGUF",
-      "allow_patterns": ["*F16*"],
+      "allow_patterns": [
+        "*F16*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -137,7 +150,9 @@
       "enabled": false,
       "repo_id": "ggml-org/gpt-oss-120b-GGUF",
       "local_dir": "/mnt/lab/models/ggml-org/gpt-oss-120b-GGUF",
-      "allow_patterns": ["*mxfp4*"],
+      "allow_patterns": [
+        "*mxfp4*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -148,7 +163,9 @@
       "enabled": false,
       "repo_id": "SamPurkis/gpt-oss-puzzle-88B-GGUF",
       "local_dir": "/home/kchauhan/models/SamPurkis/gpt-oss-puzzle-88B-GGUF",
-      "allow_patterns": ["*MXFP4_MOE*"],
+      "allow_patterns": [
+        "*MXFP4_MOE*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -159,7 +176,11 @@
       "enabled": true,
       "repo_id": "unsloth/gemma-4-26B-A4B-it-GGUF",
       "local_dir": "/home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF",
-      "allow_patterns": ["*gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf*", "*mmproj-BF16.gguf*", "*gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf*"],
+      "allow_patterns": [
+        "*gemma-4-26B-A4B-it-UD-Q5_K_XL.gguf*",
+        "*mmproj-BF16.gguf*",
+        "*gemma-4-26B-A4B-it-UD-Q6_K_XL.gguf*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -170,7 +191,9 @@
       "enabled": false,
       "repo_id": "AtomicChat/gemma-4-26B-A4B-it-assistant-GGUF",
       "local_dir": "/home/kchauhan/models/AtomicChat/gemma-4-26B-A4B-it-assistant-GGUF",
-      "allow_patterns": ["*Q4_K_M.gguf*"],
+      "allow_patterns": [
+        "*Q4_K_M.gguf*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -181,7 +204,9 @@
       "enabled": false,
       "repo_id": "Qwen/Qwen3-32B-GGUF",
       "local_dir": "/mnt/lab/models/qwen/Qwen3-32B-GGUF",
-      "allow_patterns": ["*Q6_K*"],
+      "allow_patterns": [
+        "*Q6_K*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -192,7 +217,9 @@
       "enabled": false,
       "repo_id": "unsloth/Qwen3-Coder-30B-A3B-Instruct-GGUF",
       "local_dir": "/mnt/lab/models/qwen/Qwen3-Coder-30B-A3B-Instruct-GGUF",
-      "allow_patterns": ["*IQ4_NL*"],
+      "allow_patterns": [
+        "*IQ4_NL*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -203,7 +230,9 @@
       "enabled": false,
       "repo_id": "unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF",
       "local_dir": "/mnt/lab/models/qwen/Qwen3-30B-A3B-Instruct-2507-GGUF",
-      "allow_patterns": ["*IQ4_NL*"],
+      "allow_patterns": [
+        "*IQ4_NL*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -214,7 +243,9 @@
       "enabled": false,
       "repo_id": "unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/NVIDIA-Nemotron-3-Super-120B-A12B-GGUF",
-      "allow_patterns": ["*UD-Q3_K_XL*"],
+      "allow_patterns": [
+        "*UD-Q3_K_XL*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -225,7 +256,9 @@
       "enabled": true,
       "repo_id": "Sumitc13/sarvam-30b-GGUF",
       "local_dir": "/mnt/lab/models/Sumitc13/sarvam-30b-GGUF",
-      "allow_patterns": ["*sarvam-30B-Q6_K.gguf*"],
+      "allow_patterns": [
+        "*sarvam-30B-Q6_K.gguf*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -236,7 +269,10 @@
       "enabled": true,
       "repo_id": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
-      "allow_patterns": ["*UD-Q4_K_XL*", "*UD-Q6_K.gguf*"],
+      "allow_patterns": [
+        "*UD-Q4_K_XL*",
+        "*UD-Q6_K.gguf*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -247,7 +283,9 @@
       "enabled": true,
       "repo_id": "limegreenpeper1/sarvam-105B-GGUF",
       "local_dir": "/mnt/lab/models/limegreenpeper1/sarvam-105B-GGUF",
-      "allow_patterns": ["*Q4_K_M*"],
+      "allow_patterns": [
+        "*Q4_K_M*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -258,7 +296,9 @@
       "enabled": false,
       "repo_id": "byteshape/Qwen3.6-35B-A3B-MTP-GGUF",
       "local_dir": "/mnt/lab/models/byteshape/Qwen3.6-35B-A3B-MTP-GGUF",
-      "allow_patterns": ["*IQ4_XS*"],
+      "allow_patterns": [
+        "*IQ4_XS*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -269,7 +309,11 @@
       "enabled": true,
       "repo_id": "unsloth/gemma-4-26B-A4B-it-qat-GGUF",
       "local_dir": "/home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-qat-GGUF",
-      "allow_patterns": ["*qat-UD-Q4_K_XL.gguf*", "*mtp-gemma-4-26B-A4B-it.gguf*", "*MTP/gemma-4-26B-A4B-it-Q8_0-MTP.gguf*"],
+      "allow_patterns": [
+        "*qat-UD-Q4_K_XL.gguf*",
+        "*mtp-gemma-4-26B-A4B-it.gguf*",
+        "*MTP/gemma-4-26B-A4B-it-Q8_0-MTP.gguf*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
@@ -280,12 +324,29 @@
       "enabled": true,
       "repo_id": "unsloth/gemma-4-12B-it-qat-GGUF",
       "local_dir": "/home/kchauhan/models/unsloth/gemma-4-12B-it-qat-GGUF",
-      "allow_patterns": ["*qat-UD-Q4_K_XL.gguf*", "*mtp-gemma-4-12B-it.gguf*", "*MTP/gemma-4-12B-it-Q8_0-MTP.gguf*"],
+      "allow_patterns": [
+        "*qat-UD-Q4_K_XL.gguf*",
+        "*mtp-gemma-4-12B-it.gguf*",
+        "*MTP/gemma-4-12B-it-Q8_0-MTP.gguf*"
+      ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
       "max_workers": 2,
       "description": "Gemma 4 12B QAT UD-Q4_K_XL + MTP Assistant"
+    },
+    {
+      "enabled": true,
+      "repo_id": "unsloth/diffusiongemma-26B-A4B-it-GGUF",
+      "local_dir": "/home/kchauhan/models/unsloth/diffusiongemma-26B-A4B-it-GGUF",
+      "allow_patterns": [
+        "*Q4_K_M.gguf*"
+      ],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": 2,
+      "description": "DiffusionGemma 26B-A4B IT GGUF (Q4_K_M)"
     }
   ]
 }
