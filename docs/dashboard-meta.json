@@ -1,0 +1,135 @@
+{
+  "updated": "2026-06-21",
+  "system": {
+    "gpu": "RTX 4070 Super 12GB",
+    "cpu": "i5-12600K",
+    "ram": "32GB DDR5-6000",
+    "os": "CachyOS / CUDA"
+  },
+  "methodology": "Token-generation throughput measured on the hardware above. Values are profile-level reference results, not universal speed claims. Prompt processing and task-level MTP results use separate benchmark runs.",
+  "models": {
+    "gemma-4-12b-qat-mtp": {
+      "displayName": "Gemma 4 12B QAT + MTP",
+      "summary": "Fastest profile on this node; native MTP drafting with the official assistant model.",
+      "tps": 120.8,
+      "quant": "UD-Q4_K_XL (QAT)",
+      "tags": ["MTP", "MoE", "QAT"],
+      "benchmark": "mtp_bench_gemma.py"
+    },
+    "gemma-4-26b-qat-mtp": {
+      "displayName": "Gemma 4 26B QAT + MTP",
+      "summary": "Current startup preload and the best quality/speed balance in the Gemma set.",
+      "tps": 100.6,
+      "quant": "UD-Q4_K_XL (QAT)",
+      "tags": ["MTP", "MoE", "QAT", "Preload"],
+      "benchmark": "mtp_bench_gemma.py"
+    },
+    "gemma-4-26b-qat": {
+      "displayName": "Gemma 4 26B QAT",
+      "summary": "Full model without speculative drafting; useful as the MTP control profile.",
+      "tps": 69.0,
+      "quant": "UD-Q4_K_XL (QAT)",
+      "tags": ["MoE", "QAT"],
+      "benchmark": "mtp_bench_gemma.py"
+    },
+    "qwen3-6-mtp": {
+      "displayName": "Qwen3.6 35B-A3B MTP",
+      "summary": "Thinking-enabled MTP profile with strong draft acceptance on coding and factual tasks.",
+      "tps": 60.3,
+      "quant": "UD-Q4_K_XL",
+      "tags": ["MTP", "MoE"],
+      "benchmark": "mtp_bench_qwen.py"
+    },
+    "gemma-4-12b-qat": {
+      "displayName": "Gemma 4 12B QAT",
+      "summary": "Compact QAT baseline without MTP drafting.",
+      "tps": 59.9,
+      "quant": "UD-Q4_K_XL (QAT)",
+      "tags": ["MoE", "QAT"],
+      "benchmark": "mtp_bench_gemma.py"
+    },
+    "qwen3-6-mtp-vision": {
+      "displayName": "Qwen3.6 35B-A3B MTP (Vision)",
+      "summary": "Vision-capable Qwen profile with conservative projector headroom and batch sizing.",
+      "tps": 59.0,
+      "quant": "UD-Q4_K_XL",
+      "tags": ["MTP", "Vision", "MoE"],
+      "benchmark": "bench-models/run-llama-cpp-qwen3-6-35b-a3b-vision.sh"
+    },
+    "qwen3-6-mtp-q6": {
+      "displayName": "Qwen3.6 35B-A3B MTP Q6",
+      "summary": "Higher-precision Q6 variant; slower, but useful when Q4 quality is not enough.",
+      "tps": 43.1,
+      "quant": "UD-Q6_K",
+      "tags": ["MTP", "MoE"],
+      "benchmark": "mtp_bench_qwen.py"
+    },
+    "qwen3-coder-next": {
+      "displayName": "Qwen3-Coder-Next 80B.A3B",
+      "summary": "Default coding model with a static, benchmark-derived CPU/GPU expert split.",
+      "tps": 39.6,
+      "quant": "UD-Q4_K_XL",
+      "tags": ["MoE", "Coding"],
+      "benchmark": "bench-models/bench-llama-cpp-qwen3-coder-next.sh"
+    },
+    "gemma-4-26b-qat-mtp-vision": {
+      "displayName": "Gemma 4 26B QAT + MTP (Vision)",
+      "summary": "26B QAT profile with MTP drafting and BF16 vision projector.",
+      "tps": 39.0,
+      "quant": "UD-Q4_K_XL (QAT)",
+      "tags": ["MTP", "Vision", "MoE", "QAT"],
+      "benchmark": "mtp_bench_gemma.py"
+    },
+    "gemma-4-12b-qat-mtp-vision": {
+      "displayName": "Gemma 4 12B QAT + MTP (Vision)",
+      "summary": "Smaller Gemma MTP profile with vision support.",
+      "tps": 35.0,
+      "quant": "UD-Q4_K_XL (QAT)",
+      "tags": ["MTP", "Vision", "MoE", "QAT"],
+      "benchmark": "mtp_bench_gemma.py"
+    },
+    "gpt-oss-120b": {
+      "displayName": "gpt-oss 120B",
+      "summary": "Reasoning-focused 120B MoE profile with a static expert offload split.",
+      "tps": 23.4,
+      "quant": "MXFP4",
+      "tags": ["MoE", "Reasoning"],
+      "benchmark": "bench-models/bench-llama-cpp-gpt-oss-120b.sh"
+    },
+    "sarvam-30b": {
+      "displayName": "Sarvam 30B",
+      "summary": "Dense Q6 profile running through a custom llama.cpp PR build.",
+      "tps": 15.0,
+      "quant": "Q6_K",
+      "tags": ["Dense"],
+      "benchmark": "bench-models/bench-llama-cpp-sarvam-30b.sh"
+    }
+  },
+  "benchmarks": {
+    "gemma4-12b": {
+      "title": "Gemma 4 12B QAT: baseline vs MTP",
+      "description": "Task-level generation throughput. MTP averaged 120.8 t/s across this run; acceptance varies materially by task.",
+      "metrics": [["Baseline avg", "59.9 t/s"], ["MTP peak", "135.7 t/s"], ["MTP avg", "120.8 t/s"], ["Accept rate", "65.8%"]],
+      "tasks": [["stepwise_math", 59.8, 135.7, "81.8%"], ["summarize", 59.9, 133.5, "79.8%"], ["code_python", 59.9, 130.5, "77.3%"], ["translation", 60.0, 128.6, "75.4%"], ["code_cpp", 60.0, 120.4, "68.4%"], ["long_code_review", 57.6, 111.7, "63.4%"], ["qa_factual", 59.9, 107.2, "57.1%"], ["explain_concept", 59.9, 105.7, "55.9%"], ["creative_short", 60.0, 94.0, "45.8%"]]
+    },
+    "gemma4-26b": {
+      "title": "Gemma 4 26B QAT: baseline vs MTP",
+      "description": "Task-level MTP run. The 100.6 t/s profile result above comes from a separate optimized throughput run; these rows show how acceptance changes by workload.",
+      "metrics": [["Q5 reference", "38.5 t/s"], ["QAT profile", "69.0 t/s"], ["Best MTP profile", "100.6 t/s"], ["Best speedup", "2.61x"]],
+      "tasks": [["stepwise_math", 44.45, 57.77, "81.6%"], ["translation", 44.59, 49.60, "82.5%"], ["qa_factual", 44.66, 49.57, "80.6%"], ["code_python", 44.62, 45.99, "60.3%"], ["code_cpp", 44.78, 45.10, "70.5%"], ["creative_short", 45.32, 40.96, "66.0%"], ["summarize", 44.94, 32.31, "38.3%"], ["long_code_review", 43.98, 26.22, "28.2%"], ["explain_concept", 44.74, 25.80, "31.4%"]]
+    },
+    "qwen3-6-35b": {
+      "title": "Qwen3.6 35B-A3B: baseline vs MTP",
+      "description": "Task-level comparison for Qwen3.6 35B. The served profile uses the conservative 60.3 t/s validated configuration; this separate run averaged 68.5 t/s.",
+      "metrics": [["Baseline avg", "51.3 t/s"], ["MTP peak", "74.0 t/s"], ["MTP run avg", "68.5 t/s"], ["Accept rate", "82.7%"]],
+      "tasks": [["code_python", 51.31, 73.97, "96.2%"], ["qa_factual", 51.77, 71.61, "87.7%"], ["code_cpp", 51.24, 70.15, "85.7%"], ["translation", 51.25, 69.71, "81.3%"], ["stepwise_math", 51.10, 69.11, "85.1%"], ["explain_concept", 51.22, 67.33, "81.9%"], ["summarize", 51.15, 67.06, "80.0%"], ["long_code_review", 51.04, 65.03, "77.9%"], ["creative_short", 51.36, 62.20, "70.3%"]]
+    }
+  },
+  "archived": [
+    {"name": "Gemma 4 26B (standard / non-QAT)", "profiles": "gemma-4-26b-a4b, gemma-4-26b-mtp, gemma-4-26b-mtp-q6", "reason": "The standard model spilled to system RAM. QAT profiles fit substantially more weights in VRAM and replaced it.", "retired": "June 2026", "replacement": "gemma-4-26b-qat-mtp"},
+    {"name": "Mistral Small 4 119B MoE", "profiles": "mistral-small-4-119b family", "reason": "Generation latency and storage cost were poor on this 12GB node even with aggressive expert offload.", "retired": "May 2026", "replacement": "gpt-oss-120b"},
+    {"name": "NVIDIA Nemotron 3 Super 120B", "profiles": "nemotron-super-120b", "reason": "Retired to recover storage; the 3-bit profile traded away too much quality for its throughput.", "retired": "April 2026", "replacement": "gpt-oss-120b"},
+    {"name": "Qwen3.6 35B baseline", "profiles": "unsloth/Qwen3.6-35B-A3B-GGUF", "reason": "Removed after MTP profiles were validated. Vision projector files were retained for the active MTP profile.", "retired": "June 2026", "replacement": "qwen3-6-mtp-vision"},
+    {"name": "OmniCoder 9B", "profiles": "Tesslate/OmniCoder-9B-GGUF", "reason": "Replaced by Qwen3-Coder-Next, which delivered stronger coding quality at usable hybrid-MoE throughput.", "retired": "March 2026", "replacement": "qwen3-coder-next"}
+  ]
+}

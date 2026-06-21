@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.0] - 2026-06-21
+
+### Added
+- Expandable served-profile details with portable, copyable `llama-server`
+  commands generated from `llama-swap.yaml`.
+- Direct links from each profile to its serving config and benchmark source.
+- A compact methodology note explaining the difference between profile-level
+  throughput and task-level MTP benchmark runs.
+- CI validation that rejects stale generated dashboard data.
+
+### Changed
+- Rebuilt the public dashboard around generated data instead of a handwritten
+  duplicate of the active model catalog.
+- Replaced the static online indicator with an honest dated profile snapshot.
+- Sorted profile rankings by measured TG and corrected ranks 10–12.
+- Replaced the crushed mobile table with stacked model cards and expandable
+  command details.
+- Clarified benchmark descriptions where headline and task-level measurements
+  come from separate runs.
+
 ### [2026-06-16]
 - **Qwen 3.6 MTP Optimization & Cleanup**:
   - Benchmarked Qwen 3.6 35B MTP configurations on RTX 4070 (`UD-Q4_K_XL` and `UD-Q6_K` variants).

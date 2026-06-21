@@ -3,1361 +3,478 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>L3MS // Homelab LLM Inference Leaderboard</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <meta name="description" content="Reproducible llama.cpp configurations and benchmarks from a 12GB VRAM homelab.">
+  <meta name="theme-color" content="#080808">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <title>L3MS // Homelab LLM Profiles</title>
   <style>
     :root {
+      color-scheme: dark;
       --bg: #080808;
-      --panel: #111111;
+      --panel: #111;
       --panel-light: #181818;
-      --border: #222222;
-      --border-bright: #888888;
-      --border-focus: #ffffff;
-      
-      /* Brutalist Cyber Colors */
-      --color-green: #00ff66;
-      --color-yellow: #ffff00;
-      --color-pink: #ff007f;
-      --color-blue: #00e5ff;
-      --text-main: #dddddd;
-      --text-muted: #666666;
-      
-      --shadow-offset: 3px;
+      --border: #292929;
+      --border-bright: #888;
+      --green: #00ff66;
+      --yellow: #ffff00;
+      --pink: #ff1976;
+      --blue: #00e5ff;
+      --text: #ddd;
+      --muted: #777;
+      --shadow: 3px;
     }
 
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
     body {
-      font-family: 'JetBrains Mono', monospace;
-      background-color: var(--bg);
-      color: var(--text-main);
+      margin: 0;
+      padding: 1rem .6rem 2rem;
       min-height: 100vh;
-      line-height: 1.4;
-      padding: 1rem 0.5rem;
-      font-size: 11px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    button, input { font: inherit; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    a { color: var(--blue); text-underline-offset: 3px; }
+    a:hover { color: var(--green); }
+    .container { width: min(1080px, 100%); margin: 0 auto; }
+    .surface {
+      border: 2px solid var(--border);
+      background: var(--panel);
+      box-shadow: var(--shadow) var(--shadow) 0 var(--border);
     }
 
-    .container {
-      max-width: 1000px;
-      margin: 0 auto;
-    }
-
-    /* --- HEADER --- */
     header {
-      border: 2px solid var(--border-bright);
-      padding: 0.75rem 1rem;
-      margin-bottom: 1.25rem;
-      background: var(--panel);
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-      box-shadow: var(--shadow-offset) var(--shadow-offset) 0px var(--border);
+      display: grid;
+      grid-template-columns: minmax(260px, 1fr) auto;
+      gap: 1.5rem;
+      align-items: start;
+      padding: 1rem;
+      border-color: var(--border-bright) !important;
     }
-
-    @media (min-width: 768px) {
-      header {
-        flex-direction: row;
-        justify-content: space-between;
-        align-items: center;
-      }
-    }
-
-    .brand {
-      display: flex;
-      flex-direction: column;
-      gap: 0.2rem;
-    }
-
     .brand-title {
-      font-size: 1.3rem;
-      font-weight: 800;
+      margin: 0;
       color: #fff;
-      text-transform: uppercase;
+      font-size: 1.45rem;
+      line-height: 1;
       letter-spacing: -1px;
-    }
-
-    .brand-title span.accent {
-      color: var(--color-green);
-    }
-
-    .brand-subtitle {
-      font-size: 0.65rem;
-      color: var(--text-muted);
       text-transform: uppercase;
-      letter-spacing: 2px;
-      font-weight: 700;
     }
-
-    /* --- SYSTEM SPECS --- */
-    .system-specs {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.6rem 1.2rem;
-    }
-
-    .spec-item {
-      display: flex;
-      flex-direction: column;
-    }
-
-    .spec-label {
-      font-size: 0.6rem;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      font-weight: 700;
-    }
-
-    .spec-value {
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: var(--text-main);
-      margin-top: 0.05rem;
-    }
-
-    .spec-value .node-status {
-      width: 5px;
-      height: 5px;
-      background-color: var(--color-green);
-      display: inline-block;
-      margin-right: 0.2rem;
-      vertical-align: middle;
-    }
-
-    /* --- TABS --- */
-    .tabs-nav {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.4rem;
-      margin-bottom: 1rem;
-    }
-
-    .tab-btn {
-      background: var(--panel);
-      border: 2px solid var(--border);
-      color: var(--text-muted);
-      padding: 0.4rem 0.8rem;
-      font-size: 0.75rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      cursor: pointer;
-      font-family: inherit;
-      transition: none;
-    }
-
-    .tab-btn:hover {
-      border-color: var(--border-focus);
-      color: #fff;
-    }
-
-    .tab-btn.active {
-      background: var(--border-focus);
-      color: #000;
-      border-color: var(--border-focus);
-      box-shadow: var(--shadow-offset) var(--shadow-offset) 0px var(--color-green);
-    }
-
-    /* --- TAB PANELS --- */
-    .tab-panel {
-      display: none;
-    }
-
-    .tab-panel.active {
+    .accent { color: var(--green); }
+    .eyebrow, .label {
       display: block;
+      color: var(--muted);
+      font-size: .62rem;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
     }
-
-    /* --- CONTROLS / SEARCH --- */
-    .dashboard-controls {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-      margin-bottom: 1rem;
+    .eyebrow { margin-top: .45rem; }
+    .header-links { display: flex; gap: .8rem; margin-top: .8rem; flex-wrap: wrap; }
+    .header-links a { font-size: .7rem; font-weight: 700; text-transform: uppercase; }
+    .system-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(110px, 1fr));
+      gap: .65rem 1rem;
     }
+    .system-value { display: block; margin-top: .12rem; color: #fff; font-size: .74rem; font-weight: 700; }
+    .status-dot { display: inline-block; width: 6px; height: 6px; margin-right: .35rem; background: var(--green); }
 
-    @media (min-width: 768px) {
-      .dashboard-controls {
-        flex-direction: row;
-        justify-content: space-between;
-        align-items: stretch;
-      }
+    .intro {
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(260px, .65fr);
+      gap: 1.5rem;
+      margin: 1rem 0;
+      padding: 1rem;
     }
+    .intro h2 { margin: 0 0 .45rem; color: #fff; font-size: 1rem; }
+    .intro p { margin: 0; color: #aaa; max-width: 70ch; }
+    .methodology { padding-left: 1rem; border-left: 2px solid var(--yellow); }
+    .methodology p { margin-top: .25rem; font-size: .7rem; }
 
-    .search-wrapper {
-      flex: 1;
-      max-width: 300px;
-      display: flex;
+    .tabs { display: flex; gap: .45rem; margin: 1.15rem 0 .9rem; flex-wrap: wrap; }
+    .tab, .filter, .button, .benchmark-selector {
       border: 2px solid var(--border);
       background: var(--panel);
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: 700;
+      text-transform: uppercase;
     }
-
-    .search-wrapper:focus-within {
-      border-color: var(--border-focus);
+    .tab { padding: .48rem .85rem; }
+    .tab:hover, .filter:hover, .button:hover, .benchmark-selector:hover { border-color: #fff; color: #fff; }
+    .tab.active {
+      border-color: #fff;
+      background: #fff;
+      color: #000;
+      box-shadow: var(--shadow) var(--shadow) 0 var(--green);
     }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
 
-    .search-input {
-      width: 100%;
-      background: transparent;
-      border: none;
-      padding: 0.4rem 0.6rem;
-      color: var(--text-main);
-      font-family: inherit;
-      font-size: 0.75rem;
+    .controls { display: flex; justify-content: space-between; gap: 1rem; margin-bottom: .8rem; }
+    .search {
+      width: min(340px, 100%);
+      border: 2px solid var(--border);
+      background: var(--panel);
+      color: var(--text);
+      padding: .5rem .65rem;
       outline: none;
     }
+    .search:focus { border-color: #fff; }
+    .filters { display: flex; gap: .35rem; flex-wrap: wrap; }
+    .filter { padding: .35rem .58rem; font-size: .68rem; }
+    .filter.active { border-color: var(--green); color: var(--green); }
 
-    .filter-tags {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.3rem;
-    }
-
-    .filter-tag {
-      background: var(--panel);
-      border: 2px solid var(--border);
-      color: var(--text-muted);
-      padding: 0.35rem 0.6rem;
-      font-size: 0.7rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      cursor: pointer;
-      font-family: inherit;
-    }
-
-    .filter-tag:hover {
-      border-color: var(--border-focus);
-      color: #fff;
-    }
-
-    .filter-tag.active {
-      background: var(--panel-light);
-      border-color: var(--color-green);
-      color: var(--color-green);
-    }
-
-    /* --- BRUTALIST GRID CARD --- */
-    .brutalist-card {
-      background: var(--panel);
-      border: 2px solid var(--border);
-      padding: 1rem;
-      box-shadow: var(--shadow-offset) var(--shadow-offset) 0px var(--border);
-      margin-bottom: 1rem;
-    }
-
-    /* --- LEADERBOARD TABLE --- */
-    .table-container {
-      overflow-x: auto;
-    }
-
-    .leaderboard-table {
-      width: 100%;
-      border-collapse: collapse;
-      text-align: left;
-      font-size: 0.75rem;
-    }
-
-    .leaderboard-table th {
-      font-weight: 700;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      padding: 0.6rem 0.5rem;
+    .table-shell { padding: .85rem; overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    th {
+      padding: .6rem .55rem;
       border-bottom: 2px solid var(--border-bright);
+      color: var(--muted);
+      font-size: .66rem;
+      text-transform: uppercase;
     }
-
-    .leaderboard-table td {
-      padding: 0.5rem;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .leaderboard-table tbody tr:hover {
-      background: var(--panel-light);
-      border-left: 2px solid var(--color-green);
-    }
-
-    /* --- CELLS --- */
-    .model-name-cell {
-      display: flex;
-      flex-direction: column;
-      gap: 0.15rem;
-    }
-
-    .model-id {
-      font-weight: 700;
-      font-size: 0.85rem;
-      color: #fff;
-    }
-
-    .model-desc {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-    }
-
-    .badge-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.25rem;
-      margin-top: 0.2rem;
-    }
-
-    /* --- BRUTALIST BADGES --- */
+    td { padding: .65rem .55rem; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    .model-row:hover { background: var(--panel-light); }
+    .rank { width: 58px; color: var(--muted); font-weight: 800; }
+    .model-name { color: #fff; font-size: .82rem; font-weight: 800; }
+    .model-description { display: block; margin-top: .18rem; color: var(--muted); font-size: .68rem; max-width: 58ch; }
+    .badge-row { display: flex; gap: .25rem; flex-wrap: wrap; margin-top: .35rem; }
     .badge {
-      font-size: 0.6rem;
-      padding: 0.1rem 0.3rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      border: 1px solid var(--border);
-      background: #000;
-      color: var(--text-muted);
-    }
-
-    .badge-mtp { color: var(--color-green); border-color: var(--color-green); }
-    .badge-vision { color: var(--color-blue); border-color: var(--color-blue); }
-    .badge-moe { color: var(--color-pink); border-color: var(--color-pink); }
-    .badge-qat { color: var(--color-yellow); border-color: var(--color-yellow); }
-    .badge-preload { background: var(--color-pink); color: #000; font-weight: 800; border-color: var(--color-pink); }
-
-    /* --- TPS BARS --- */
-    .tps-cell {
-      min-width: 140px;
-    }
-
-    .tps-header-wrapper {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-      margin-bottom: 0.2rem;
-    }
-
-    .tps-number {
-      font-size: 0.95rem;
-      font-weight: 800;
-      color: #fff;
-    }
-
-    .tps-unit {
-      font-size: 0.65rem;
-      color: var(--text-muted);
-    }
-
-    .tps-bar-bg {
-      height: 5px;
-      background: #000;
-      border: 1px solid var(--border);
-      width: 100%;
-    }
-
-    .tps-bar-fill {
-      height: 100%;
-      background: var(--color-green);
-      width: 0%;
-      transition: width 0.6s steps(10);
-    }
-
-    /* --- COMPARISON VIEW --- */
-    .comparison-grid {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 1rem;
-    }
-
-    @media (min-width: 992px) {
-      .comparison-grid {
-        grid-template-columns: 240px 1fr;
-      }
-    }
-
-    .selector-pane {
-      display: flex;
-      flex-direction: column;
-      gap: 0.4rem;
-    }
-
-    .selector-card {
-      background: var(--panel);
-      border: 2px solid var(--border);
-      padding: 0.6rem 0.8rem;
-      cursor: pointer;
-      text-transform: uppercase;
-    }
-
-    .selector-card:hover {
-      border-color: var(--border-focus);
-    }
-
-    .selector-card.active {
-      border-color: var(--color-green);
-      box-shadow: 2px 2px 0px var(--color-green);
-      background: var(--panel-light);
-    }
-
-    .selector-card-title {
-      font-weight: 700;
-      font-size: 0.75rem;
-      color: #fff;
-    }
-
-    .selector-card-desc {
-      font-size: 0.6rem;
-      color: var(--text-muted);
-      margin-top: 0.15rem;
-    }
-
-    /* --- CHART PANE --- */
-    .chart-pane {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-    }
-
-    .chart-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      border-bottom: 2px solid var(--border);
-      padding-bottom: 0.5rem;
-    }
-
-    .chart-title {
-      font-size: 0.9rem;
-      text-transform: uppercase;
-      font-weight: 800;
-    }
-
-    .comparison-toggle {
-      display: flex;
-      border: 2px solid var(--border);
-      background: #000;
-    }
-
-    .toggle-btn {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      padding: 0.25rem 0.5rem;
-      font-size: 0.65rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      cursor: pointer;
-      font-family: inherit;
-    }
-
-    .toggle-btn.active {
-      background: var(--border-focus);
-      color: #000;
-    }
-
-    .bars-container {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-
-    .chart-row {
-      display: grid;
-      grid-template-columns: 130px 1fr;
-      align-items: center;
-      gap: 0.75rem;
-    }
-
-    .chart-label {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      text-transform: lowercase;
-    }
-
-    .chart-bar-area {
-      position: relative;
-      height: 20px;
-      display: flex;
-      align-items: center;
-    }
-
-    .chart-bar-bg {
-      position: absolute;
-      width: 100%;
-      height: 6px;
-      background: #000;
-      border: 1px solid var(--border);
-    }
-
-    /* Range Overlay Bar */
-    .range-bar {
-      position: absolute;
-      height: 6px;
-      background: #222;
+      display: inline-block;
+      padding: .08rem .28rem;
       border: 1px solid var(--border-bright);
-      transition: all 0.4s steps(8);
-    }
-
-    /* Compare Bars */
-    .compare-bar-1 {
-      position: absolute;
-      height: 3px;
-      background: var(--color-pink);
-      top: 3px;
-      width: 0%;
-      transition: width 0.4s ease;
-    }
-
-    .compare-bar-2 {
-      position: absolute;
-      height: 3px;
-      background: var(--color-green);
-      bottom: 3px;
-      width: 0%;
-      transition: width 0.4s ease;
-    }
-
-    .chart-bar-values {
-      position: absolute;
-      right: 0.4rem;
-      font-size: 0.65rem;
-      font-weight: 700;
-      color: var(--text-main);
-      pointer-events: none;
-    }
-
-    .accept-rate-marker {
-      display: inline-flex;
-      align-items: center;
-      margin-left: 0.4rem;
-      color: var(--color-green);
-      font-size: 0.6rem;
-    }
-
-    /* --- METRICS SUMMARY --- */
-    .metrics-summary {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 0.75rem;
-      border-top: 2px solid var(--border);
-      padding-top: 1rem;
-    }
-
-    .metric-card {
-      background: var(--panel-light);
-      border: 2px solid var(--border);
-      padding: 0.6rem 0.8rem;
-      display: flex;
-      flex-direction: column;
-    }
-
-    .metric-title {
-      font-size: 0.6rem;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      font-weight: 700;
-    }
-
-    .metric-val {
+      color: #aaa;
+      font-size: .58rem;
       font-weight: 800;
-      font-size: 1.1rem;
-      color: #fff;
-      margin-top: 0.15rem;
-    }
-
-    /* --- ARCHIVED MODELS --- */
-    .archive-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-
-    .archive-card {
-      background: var(--panel);
-      border: 2px solid var(--border);
-      padding: 0.75rem 1rem;
-      box-shadow: var(--shadow-offset) var(--shadow-offset) 0px var(--border);
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-
-    .archive-card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      flex-wrap: wrap;
-      gap: 0.4rem;
-    }
-
-    .archive-title {
-      font-size: 0.85rem;
-      font-weight: 800;
-      color: #fff;
       text-transform: uppercase;
     }
+    .badge-mtp { color: var(--green); border-color: var(--green); }
+    .badge-vision { color: var(--blue); border-color: var(--blue); }
+    .badge-qat { color: var(--yellow); border-color: var(--yellow); }
+    .badge-preload, .badge-reasoning { color: var(--pink); border-color: var(--pink); }
+    .throughput { min-width: 125px; }
+    .throughput-value { color: #fff; font-size: 1.05rem; font-weight: 800; }
+    .throughput-unit { color: var(--muted); font-size: .65rem; }
+    .bar-track { height: 3px; margin-top: .25rem; background: #000; }
+    .bar { height: 100%; background: var(--green); }
+    .button { padding: .32rem .5rem; font-size: .62rem; }
+    .details-row[hidden] { display: none; }
+    .details-cell { padding: 0 0 .8rem; background: #0c0c0c; }
+    .model-details { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 1rem; padding: 1rem; border-left: 3px solid var(--green); }
+    .detail-facts { display: grid; gap: .65rem; align-content: start; }
+    .detail-value { display: block; margin-top: .15rem; color: #fff; font-weight: 700; }
+    .detail-links { display: flex; flex-direction: column; gap: .35rem; margin-top: .3rem; font-size: .68rem; }
+    .command-head { display: flex; justify-content: space-between; align-items: center; gap: .8rem; margin-bottom: .45rem; }
+    .command-note { margin: 0 0 .55rem; color: var(--yellow); font-size: .65rem; }
+    pre { margin: 0; padding: .75rem; overflow: auto; border: 1px solid var(--border); background: #050505; color: #bbb; font-size: .67rem; line-height: 1.55; }
+    .mobile-models { display: none; }
 
-    .archive-details {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 0.5rem;
-      font-size: 0.7rem;
-      border-top: 1px solid var(--border);
-      padding-top: 0.5rem;
-    }
+    .benchmark-layout { display: grid; grid-template-columns: 250px minmax(0, 1fr); gap: 1rem; }
+    .benchmark-list { display: flex; flex-direction: column; gap: .45rem; }
+    .benchmark-selector { width: 100%; padding: .75rem; text-align: left; }
+    .benchmark-selector.active { border-color: var(--green); color: #fff; box-shadow: var(--shadow) var(--shadow) 0 var(--green); }
+    .benchmark-selector small { display: block; margin-top: .25rem; color: var(--muted); }
+    .benchmark-panel { padding: 1rem; }
+    .benchmark-panel h3 { margin: 0 0 .35rem; color: #fff; font-size: .9rem; }
+    .benchmark-description { margin: 0 0 1rem; color: var(--muted); font-size: .7rem; }
+    .chart { display: grid; gap: .55rem; }
+    .chart-row { display: grid; grid-template-columns: 125px minmax(0, 1fr); gap: .7rem; align-items: center; }
+    .chart-label { overflow: hidden; color: var(--muted); font-size: .65rem; text-overflow: ellipsis; }
+    .chart-bars { position: relative; height: 24px; border-bottom: 1px solid var(--border); }
+    .chart-bar { position: absolute; left: 0; height: 3px; }
+    .chart-bar.baseline { top: 6px; background: var(--pink); }
+    .chart-bar.mtp { top: 14px; background: var(--green); }
+    .chart-values { position: absolute; right: 0; top: 0; color: #fff; font-size: .6rem; background: var(--panel); }
+    .accept { color: var(--green); }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: .55rem; margin-top: 1rem; }
+    .metric { padding: .65rem; border: 1px solid var(--border); background: var(--panel-light); }
+    .metric strong { display: block; margin-top: .2rem; color: #fff; font-size: 1rem; }
 
-    @media (min-width: 768px) {
-      .archive-details {
-        grid-template-columns: 1fr 1fr;
-      }
-    }
+    .archive-intro { padding: .9rem; margin-bottom: .8rem; border-left: 4px solid var(--yellow); }
+    .archive-intro p { margin: .25rem 0 0; color: var(--muted); }
+    .archive-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+    .archive-card { padding: .85rem; }
+    .archive-card h3 { margin: 0; color: #fff; font-size: .8rem; }
+    .archive-card p { margin: .55rem 0; color: var(--muted); font-size: .68rem; }
+    .archive-meta { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; padding-top: .55rem; border-top: 1px dashed var(--border); }
 
-    .archive-detail-item {
-      display: flex;
-      flex-direction: column;
-      gap: 0.1rem;
-    }
+    .empty { padding: 2rem; color: var(--muted); text-align: center; }
+    footer { margin-top: 2rem; padding: 1rem 0; border-top: 2px solid var(--border); color: var(--muted); font-size: .66rem; text-align: center; }
 
-    .archive-detail-label {
-      font-size: 0.55rem;
-      text-transform: uppercase;
-      color: var(--text-muted);
-      font-weight: 700;
-    }
-
-    .archive-detail-val {
-      color: var(--text-main);
-    }
-
-    .archive-detail-val.replacement {
-      color: var(--color-green);
-      font-weight: 700;
-    }
-
-    /* --- FOOTER --- */
-    footer {
-      margin-top: 3rem;
-      border-top: 2px solid var(--border);
-      padding: 1.5rem 0;
-      text-align: center;
-      color: var(--text-muted);
-      font-size: 0.7rem;
-    }
-
-    footer a {
-      color: var(--color-blue);
-      text-decoration: underline;
-    }
-
-    footer a:hover {
-      color: var(--color-green);
+    @media (max-width: 760px) {
+      body { padding: .65rem .45rem 1.5rem; }
+      header, .intro { grid-template-columns: 1fr; }
+      header { gap: 1rem; }
+      .intro { gap: .8rem; }
+      .methodology { padding: .7rem 0 0; border-top: 2px solid var(--yellow); border-left: 0; }
+      .system-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .tabs { display: grid; grid-template-columns: 1fr; }
+      .tab { text-align: left; }
+      .controls { flex-direction: column; }
+      .search { width: 100%; }
+      .table-shell { display: none; }
+      .mobile-models { display: grid; gap: .65rem; }
+      .mobile-card { padding: .8rem; }
+      .mobile-card-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .75rem; align-items: start; }
+      .mobile-speed { color: #fff; font-size: 1rem; font-weight: 800; text-align: right; }
+      .mobile-meta { display: flex; gap: .8rem; margin: .65rem 0; color: #aaa; }
+      .model-details { grid-template-columns: 1fr; margin-top: .75rem; padding: .8rem 0 0; border-top: 2px solid var(--green); border-left: 0; }
+      .benchmark-layout { grid-template-columns: 1fr; }
+      .benchmark-list { display: grid; grid-template-columns: 1fr; }
+      .chart-row { grid-template-columns: 95px minmax(0, 1fr); }
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .archive-list { grid-template-columns: 1fr; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    
-    <!-- --- HEADER --- -->
-    <header>
-      <div class="brand">
-        <h1 class="brand-title">L3MS <span class="accent">//</span> BENCHMARKS</h1>
-        <p class="brand-subtitle">Homelab LLM Inference Dashboard</p>
+  <main class="container">
+    <header class="surface">
+      <div>
+        <h1 class="brand-title">L3MS <span class="accent">//</span> PROFILES</h1>
+        <span class="eyebrow">Reproducible homelab LLM inference</span>
+        <nav class="header-links" aria-label="Related resources">
+          <a href="https://github.com/carteakey/l3ms">Source</a>
+          <a href="https://carteakey.dev/blog/local-inference/local-llm-optimization/">Optimization guide</a>
+        </nav>
       </div>
-      <div class="system-specs">
-        <div class="spec-item">
-          <span class="spec-label">Host Status</span>
-          <span class="spec-value"><span class="node-status"></span> ONLINE</span>
-        </div>
-        <div class="spec-item">
-          <span class="spec-label">Node GPU</span>
-          <span class="spec-value">RTX 4070 Super 12GB</span>
-        </div>
-        <div class="spec-item">
-          <span class="spec-label">Node CPU</span>
-          <span class="spec-value">i5-12600K</span>
-        </div>
-        <div class="spec-item">
-          <span class="spec-label">System RAM</span>
-          <span class="spec-value">32GB DDR5-6000</span>
-        </div>
+      <div class="system-grid" aria-label="Test system">
+        <div><span class="label">Snapshot</span><span class="system-value"><span class="status-dot"></span><span id="profile-count">--</span> profiles</span></div>
+        <div><span class="label">GPU</span><span class="system-value" id="system-gpu">--</span></div>
+        <div><span class="label">CPU</span><span class="system-value" id="system-cpu">--</span></div>
+        <div><span class="label">RAM</span><span class="system-value" id="system-ram">--</span></div>
       </div>
     </header>
 
-    <!-- --- TABS --- -->
-    <nav class="tabs-nav">
-      <button class="tab-btn active" data-tab="active-leaderboard">
-        [1] Served Models
-      </button>
-      <button class="tab-btn" data-tab="perf-ranges">
-        [2] Performance Ranges
-      </button>
-      <button class="tab-btn" data-tab="archived-models">
-        [3] Archived Catalog
-      </button>
+    <section class="intro surface">
+      <div>
+        <h2>Commands and measured performance from one 12GB node.</h2>
+        <p>These are the configurations I actually serve through llama-swap. Open a profile to see its normalized llama.cpp command, benchmark source, and the trade-offs used to make it fit.</p>
+      </div>
+      <div class="methodology">
+        <span class="label">How to read the numbers</span>
+        <p id="methodology-copy"></p>
+      </div>
+    </section>
+
+    <nav class="tabs" aria-label="Dashboard views">
+      <button class="tab active" data-tab="models">[1] Served profiles</button>
+      <button class="tab" data-tab="benchmarks">[2] Benchmark runs</button>
+      <button class="tab" data-tab="archive">[3] Retired profiles</button>
     </nav>
 
-    <!-- ========================================== -->
-    <!-- TAB 1: ACTIVE LEADERBOARD                  -->
-    <!-- ========================================== -->
-    <section class="tab-panel active" id="active-leaderboard">
-      <div class="dashboard-controls">
-        <div class="search-wrapper">
-          <input type="text" id="model-search" class="search-input" placeholder="Search profiles...">
-        </div>
-        <div class="filter-tags">
-          <button class="filter-tag active" data-filter="all">All</button>
-          <button class="filter-tag" data-filter="mtp">MTP</button>
-          <button class="filter-tag" data-filter="vision">Vision</button>
-          <button class="filter-tag" data-filter="moe">MoE</button>
-          <button class="filter-tag" data-filter="qat">QAT</button>
+    <section class="tab-panel active" id="models-panel">
+      <div class="controls">
+        <input class="search" id="model-search" type="search" placeholder="Search models, quants, workloads..." aria-label="Search profiles">
+        <div class="filters" id="model-filters" aria-label="Filter profiles">
+          <button class="filter active" data-filter="All">All</button>
+          <button class="filter" data-filter="MTP">MTP</button>
+          <button class="filter" data-filter="Vision">Vision</button>
+          <button class="filter" data-filter="MoE">MoE</button>
+          <button class="filter" data-filter="QAT">QAT</button>
+          <button class="filter" data-filter="Coding">Coding</button>
         </div>
       </div>
 
-      <div class="brutalist-card">
-        <div class="table-container">
-          <table class="leaderboard-table" id="leaderboard-table">
-            <thead>
-              <tr>
-                <th style="width: 50px;">Rank</th>
-                <th>Model Profile</th>
-                <th style="width: 100px;">Context</th>
-                <th style="width: 160px;">Quantization</th>
-                <th class="tps-cell">Performance</th>
-              </tr>
-            </thead>
-            <tbody id="leaderboard-tbody">
-              <!-- Dynamically populated -->
-            </tbody>
-          </table>
+      <div class="table-shell surface">
+        <table>
+          <thead><tr><th>Rank</th><th>Profile</th><th>Context</th><th>Quant</th><th>Measured TG</th><th></th></tr></thead>
+          <tbody id="model-table-body"></tbody>
+        </table>
+      </div>
+      <div class="mobile-models" id="mobile-models"></div>
+    </section>
+
+    <section class="tab-panel" id="benchmarks-panel">
+      <div class="benchmark-layout">
+        <div class="benchmark-list" id="benchmark-list"></div>
+        <div class="benchmark-panel surface">
+          <h3 id="benchmark-title"></h3>
+          <p class="benchmark-description" id="benchmark-description"></p>
+          <div class="chart" id="benchmark-chart"></div>
+          <div class="metrics" id="benchmark-metrics"></div>
         </div>
       </div>
     </section>
 
-    <!-- ========================================== -->
-    <!-- TAB 2: PERFORMANCE RANGES                  -->
-    <!-- ========================================== -->
-    <section class="tab-panel" id="perf-ranges">
-      <div class="comparison-grid">
-        
-        <div class="selector-pane" id="range-selectors">
-          <!-- Dynamically populated -->
-        </div>
+    <section class="tab-panel" id="archive-panel">
+      <div class="archive-intro surface">
+        <span class="label">Retired, with reasons</span>
+        <p>Models leave the node when their quality, storage cost, or throughput no longer earns the disk space.</p>
+      </div>
+      <div class="archive-list" id="archive-list"></div>
+    </section>
 
-        <div class="brutalist-card chart-pane">
-          <div class="chart-header">
-            <h3 class="chart-title" id="chart-model-title">...</h3>
-            <div class="comparison-toggle" id="chart-comparison-toggle" style="display: none;">
-              <button class="toggle-btn" data-mode="range">Range</button>
-              <button class="toggle-btn active" data-mode="compare">Compare</button>
+    <footer>
+      <span id="generated-date"></span> · Commands generated from <a href="https://github.com/carteakey/l3ms/blob/main/llama-swap.yaml">llama-swap.yaml</a> · <span id="system-os"></span>
+    </footer>
+  </main>
+
+  <script src="generated-models.js"></script>
+  <script>
+    const dashboard = window.L3MS_DASHBOARD;
+    const models = dashboard.models;
+    let activeFilter = "All";
+    let searchTerm = "";
+    let activeBenchmark = Object.keys(dashboard.benchmarks)[0];
+
+    const escapeHtml = value => String(value).replace(/[&<>'"]/g, character => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;"
+    })[character]);
+
+    const badgeClass = tag => `badge-${tag.toLowerCase()}`;
+    const badges = model => model.tags.map(tag => `<span class="badge ${badgeClass(tag)}">${escapeHtml(tag)}</span>`).join("");
+    const rankFor = model => String(models.findIndex(item => item.id === model.id) + 1).padStart(2, "0");
+    const barWidth = model => Math.round((model.tps / models[0].tps) * 100);
+
+    function modelDetails(model) {
+      return `
+        <div class="model-details" data-details-for="${escapeHtml(model.id)}">
+          <div class="detail-facts">
+            <div><span class="label">Measured result</span><span class="detail-value">${model.tps.toFixed(1)} t/s TG</span></div>
+            <div><span class="label">Serving envelope</span><span class="detail-value">${escapeHtml(model.context)} context · ${escapeHtml(model.quant)}</span></div>
+            <div class="detail-links">
+              <a href="${escapeHtml(model.sourceUrl)}">llama-swap profile</a>
+              <a href="${escapeHtml(model.benchmarkUrl)}">benchmark source</a>
             </div>
           </div>
-
-          <p id="chart-model-desc" style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.5rem;"></p>
-
-          <div class="bars-container" id="chart-bars">
-            <!-- Dynamically populated -->
+          <div>
+            <div class="command-head"><span class="label">Portable llama.cpp command</span><button class="button" data-copy="${escapeHtml(model.id)}">Copy command</button></div>
+            <p class="command-note">Paths are placeholders and the public-safe default binds to localhost. CPU pinning and fit values match this node.</p>
+            <pre><code>${escapeHtml(model.command)}</code></pre>
           </div>
+        </div>`;
+    }
 
-          <div class="metrics-summary" id="chart-metrics">
-            <!-- Dynamically populated -->
-          </div>
-        </div>
-
-      </div>
-    </section>
-
-    <!-- ========================================== -->
-    <!-- TAB 3: ARCHIVED CATALOG                    -->
-    <!-- ========================================== -->
-    <section class="tab-panel" id="archived-models">
-      <div class="brutalist-card" style="border-left: 4px solid var(--color-yellow);">
-        <h3 class="chart-title" style="margin-bottom: 0.5rem; color: var(--color-yellow);">Deprecated / Archived Assets</h3>
-        <p style="font-size: 0.8rem; color: var(--text-muted);">
-          Configurations disabled in `llama-swap.yaml` and GGUF files deleted from disk to reclaim ~100+ GB of storage. Standard Post-Training Quantization (PTQ) models are replaced by training-optimized Quantization-Aware Training (QAT) variants which fit VRAM limits and run up to 2x faster.
-        </p>
-      </div>
-
-      <div class="archive-list" id="archive-list-container">
-        <!-- Dynamically populated -->
-      </div>
-    </section>
-
-    <!-- --- FOOTER --- -->
-    <footer>
-      <p>L3MS toolkit. Built on CachyOS / CUDA. Source: <a href="https://github.com/carteakey/l3ms" target="_blank">carteakey/l3ms</a></p>
-      <p style="margin-top: 0.5rem; font-size: 0.7rem; color: var(--text-muted);">Generated on June 12, 2026</p>
-    </footer>
-
-  </div>
-
-  <script>
-    const servedModels = [
-      {
-        id: "gemma-4-12b-qat-mtp",
-        name: "gemma-4-12B QAT + MTP",
-        quant: "UD-Q4_K_XL (QAT)",
-        context: "131k",
-        tps: 120.80,
-        isMtp: true,
-        isVision: false,
-        isMoe: true,
-        isQat: true,
-        preload: false,
-        description: "Ultrafast 12B model with native MTP drafting using the official assistant model."
-      },
-      {
-        id: "gemma-4-26b-qat-mtp",
-        name: "gemma-4-26B QAT + MTP",
-        quant: "UD-Q4_K_XL (QAT)",
-        context: "131k",
-        tps: 100.60,
-        isMtp: true,
-        isVision: false,
-        isMoe: true,
-        isQat: true,
-        preload: true,
-        description: "Startup Preload Default. Gemma 4 26B with Q8_0 MTP Assistant draft model."
-      },
-      {
-        id: "qwen3-6-mtp",
-        name: "Qwen3.6-35B-A3B MTP",
-        quant: "UD-Q4_K_XL",
-        context: "131k",
-        tps: 60.30,
-        isMtp: true,
-        isVision: false,
-        isMoe: true,
-        isQat: false,
-        preload: false,
-        description: "Qwen 3.6 35B model utilizing Multi-Token Prediction (MTP) draft execution."
-      },
-      {
-        id: "gemma-4-26b-qat",
-        name: "gemma-4-26B QAT",
-        quant: "UD-Q4_K_XL (QAT)",
-        context: "131k",
-        tps: 69.00,
-        isMtp: false,
-        isVision: false,
-        isMoe: true,
-        isQat: true,
-        preload: false,
-        description: "QAT 26B base text model without Multi-Token Prediction."
-      },
-      {
-        id: "qwen3-6-mtp-vision",
-        name: "Qwen3.6-35B-A3B MTP (Vision)",
-        quant: "UD-Q4_K_XL",
-        context: "131k",
-        tps: 59.00,
-        isMtp: true,
-        isVision: true,
-        isMoe: true,
-        isQat: false,
-        preload: false,
-        description: "Qwen 3.6 35B MTP vision model with CLIP projector file in MTP directory."
-      },
-      {
-        id: "gemma-4-12b-qat",
-        name: "gemma-4-12B QAT",
-        quant: "UD-Q4_K_XL (QAT)",
-        context: "131k",
-        tps: 59.90,
-        isMtp: false,
-        isVision: false,
-        isMoe: true,
-        isQat: true,
-        preload: false,
-        description: "Baseline QAT 12B model without MTP drafting."
-      },
-      {
-        id: "qwen3-6-mtp-q6",
-        name: "Qwen3.6-35B-A3B MTP Q6",
-        quant: "UD-Q6_K",
-        context: "131k",
-        tps: 43.10,
-        isMtp: true,
-        isVision: false,
-        isMoe: true,
-        isQat: false,
-        preload: false,
-        description: "Higher-precision Qwen 3.6 35B MTP configuration."
-      },
-      {
-        id: "qwen3-coder-next",
-        name: "Qwen3-Coder-Next 80B.A3B",
-        quant: "UD-Q4_K_XL",
-        context: "65k",
-        tps: 39.60,
-        isMtp: false,
-        isVision: false,
-        isMoe: true,
-        isQat: false,
-        preload: false,
-        description: "Default coding model; static bench-derived expert placement for high throughput."
-      },
-      {
-        id: "gemma-4-26b-qat-mtp-vision",
-        name: "gemma-4-26B QAT + MTP (Vision)",
-        quant: "UD-Q4_K_XL (QAT)",
-        context: "131k",
-        tps: 39.00,
-        isMtp: true,
-        isVision: true,
-        isMoe: true,
-        isQat: true,
-        preload: false,
-        description: "QAT 26B base with MTP Assistant + CLIP vision support (mmproj-BF16.gguf)."
-      },
-      {
-        id: "gemma-4-12b-qat-mtp-vision",
-        name: "gemma-4-12B QAT + MTP (Vision)",
-        quant: "UD-Q4_K_XL (QAT)",
-        context: "131k",
-        tps: 35.00,
-        isMtp: true,
-        isVision: true,
-        isMoe: true,
-        isQat: true,
-        preload: false,
-        description: "QAT 12B base with MTP Assistant + CLIP vision support (mmproj-BF16.gguf)."
-      },
-      {
-        id: "gpt-oss-120b",
-        name: "gpt-oss 120B",
-        quant: "MXFP4",
-        context: "32k",
-        tps: 23.40,
-        isMtp: false,
-        isVision: false,
-        isMoe: true,
-        isQat: false,
-        preload: false,
-        description: "High reasoning production default; static bench-derived CPU/GPU split."
-      },
-      {
-        id: "sarvam-30b",
-        name: "sarvam-30B",
-        quant: "Q6_K",
-        context: "4k",
-        tps: 15.00,
-        isMtp: false,
-        isVision: false,
-        isMoe: false,
-        isQat: false,
-        preload: false,
-        description: "Requires custom PR-20275 llama.cpp build; runs with CPU layer splits."
-      }
-    ];
-
-    const rangeBenchmarks = {
-      "gemma4-12b": {
-        title: "Gemma 4 12B-it QAT Benchmarks",
-        description: "Direct comparison on RTX 4070 with and without Multi-Token Prediction (MTP). Average Speedup: 2.0x.",
-        hasComparison: true,
-        metrics: [
-          { title: "Baseline Avg", value: "59.9 t/s" },
-          { title: "MTP Peak", value: "135.7 t/s" },
-          { title: "MTP Avg", value: "120.8 t/s" },
-          { title: "Accept Rate", value: "65.8%" }
-        ],
-        tasks: [
-          { name: "stepwise_math", baseline: 59.8, mtp: 135.7, accept: "81.8%" },
-          { name: "summarize", baseline: 59.9, mtp: 133.5, accept: "79.8%" },
-          { name: "code_python", baseline: 59.9, mtp: 130.5, accept: "77.3%" },
-          { name: "translation", baseline: 60.0, mtp: 128.6, accept: "75.4%" },
-          { name: "code_cpp", baseline: 60.0, mtp: 120.4, accept: "68.4%" },
-          { name: "long_code_review", baseline: 57.6, mtp: 111.7, accept: "63.4%" },
-          { name: "qa_factual", baseline: 59.9, mtp: 107.2, accept: "57.1%" },
-          { name: "explain_concept", baseline: 59.9, mtp: 105.7, accept: "55.9%" },
-          { name: "creative_short", baseline: 60.0, mtp: 94.0, accept: "45.8%" }
-        ]
-      },
-      "gemma4-26b": {
-        title: "Gemma 4 26B-A4B MoE Benchmarks",
-        description: "Comparing 26B MoE configurations. Dynamic Q5 base spills to CPU, while Q4 QAT fits entirely in VRAM, enabling actual MTP draft speedups.",
-        hasComparison: true,
-        metrics: [
-          { title: "Baseline (Q5)", value: "38.5 t/s" },
-          { title: "QAT Only", value: "69.0 t/s" },
-          { title: "QAT + MTP", value: "100.6 t/s" },
-          { title: "Speedup Factor", value: "2.61x" }
-        ],
-        tasks: [
-          { name: "stepwise_math", baseline: 44.45, mtp: 57.77, accept: "81.6%" },
-          { name: "translation", baseline: 44.59, mtp: 49.60, accept: "82.5%" },
-          { name: "qa_factual", baseline: 44.66, mtp: 49.57, accept: "80.6%" },
-          { name: "code_python", baseline: 44.62, mtp: 45.99, accept: "60.3%" },
-          { name: "code_cpp", baseline: 44.78, mtp: 45.10, accept: "70.5%" },
-          { name: "creative_short", baseline: 45.32, mtp: 40.96, accept: "66.0%" },
-          { name: "summarize", baseline: 44.94, mtp: 32.31, accept: "38.3%" },
-          { name: "long_code_review", baseline: 43.98, mtp: 26.22, accept: "28.2%" },
-          { name: "explain_concept", baseline: 44.74, mtp: 25.80, accept: "31.4%" }
-        ]
-      },
-      "qwen3-6-35b": {
-        title: "Qwen 3.6 35B-A3B MTP Benchmarks",
-        description: "Evaluations for Qwen 3.6 35B showing strong draft acceptance rates, hitting up to 74 t/s on 12GB hardware.",
-        hasComparison: true,
-        metrics: [
-          { title: "Baseline Avg", value: "51.3 t/s" },
-          { title: "MTP Peak", value: "74.0 t/s" },
-          { title: "MTP Avg", value: "68.5 t/s" },
-          { title: "Accept Rate", value: "82.7%" }
-        ],
-        tasks: [
-          { name: "code_python", baseline: 51.31, mtp: 73.97, accept: "96.2%" },
-          { name: "qa_factual", baseline: 51.77, mtp: 71.61, accept: "87.7%" },
-          { name: "code_cpp", baseline: 51.24, mtp: 70.15, accept: "85.7%" },
-          { name: "translation", baseline: 51.25, mtp: 69.71, accept: "81.3%" },
-          { name: "stepwise_math", baseline: 51.10, mtp: 69.11, accept: "85.1%" },
-          { name: "explain_concept", baseline: 51.22, mtp: 67.33, accept: "81.9%" },
-          { name: "summarize", baseline: 51.15, mtp: 67.06, accept: "80.0%" },
-          { name: "long_code_review", baseline: 51.04, mtp: 65.03, accept: "77.9%" },
-          { name: "creative_short", baseline: 51.36, mtp: 62.20, accept: "70.3%" }
-        ]
-      }
-    };
-
-    const archivedModels = [
-      {
-        name: "Gemma 4 26B (Standard / Non-QAT)",
-        profiles: "gemma-4-26b-a4b, gemma-4-26b-mtp, gemma-4-26b-mtp-q6",
-        reason: "Replaced by Quantization-Aware Training (QAT) variants. The standard 26B baseline model (~18 GB) exceeded VRAM limits and spilled to CPU RAM (reducing speed to ~38 t/s). QAT models (UD-Q4_K_XL at ~14.2 GB) fit entirely in VRAM, driving speed up to 69 t/s (baseline) and 100+ t/s (MTP).",
-        dateRetired: "June 2026",
-        replacement: "gemma-4-26b-qat-mtp"
-      },
-      {
-        name: "Mistral Small 4 119B MoE Family",
-        profiles: "mistral-small-4-119b, -optimized, -no-vision, -no-vision-thinking, -vision",
-        reason: "Extremely heavy parameters for a 12GB VRAM setup. Even with aggressive CPU offloading and expert filtering via ik_llama.cpp, generation latencies remained high. Deprecated to reclaim ~65 GB of storage.",
-        dateRetired: "May 2026",
-        replacement: "gpt-oss-120b (better expert/reasoning efficiency)"
-      },
-      {
-        name: "NVIDIA Nemotron 3 Super 120B",
-        profiles: "nemotron-super-120b (UD-Q3_K_XL)",
-        reason: "Retired to free up storage space. Standard post-training quantization at 3-bit precision suffered quality loss compared to newer models, and throughput was slow due to high parameter size on a single node.",
-        dateRetired: "April 2026",
-        replacement: "gpt-oss-120b"
-      },
-      {
-        name: "Byteshape Qwen 3.6 35B MTP",
-        profiles: "byteshape/Qwen3.6-35B-A3B-MTP-GGUF",
-        reason: "Unoptimized or redundant relative to the final compiled Qwen 3.6 configurations in the main l3ms model store.",
-        dateRetired: "June 2026",
-        replacement: "qwen3-6-mtp"
-      },
-      {
-        name: "Qwen 3.6 35B Baseline (Non-MTP)",
-        profiles: "unsloth/Qwen3.6-35B-A3B-GGUF",
-        reason: "Deleted base models once MTP profiles were fully validated. The vision projector files (`mmproj-F16.gguf`) were copied and relocated to the active MTP folder to preserve vision processing while recovering ~25 GB of storage.",
-        dateRetired: "June 2026",
-        replacement: "qwen3-6-mtp-vision"
-      },
-      {
-        name: "OmniCoder 9B",
-        profiles: "Tesslate/OmniCoder-9B-GGUF",
-        reason: "Deprecated coding model. Replaced by the far more capable Qwen3-Coder-Next 80B MoE which utilizes expert splitting to maintain 40 t/s local throughput.",
-        dateRetired: "March 2026",
-        replacement: "qwen3-coder-next"
-      }
-    ];
-
-    let currentTab = "active-leaderboard";
-    let selectedRangeModel = "gemma4-12b";
-    let rangeMode = "compare";
-
-    document.addEventListener("DOMContentLoaded", () => {
-      initTabs();
-      renderLeaderboard();
-      initLeaderboardFilters();
-      renderRangeSelectors();
-      renderRangeChart();
-      renderArchivedModels();
-      
-      setTimeout(animateProgressBars, 100);
-    });
-
-    function initTabs() {
-      const tabButtons = document.querySelectorAll(".tab-btn");
-      tabButtons.forEach(btn => {
-        btn.addEventListener("click", () => {
-          const targetTab = btn.getAttribute("data-tab");
-          
-          tabButtons.forEach(b => b.classList.remove("active"));
-          btn.classList.add("active");
-
-          document.querySelectorAll(".tab-panel").forEach(panel => {
-            panel.classList.remove("active");
-          });
-          document.getElementById(targetTab).classList.add("active");
-
-          currentTab = targetTab;
-          
-          if (targetTab === "active-leaderboard") {
-            setTimeout(animateProgressBars, 50);
-          } else if (targetTab === "perf-ranges") {
-            setTimeout(animateRangeBars, 50);
-          }
-        });
+    function filteredModels() {
+      const needle = searchTerm.trim().toLowerCase();
+      return models.filter(model => {
+        const filterMatch = activeFilter === "All" || model.tags.includes(activeFilter);
+        const haystack = [model.name, model.description, model.quant, model.context, ...model.tags].join(" ").toLowerCase();
+        return filterMatch && (!needle || haystack.includes(needle));
       });
     }
 
-    function renderLeaderboard(searchTerm = "", activeFilter = "all") {
-      const tbody = document.getElementById("leaderboard-tbody");
-      tbody.innerHTML = "";
-      
-      const maxTps = Math.max(...servedModels.map(m => m.tps));
-
-      const filtered = servedModels.filter(model => {
-        const matchesSearch = model.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                              model.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                              model.quant.toLowerCase().includes(searchTerm.toLowerCase());
-        
-        if (!matchesSearch) return false;
-
-        if (activeFilter === "mtp") return model.isMtp;
-        if (activeFilter === "vision") return model.isVision;
-        if (activeFilter === "moe") return model.isMoe;
-        if (activeFilter === "qat") return model.isQat;
-        return true;
-      });
-
-      if (filtered.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="5" style="text-align: center; color: var(--text-muted); padding: 3rem;">NO ACTIVE PROFILES FOUND.</td></tr>`;
+    function renderModels() {
+      const visible = filteredModels();
+      const table = document.getElementById("model-table-body");
+      const mobile = document.getElementById("mobile-models");
+      if (!visible.length) {
+        table.innerHTML = '<tr><td colspan="6" class="empty">No matching profiles.</td></tr>';
+        mobile.innerHTML = '<div class="surface empty">No matching profiles.</div>';
         return;
       }
 
-      filtered.forEach((model, index) => {
-        const rank = index + 1;
-        const barPercentage = (model.tps / maxTps) * 100;
-        
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td style="font-weight: 800; color: ${rank === 1 ? 'var(--color-green)' : rank === 2 ? 'var(--color-blue)' : 'var(--text-muted)'}; padding-left: 1rem;">
-            [0${rank}]
-          </td>
-          <td>
-            <div class="model-name-cell">
-              <span class="model-id">${model.name}</span>
-              <span class="model-desc">${model.description}</span>
-              <div class="badge-row">
-                ${model.preload ? '<span class="badge badge-preload">Preload</span>' : ''}
-                ${model.isMtp ? '<span class="badge badge-mtp">MTP</span>' : ''}
-                ${model.isVision ? '<span class="badge badge-vision">Vision</span>' : ''}
-                ${model.isMoe ? '<span class="badge badge-moe">MoE</span>' : ''}
-                ${model.isQat ? '<span class="badge badge-qat">QAT</span>' : ''}
-              </div>
-            </div>
-          </td>
-          <td>
-            <span>${model.context}</span>
-          </td>
-          <td>
-            <span class="badge" style="background: transparent; color: var(--text-main); font-family: inherit; font-size: 0.75rem;">${model.quant}</span>
-          </td>
-          <td class="tps-cell">
-            <div class="tps-header-wrapper">
-              <span class="tps-number">${model.tps.toFixed(1)}</span>
-              <span class="tps-unit">t/s</span>
-            </div>
-            <div class="tps-bar-bg">
-              <div class="tps-bar-fill" data-percentage="${barPercentage}%"></div>
-            </div>
-          </td>
-        `;
-        tbody.appendChild(tr);
-      });
+      table.innerHTML = visible.map(model => `
+        <tr class="model-row">
+          <td class="rank">[${rankFor(model)}]</td>
+          <td><span class="model-name">${escapeHtml(model.name)}</span><span class="model-description">${escapeHtml(model.description)}</span><div class="badge-row">${badges(model)}</div></td>
+          <td>${escapeHtml(model.context)}</td>
+          <td><span class="badge">${escapeHtml(model.quant)}</span></td>
+          <td class="throughput"><span class="throughput-value">${model.tps.toFixed(1)}</span> <span class="throughput-unit">t/s</span><div class="bar-track"><div class="bar" style="width:${barWidth(model)}%"></div></div></td>
+          <td><button class="button" data-toggle="${escapeHtml(model.id)}" aria-expanded="false">Command</button></td>
+        </tr>
+        <tr class="details-row" data-detail-row="${escapeHtml(model.id)}" hidden><td colspan="6" class="details-cell">${modelDetails(model)}</td></tr>
+      `).join("");
+
+      mobile.innerHTML = visible.map(model => `
+        <article class="mobile-card surface">
+          <div class="mobile-card-head"><div><span class="label">[${rankFor(model)}]</span><div class="model-name">${escapeHtml(model.name)}</div></div><div class="mobile-speed">${model.tps.toFixed(1)}<span class="throughput-unit"> t/s</span></div></div>
+          <span class="model-description">${escapeHtml(model.description)}</span>
+          <div class="mobile-meta"><span>${escapeHtml(model.context)}</span><span>${escapeHtml(model.quant)}</span></div>
+          <div class="badge-row">${badges(model)}</div>
+          <button class="button" data-toggle="${escapeHtml(model.id)}" aria-expanded="false" style="margin-top:.7rem">Show command</button>
+          <div data-mobile-detail="${escapeHtml(model.id)}" hidden>${modelDetails(model)}</div>
+        </article>
+      `).join("");
     }
 
-    function animateProgressBars() {
-      document.querySelectorAll(".tps-bar-fill").forEach(bar => {
-        bar.style.width = bar.getAttribute("data-percentage");
-      });
+    function toggleDetails(modelId, button) {
+      const desktopRow = document.querySelector(`[data-detail-row="${CSS.escape(modelId)}"]`);
+      const mobileDetail = document.querySelector(`[data-mobile-detail="${CSS.escape(modelId)}"]`);
+      const target = window.matchMedia("(max-width: 760px)").matches ? mobileDetail : desktopRow;
+      const willOpen = target.hasAttribute("hidden");
+      target.toggleAttribute("hidden", !willOpen);
+      button.setAttribute("aria-expanded", String(willOpen));
+      button.textContent = willOpen ? "Hide command" : "Command";
     }
 
-    function initLeaderboardFilters() {
-      const searchInput = document.getElementById("model-search");
-      const filterTags = document.querySelectorAll(".filter-tag");
-
-      const handleFilterChange = () => {
-        const searchTerm = searchInput.value;
-        const activeFilter = document.querySelector(".filter-tag.active").getAttribute("data-filter");
-        renderLeaderboard(searchTerm, activeFilter);
-        setTimeout(animateProgressBars, 20);
-      };
-
-      searchInput.addEventListener("input", handleFilterChange);
-
-      filterTags.forEach(tag => {
-        tag.addEventListener("click", () => {
-          filterTags.forEach(t => t.classList.remove("active"));
-          tag.classList.add("active");
-          handleFilterChange();
-        });
-      });
-    }
-
-    function renderRangeSelectors() {
-      const pane = document.getElementById("range-selectors");
-      pane.innerHTML = "";
-
-      Object.keys(rangeBenchmarks).forEach(key => {
-        const bench = rangeBenchmarks[key];
-        const card = document.createElement("div");
-        card.className = `selector-card ${key === selectedRangeModel ? 'active' : ''}`;
-        card.setAttribute("data-key", key);
-        card.innerHTML = `
-          <span class="selector-card-title">${bench.title}</span>
-          <span class="selector-card-desc">${bench.tasks.length} tasks</span>
-        `;
-        
-        card.addEventListener("click", () => {
-          document.querySelectorAll(".selector-card").forEach(c => c.classList.remove("active"));
-          card.classList.add("active");
-          selectedRangeModel = key;
-          renderRangeChart();
-        });
-
-        pane.appendChild(card);
-      });
-    }
-
-    function renderRangeChart() {
-      const modelData = rangeBenchmarks[selectedRangeModel];
-      document.getElementById("chart-model-title").innerText = modelData.title;
-      document.getElementById("chart-model-desc").innerText = modelData.description;
-      
-      const toggle = document.getElementById("chart-comparison-toggle");
-      if (modelData.hasComparison) {
-        toggle.style.display = "flex";
-      } else {
-        toggle.style.display = "none";
+    async function copyCommand(modelId, button) {
+      const model = models.find(item => item.id === modelId);
+      try {
+        await navigator.clipboard.writeText(model.command);
+        button.textContent = "Copied";
+      } catch {
+        const fallback = document.createElement("textarea");
+        fallback.value = model.command;
+        fallback.setAttribute("readonly", "");
+        fallback.style.position = "fixed";
+        fallback.style.opacity = "0";
+        document.body.appendChild(fallback);
+        fallback.select();
+        button.textContent = document.execCommand("copy") ? "Copied" : "Clipboard blocked";
+        fallback.remove();
       }
-
-      const metricsSummary = document.getElementById("chart-metrics");
-      metricsSummary.innerHTML = "";
-      modelData.metrics.forEach(metric => {
-        const card = document.createElement("div");
-        card.className = "metric-card";
-        card.innerHTML = `
-          <span class="metric-title">${metric.title}</span>
-          <span class="metric-val">${metric.value}</span>
-        `;
-        metricsSummary.appendChild(card);
-      });
-
-      const container = document.getElementById("chart-bars");
-      container.innerHTML = "";
-
-      let maxVal = 0;
-      modelData.tasks.forEach(t => {
-        if (t.baseline > maxVal) maxVal = t.baseline;
-        if (t.mtp && t.mtp > maxVal) maxVal = t.mtp;
-      });
-      maxVal = maxVal * 1.05;
-
-      modelData.tasks.forEach(task => {
-        const row = document.createElement("div");
-        row.className = "chart-row";
-        
-        let barHtml = "";
-        
-        if (rangeMode === "compare" && task.mtp !== undefined) {
-          const basePct = (task.baseline / maxVal) * 100;
-          const mtpPct = (task.mtp / maxVal) * 100;
-          
-          barHtml = `
-            <div class="chart-bar-bg"></div>
-            <div class="compare-bar-1" data-width="${basePct}%" title="Baseline: ${task.baseline} t/s"></div>
-            <div class="compare-bar-2" data-width="${mtpPct}%" title="MTP: ${task.mtp} t/s"></div>
-            <div class="chart-bar-values">
-              <span style="color: var(--color-pink); margin-right: 0.4rem;">${task.baseline.toFixed(0)}</span>
-              <span style="color: var(--color-green); font-weight: 700;">${task.mtp.toFixed(0)}</span>
-              <span class="accept-rate-marker">[${task.accept}]</span>
-            </div>
-          `;
-        } else {
-          const minVal = Math.min(task.baseline, task.mtp || task.baseline);
-          const maxValTask = Math.max(task.baseline, task.mtp || task.baseline);
-          
-          const leftPct = (minVal / maxVal) * 100;
-          const widthPct = ((maxValTask - minVal) / maxVal) * 100 || 2;
-          
-          barHtml = `
-            <div class="chart-bar-bg"></div>
-            <div class="range-bar" data-left="${leftPct}%" data-width="${widthPct}%"></div>
-            <div class="chart-bar-values">
-              <span>${minVal.toFixed(0)}-${maxValTask.toFixed(0)} t/s</span>
-            </div>
-          `;
-        }
-
-        row.innerHTML = `
-          <div class="chart-label" title="${task.name}">${task.name}</div>
-          <div class="chart-bar-area">${barHtml}</div>
-        `;
-        container.appendChild(row);
-      });
-
-      const toggleButtons = document.querySelectorAll("#chart-comparison-toggle .toggle-btn");
-      toggleButtons.forEach(btn => {
-        const newBtn = btn.cloneNode(true);
-        btn.parentNode.replaceChild(newBtn, btn);
-        
-        newBtn.classList.toggle("active", newBtn.getAttribute("data-mode") === rangeMode);
-        
-        newBtn.addEventListener("click", () => {
-          rangeMode = newBtn.getAttribute("data-mode");
-          renderRangeChart();
-        });
-      });
-
-      setTimeout(animateRangeBars, 20);
+      setTimeout(() => { button.textContent = "Copy command"; }, 1400);
     }
 
-    function animateRangeBars() {
-      document.querySelectorAll(".compare-bar-1").forEach(bar => {
-        bar.style.width = bar.getAttribute("data-width");
-      });
-      document.querySelectorAll(".compare-bar-2").forEach(bar => {
-        bar.style.width = bar.getAttribute("data-width");
-      });
-      document.querySelectorAll(".range-bar").forEach(bar => {
-        bar.style.left = bar.getAttribute("data-left");
-        bar.style.width = bar.getAttribute("data-width");
-      });
+    function renderBenchmarks() {
+      const entries = Object.entries(dashboard.benchmarks);
+      document.getElementById("benchmark-list").innerHTML = entries.map(([key, bench]) => `
+        <button class="benchmark-selector ${key === activeBenchmark ? "active" : ""}" data-benchmark="${escapeHtml(key)}">${escapeHtml(bench.title)}<small>${bench.tasks.length} tasks</small></button>
+      `).join("");
+      const bench = dashboard.benchmarks[activeBenchmark];
+      document.getElementById("benchmark-title").textContent = bench.title;
+      document.getElementById("benchmark-description").textContent = bench.description;
+      const max = Math.max(...bench.tasks.flatMap(task => [task[1], task[2]]));
+      document.getElementById("benchmark-chart").innerHTML = bench.tasks.map(([name, baseline, mtp, accept]) => `
+        <div class="chart-row"><div class="chart-label" title="${escapeHtml(name)}">${escapeHtml(name)}</div><div class="chart-bars"><div class="chart-bar baseline" style="width:${baseline / max * 100}%"></div><div class="chart-bar mtp" style="width:${mtp / max * 100}%"></div><span class="chart-values"><span style="color:var(--pink)">${baseline.toFixed(0)}</span> / <span class="accept">${mtp.toFixed(0)} [${escapeHtml(accept)}]</span></span></div></div>
+      `).join("");
+      document.getElementById("benchmark-metrics").innerHTML = bench.metrics.map(([label, value]) => `<div class="metric"><span class="label">${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("");
     }
 
-    function renderArchivedModels() {
-      const container = document.getElementById("archive-list-container");
-      container.innerHTML = "";
-
-      archivedModels.forEach(model => {
-        const card = document.createElement("div");
-        card.className = "archive-card";
-        card.innerHTML = `
-          <div class="archive-card-header">
-            <h4 class="archive-title">${model.name}</h4>
-            <span class="badge" style="border-color: var(--border); color: var(--text-muted);">DEPRECATED</span>
-          </div>
-          <p style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.4;">${model.reason}</p>
-          <div class="archive-details">
-            <div class="archive-detail-item">
-              <span class="archive-detail-label">Profiles Retired</span>
-              <span class="archive-detail-val" style="color: var(--color-pink); font-size: 0.7rem;">${model.profiles}</span>
-            </div>
-            <div class="archive-detail-item">
-              <span class="archive-detail-label">Date Retired</span>
-              <span class="archive-detail-val">${model.dateRetired}</span>
-            </div>
-            <div class="archive-detail-item" style="grid-column: span 2; border-top: 1px dashed var(--border); padding-top: 0.4rem; margin-top: 0.2rem;">
-              <span class="archive-detail-label">Recommended Replacement</span>
-              <span class="archive-detail-val replacement">==> ${model.replacement}</span>
-            </div>
-          </div>
-        `;
-        container.appendChild(card);
-      });
+    function renderArchive() {
+      document.getElementById("archive-list").innerHTML = dashboard.archived.map(model => `
+        <article class="archive-card surface"><h3>${escapeHtml(model.name)}</h3><p>${escapeHtml(model.reason)}</p><div class="archive-meta"><div><span class="label">Retired</span><span class="detail-value">${escapeHtml(model.retired)}</span></div><div><span class="label">Replacement</span><span class="detail-value accent">${escapeHtml(model.replacement)}</span></div></div></article>
+      `).join("");
     }
+
+    document.addEventListener("click", event => {
+      const tab = event.target.closest("[data-tab]");
+      if (tab) {
+        document.querySelectorAll(".tab").forEach(item => item.classList.toggle("active", item === tab));
+        document.querySelectorAll(".tab-panel").forEach(panel => panel.classList.toggle("active", panel.id === `${tab.dataset.tab}-panel`));
+      }
+      const filter = event.target.closest("[data-filter]");
+      if (filter) {
+        activeFilter = filter.dataset.filter;
+        document.querySelectorAll(".filter").forEach(item => item.classList.toggle("active", item === filter));
+        renderModels();
+      }
+      const toggle = event.target.closest("[data-toggle]");
+      if (toggle) toggleDetails(toggle.dataset.toggle, toggle);
+      const copy = event.target.closest("[data-copy]");
+      if (copy) copyCommand(copy.dataset.copy, copy);
+      const benchmark = event.target.closest("[data-benchmark]");
+      if (benchmark) { activeBenchmark = benchmark.dataset.benchmark; renderBenchmarks(); }
+    });
+
+    document.getElementById("model-search").addEventListener("input", event => { searchTerm = event.target.value; renderModels(); });
+    document.getElementById("profile-count").textContent = models.length;
+    document.getElementById("system-gpu").textContent = dashboard.system.gpu;
+    document.getElementById("system-cpu").textContent = dashboard.system.cpu;
+    document.getElementById("system-ram").textContent = dashboard.system.ram;
+    document.getElementById("system-os").textContent = dashboard.system.os;
+    document.getElementById("methodology-copy").textContent = dashboard.methodology;
+    document.getElementById("generated-date").textContent = `Snapshot generated ${dashboard.generatedAt}`;
+    renderModels();
+    renderBenchmarks();
+    renderArchive();
   </script>
 </body>
 </html>

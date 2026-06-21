@@ -13,6 +13,16 @@ L3MS is built for developers who want script-first control with better ergonomic
 - Track live process output and runtime resource usage while a model is running
 - Use either a full TUI or interactive CLI commands (`--run`, `--bench`)
 
+## Public Dashboard
+
+The [L3MS profile dashboard](https://l3ms.carteakey.dev) publishes the active
+12 GB homelab configurations, measured generation throughput, task-level MTP
+comparisons, and the reasons older profiles were retired.
+
+Open any served profile to get a portable `llama-server` command generated
+from `llama-swap.yaml`. Public commands replace local model paths with shell
+variables and bind to `127.0.0.1` by default.
+
 ## Install
 
 ```bash
@@ -190,6 +200,26 @@ Throttle concurrency (useful on metered connections):
 | `--base-models-dir` | | Override base directory for auto-organized downloads |
 
 > **Note**: Run the script directly (`./model_downloader/download_hf_model.py`) rather than via `python3` to ensure the correct venv Python is used.
+
+## Dashboard Development
+
+The served-profile data and commands in `docs/generated-models.js` are
+generated from `llama-swap.yaml`. Presentation-only values such as measured
+throughput and benchmark comparisons live in `docs/dashboard-meta.json`.
+
+Regenerate after changing either source:
+
+```bash
+python3 docs/generate_dashboard_data.py
+```
+
+Preview locally:
+
+```bash
+python3 -m http.server 8080 -d docs
+```
+
+Do not edit `docs/generated-models.js` by hand.
 
 ## Versioning
 

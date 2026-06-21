@@ -70,6 +70,9 @@
 
 ## ✅ Done
 
+- ~~Generated public profile dashboard~~ — served profiles and portable
+  `llama-server` commands now derive from `llama-swap.yaml`; benchmark metadata
+  stays separate, rankings are deterministic, and mobile uses readable cards.
 - ~~TUI: teach Model Ops about llama-swap~~ — Run mode now reads from
   `/v1/models`; Start/Stop call `/models/load` and `/models/unload`;
   editor shows model state + curl snippets. Bench mode unchanged.

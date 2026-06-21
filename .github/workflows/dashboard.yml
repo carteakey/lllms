@@ -1,0 +1,22 @@
+name: Dashboard data
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify-generated-data:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Regenerate dashboard payload
+        run: python3 docs/generate_dashboard_data.py
+      - name: Check committed payload
+        run: git diff --exit-code -- docs/generated-models.js
