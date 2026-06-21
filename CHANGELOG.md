@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.5.1] - 2026-06-21
+
+### Fixed
+- Corrected the dashboard test GPU from RTX 4070 Super 12GB to RTX 4070 12GB.
+
 ## [0.5.0] - 2026-06-21
 
 ### Added

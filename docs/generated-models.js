@@ -2,7 +2,7 @@
 window.L3MS_DASHBOARD = {
   "generatedAt": "2026-06-21",
   "system": {
-    "gpu": "RTX 4070 Super 12GB",
+    "gpu": "RTX 4070 12GB",
     "cpu": "i5-12600K",
     "ram": "32GB DDR5-6000",
     "os": "CachyOS / CUDA"
