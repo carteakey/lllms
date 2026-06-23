@@ -838,6 +838,8 @@ fit-params emits it anyway (harmless).
 
 **Results (512pp + 128tg, 10 threads, FA=1, no-mmap, LLAMA_SET_ROWS=1, GGML_CUDA_GRAPH_OPT=1):**
 
+> Historical note: `LLAMA_SET_ROWS=1` was present for these runs, but current upstream llama.cpp does not read that environment variable. Treat it as a no-op when interpreting or reproducing the result.
+
 | Strategy | binary | ngl | pp (t/s) | tg (t/s) | RAM est. | Notes |
 |----------|--------|-----|----------|----------|----------|-------|
 | `N_CPU_MOE=36` | default | 99 | — | — | ~60 GB | **CRASHES 64 GB SYSTEM — do not use** |

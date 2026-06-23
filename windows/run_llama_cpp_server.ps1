@@ -43,7 +43,6 @@ Download-IfNeeded -Url $ModelUrl      -Destination $ModelFile
 # Download-IfNeeded -Url $DraftModelUrl -Destination $DraftModelFile
 
 # Row-major speedup
-$Env:LLAMA_SET_ROWS = '1'
 
 $Args = @(
     '--model',      $ModelFile,

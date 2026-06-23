@@ -19,7 +19,6 @@
 #   TASKS=1024,256 ./bench-ik-llama-cpp-gpt-oss-120b.sh
 #   N_GPU_LAYERS=37 FUSED_MOE=1 GROUPED_ROUTING=1 ./bench-ik-llama-cpp-gpt-oss-120b.sh
 
-export LLAMA_SET_ROWS="${LLAMA_SET_ROWS:-1}"
 export GGML_CUDA_GRAPH_OPT="${GGML_CUDA_GRAPH_OPT:-1}"
 
 MODEL="${MODEL:-/mnt/lab/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf}"

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.5.2] - 2026-06-22
+
+### Added
+- Added a machine-testing handoff for n-gram speculation, target/draft KV precision, CUDA graphs, ubatch sizing, prompt-cache reuse, imatrix quants, and future multi-GPU work.
+
+### Changed
+- Removed the inactive `LLAMA_SET_ROWS` environment variable from current serving profiles, benchmark scripts, and Windows launchers, then regenerated the dashboard commands.
+- Marked its appearance in an older benchmark result as historical context rather than an active recommendation.
+
 ## [0.5.1] - 2026-06-21
 
 ### Fixed

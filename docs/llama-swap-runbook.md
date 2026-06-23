@@ -115,7 +115,7 @@ curl -X POST http://localhost:8080/models/unload -d '{"model":"qwen3-coder-next"
    `cmd:` (using `${PORT}` for the upstream port) and a unique key.
 2. Reuse the existing macros (`${llama_server}`, `${chat_template}`,
    `${cpu_range}`) so per-host paths stay in one place.
-3. Add `env:` if the model needs `LLAMA_SET_ROWS` / `GGML_CUDA_GRAPH_OPT`
+3. Add `env:` if the model needs a runtime-specific toggle such as `GGML_CUDA_GRAPH_OPT`
    overrides.
 4. Restart: `systemctl --user restart llama-swap.service`.
 5. Verify: `curl -s http://localhost:8080/v1/models | jq '.data[].id'`.

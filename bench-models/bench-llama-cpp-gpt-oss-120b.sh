@@ -9,7 +9,6 @@
 # Simple patterns like ".ffn_.*_exps.=CPU" work correctly for this model.
 #
 # Env vars carried from run scripts:
-#   LLAMA_SET_ROWS=1        — row-interleaved tensor layout, helps hybrid CPU+GPU
 #   GGML_CUDA_GRAPH_OPT=1   — CUDA graph optimisation
 #   BATCH_SIZE=2048         — logical batch
 #   UBATCH_SIZE=512         — physical batch
@@ -28,7 +27,6 @@
 #   TASKS=1024,256 ./bench-llama-cpp-gpt-oss-120b.sh
 #   N_GPU_LAYERS=37 ./bench-llama-cpp-gpt-oss-120b.sh
 
-export LLAMA_SET_ROWS="${LLAMA_SET_ROWS:-1}"
 export GGML_CUDA_GRAPH_OPT="${GGML_CUDA_GRAPH_OPT:-1}"
 
 MODEL="${MODEL:-/mnt/lab/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf}"

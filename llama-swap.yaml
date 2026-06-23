@@ -45,7 +45,6 @@ models:
     name: "gpt-oss 120B (optimized, bench-derived static placement, reasoning=high)"
     description: "Production default. pp=427 tg=23.4 t/s. See docs/bench-runbook.md §8."
     env:
-      - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
@@ -76,7 +75,6 @@ models:
     description: "Pre-optimized variant using --fit. Keep for regression comparison."
     unlisted: true
     env:
-      - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
@@ -99,7 +97,6 @@ models:
     description: "Lower-latency variant. Preserved from run-llama-cpp-gpt-oss-low-120b.sh."
     unlisted: true
     env:
-      - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
@@ -123,7 +120,6 @@ models:
     name: "Qwen3-Coder-Next 80B.A3B (optimized, bench-derived static placement)"
     description: "Default coder. pp=502 tg=39.6 t/s @ 64k ctx. See bench-runbook.md §8."
     env:
-      - "LLAMA_SET_ROWS=1"
       # GRAPH_OPT=0: CUDA graph re-capture can OOM with tight VRAM headroom
       - "GGML_CUDA_GRAPH_OPT=0"
     cmd: |
@@ -149,7 +145,6 @@ models:
     description: "Pre-optimized variant using --fit @ 131k. Keep for long-context use."
     unlisted: true
     env:
-      - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
@@ -171,7 +166,6 @@ models:
     description: "ik_llama fork binary, --n-cpu-moe 38 @ 131k. Preserved from run-llama-cpp-qwen3-coder-next-test.sh."
     unlisted: true
     env:
-      - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
       taskset -c ${cpu_range} ${ik_server}
@@ -194,7 +188,6 @@ models:
   "qwen3-6-mtp":
     name: "Qwen3.6-35B-A3B MTP (UD-Q4_K_XL)"
     env:
-      - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
@@ -219,7 +212,6 @@ models:
   "qwen3-6-mtp-vision":
     name: "Qwen3.6-35B-A3B MTP (UD-Q4_K_XL, vision/mmproj-F16)"
     env:
-      - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=0"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
@@ -245,7 +237,6 @@ models:
   "qwen3-6-mtp-q6":
     name: "Qwen3.6-35B-A3B MTP (UD-Q6_K)"
     env:
-      - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
@@ -275,7 +266,6 @@ models:
   #   name: "Mistral-Small-4-119B-2603 (standard, --fit)"
   #   description: "Baseline validation preset. Use -optimized for throughput."
   #   env:
-  #     - "LLAMA_SET_ROWS=1"
   #     - "GGML_CUDA_GRAPH_OPT=1"
   #   cmd: |
   #     taskset -c ${cpu_range} ${llama_server}
@@ -297,7 +287,6 @@ models:
   # "mistral-small-4-119b-optimized":
   #   name: "Mistral-Small-4-119B-2603 (optimized, static -ot)"
   #   env:
-  #     - "LLAMA_SET_ROWS=1"
   #     - "GGML_CUDA_GRAPH_OPT=1"
   #   cmd: |
   #     taskset -c ${cpu_range} ${llama_server}
@@ -321,7 +310,6 @@ models:
   # "mistral-small-4-119b-no-vision":
   #   name: "Mistral-Small-4-119B-2603 (optimized, text-only)"
   #   env:
-  #     - "LLAMA_SET_ROWS=1"
   #     - "GGML_CUDA_GRAPH_OPT=1"
   #   cmd: |
   #     taskset -c ${cpu_range} ${llama_server}
@@ -344,7 +332,6 @@ models:
   # "mistral-small-4-119b-no-vision-thinking":
   #   name: "Mistral-Small-4-119B-2603 (optimized, text-only, reasoning=high)"
   #   env:
-  #     - "LLAMA_SET_ROWS=1"
   #     - "GGML_CUDA_GRAPH_OPT=1"
   #   cmd: |
   #     taskset -c ${cpu_range} ${llama_server}
@@ -371,7 +358,6 @@ models:
   #   name: "Mistral-Small-4-119B-2603 (optimized, vision/mmproj)"
   #   description: "One fewer GPU layer than non-vision to leave headroom for mmproj path."
   #   env:
-  #     - "LLAMA_SET_ROWS=1"
   #     - "GGML_CUDA_GRAPH_OPT=1"
   #   cmd: |
   #     taskset -c ${cpu_range} ${llama_server}
@@ -399,7 +385,6 @@ models:
   # "nemotron-super-120b":
   #   name: "NVIDIA-Nemotron-3-Super-120B-A12B (UD-Q3_K_XL)"
   #   env:
-  #     - "LLAMA_SET_ROWS=1"
   #     - "GGML_CUDA_GRAPH_OPT=1"
   #   cmd: |
   #     taskset -c ${cpu_range} ${llama_server}
@@ -418,7 +403,6 @@ models:
   "gemma-4-26b-qat":
     name: "gemma-4-26B QAT (UD-Q4_K_XL, text, 131k ctx)"
     env:
-      - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
@@ -440,7 +424,6 @@ models:
   "gemma-4-26b-qat-mtp":
     name: "gemma-4-26B QAT + MTP (UD-Q4_K_XL + Assistant, 131k ctx)"
     env:
-      - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
@@ -466,7 +449,6 @@ models:
   "gemma-4-26b-qat-mtp-vision":
     name: "Gemma 4 26B QAT + MTP (UD-Q4_K_XL + Assistant, vision, Mainline)"
     env:
-      - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=0"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
@@ -493,7 +475,6 @@ models:
   "gemma-4-12b-qat":
     name: "gemma-4-12B QAT (UD-Q4_K_XL, text, 131k ctx)"
     env:
-      - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
@@ -515,7 +496,6 @@ models:
   "gemma-4-12b-qat-mtp":
     name: "gemma-4-12B QAT + MTP (UD-Q4_K_XL + Assistant, 131k ctx)"
     env:
-      - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}
@@ -541,7 +521,6 @@ models:
   "gemma-4-12b-qat-mtp-vision":
     name: "gemma-4-12B QAT + MTP (UD-Q4_K_XL + Assistant, vision, 131k ctx)"
     env:
-      - "LLAMA_SET_ROWS=1"
       - "GGML_CUDA_GRAPH_OPT=0"
     cmd: |
       taskset -c ${cpu_range} ${llama_server}

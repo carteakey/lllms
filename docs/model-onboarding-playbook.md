@@ -44,7 +44,7 @@ Conventions:
   `${chat_template}`, `${cpu_range}`) — do not hardcode paths
 - `cmd:` must pass `--port ${PORT} --host 0.0.0.0` (llama-swap auto-assigns
   the upstream port; its listener stays on `:8080`)
-- put `LLAMA_SET_ROWS` / `GGML_CUDA_GRAPH_OPT` in `env:` per model
+- put runtime-specific toggles such as `GGML_CUDA_GRAPH_OPT` in `env:` per model
 - safe serving defaults (`--fit` or static `-ngl`+`-ot`, `--parallel 1`,
   `-ctk/-ctv q8_0`, `--flash-attn on`)
 - add reasoning-effort variants with `filters.setParamsByID` (aliases like

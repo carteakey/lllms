@@ -4,7 +4,6 @@ $ServerExe  = Join-Path $ScriptRoot 'vendor\llama.cpp\build\bin\llama-server.exe
 $ModelFile = 'D:\local-llm-env\models\ggml-org\gpt-oss-20b-GGUF\gpt-oss-20b-mxfp4.gguf'
 
 # Row-major speedup
-$Env:LLAMA_SET_ROWS = '1'
 
 $Args = @(
     '-m',            $ModelFile,
