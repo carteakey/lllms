@@ -17,6 +17,11 @@ DEFAULT_BASE_URL = os.environ.get("LLAMA_SWAP_URL", "http://localhost:8080")
 REQUEST_TIMEOUT = httpx.Timeout(5.0, connect=2.0)
 
 
+def auth_headers() -> dict[str, str]:
+    api_key = os.environ.get("LLAMA_SWAP_API_KEY", "").strip()
+    return {"Authorization": f"Bearer {api_key}"} if api_key else {}
+
+
 @dataclass
 class SwapModel:
     id: str
@@ -37,7 +42,9 @@ def _normalize_state(entry: dict) -> str:
 async def list_models(base_url: str = DEFAULT_BASE_URL) -> List[SwapModel]:
     """Return every servable model. Raises httpx errors on connection failure."""
     async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-        resp = await client.get(f"{base_url.rstrip('/')}/v1/models")
+        resp = await client.get(
+            f"{base_url.rstrip('/')}/v1/models", headers=auth_headers()
+        )
         resp.raise_for_status()
         data = resp.json().get("data", [])
     models = []
@@ -64,6 +71,7 @@ async def load_model(model_id: str, base_url: str = DEFAULT_BASE_URL) -> str:
         resp = await client.post(
             f"{base_url.rstrip('/')}/models/load",
             json={"model": model_id},
+            headers=auth_headers(),
         )
     return f"HTTP {resp.status_code} {resp.text.strip()[:200]}"
 
@@ -73,6 +81,7 @@ async def unload_model(model_id: str, base_url: str = DEFAULT_BASE_URL) -> str:
         resp = await client.post(
             f"{base_url.rstrip('/')}/models/unload",
             json={"model": model_id},
+            headers=auth_headers(),
         )
     return f"HTTP {resp.status_code} {resp.text.strip()[:200]}"
 
@@ -81,7 +90,9 @@ async def probe(base_url: str = DEFAULT_BASE_URL) -> Optional[str]:
     """Return an error string if llama-swap is unreachable, else None."""
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-            resp = await client.get(f"{base_url.rstrip('/')}/v1/models")
+            resp = await client.get(
+                f"{base_url.rstrip('/')}/v1/models", headers=auth_headers()
+            )
             resp.raise_for_status()
         return None
     except httpx.HTTPError as exc:

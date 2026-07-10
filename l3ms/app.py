@@ -18,6 +18,7 @@ from textual import on
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.events import Key
 from textual.message import Message
 from textual.screen import ModalScreen, Screen
 from textual.widgets import (
@@ -177,6 +178,88 @@ def _format_mtime(timestamp: float) -> str:
 class ShortcutStrip(Static):
     def __init__(self, text: str) -> None:
         super().__init__(text, classes="key_hint shortcut_strip")
+
+
+_NAV_KEY_ACTIONS = {
+    "f1": "nav_workbench",
+    "f2": "nav_run",
+    "f3": "nav_chat",
+    "f4": "nav_browser",
+    "f5": "nav_download",
+    "f6": "nav_jobs",
+    "f7": "nav_maintenance",
+    "alt+1": "nav_workbench",
+    "alt+2": "nav_run",
+    "alt+3": "nav_chat",
+    "alt+4": "nav_browser",
+    "alt+5": "nav_download",
+    "alt+6": "nav_jobs",
+    "alt+7": "nav_maintenance",
+}
+
+
+class NavInput(Input):
+    BINDINGS = [
+        *Input.BINDINGS,
+        Binding("f1", "app.nav_workbench", "Workbench", show=False, priority=True),
+        Binding("f2", "app.nav_run", "Ops", show=False, priority=True),
+        Binding("f3", "app.nav_chat", "Chat", show=False, priority=True),
+        Binding("f4", "app.nav_browser", "Browser", show=False, priority=True),
+        Binding("f5", "app.nav_download", "Download", show=False, priority=True),
+        Binding("f6", "app.nav_jobs", "Jobs", show=False, priority=True),
+        Binding(
+            "f7",
+            "app.nav_maintenance",
+            "Maintenance",
+            show=False,
+            priority=True,
+        ),
+    ]
+
+    async def _on_key(self, event: Key) -> None:
+        action = _NAV_KEY_ACTIONS.get(event.key)
+        if action:
+            event.stop()
+            event.prevent_default()
+            dispatch_nav = getattr(self.app, "dispatch_nav", None)
+            if dispatch_nav:
+                dispatch_nav(action)
+            else:
+                await self.app.run_action(action)
+            return
+        await super()._on_key(event)
+
+
+class NavTextArea(TextArea):
+    BINDINGS = [
+        *TextArea.BINDINGS,
+        Binding("f1", "app.nav_workbench", "Workbench", show=False, priority=True),
+        Binding("f2", "app.nav_run", "Ops", show=False, priority=True),
+        Binding("f3", "app.nav_chat", "Chat", show=False, priority=True),
+        Binding("f4", "app.nav_browser", "Browser", show=False, priority=True),
+        Binding("f5", "app.nav_download", "Download", show=False, priority=True),
+        Binding("f6", "app.nav_jobs", "Jobs", show=False, priority=True),
+        Binding(
+            "f7",
+            "app.nav_maintenance",
+            "Maintenance",
+            show=False,
+            priority=True,
+        ),
+    ]
+
+    async def _on_key(self, event: Key) -> None:
+        action = _NAV_KEY_ACTIONS.get(event.key)
+        if action:
+            event.stop()
+            event.prevent_default()
+            dispatch_nav = getattr(self.app, "dispatch_nav", None)
+            if dispatch_nav:
+                dispatch_nav(action)
+            else:
+                await self.app.run_action(action)
+            return
+        await super()._on_key(event)
 
 
 def _read_exact(handle: Any, size: int) -> bytes:
@@ -386,7 +469,7 @@ class DownloadPanel(Static):
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel"):
             with Horizontal(classes="row"):
-                yield Input(value=str(self.config_path), id="config_path")
+                yield NavInput(value=str(self.config_path), id="config_path")
                 yield Button("Load", id="btn_load")
                 yield Button("Save", id="btn_save", variant="success")
                 yield Button("Validate", id="btn_validate")
@@ -394,10 +477,10 @@ class DownloadPanel(Static):
                 yield Button("Restore", id="btn_restore")
 
             with Horizontal(classes="row"):
-                yield Input(placeholder="base_models_dir", id="base_models_dir")
+                yield NavInput(placeholder="base_models_dir", id="base_models_dir")
                 yield Checkbox("slow preset (4 workers)", value=True, id="slow_flag")
-                yield Input(placeholder="max workers override", id="max_workers")
-                yield Input(placeholder="save note", id="save_note")
+                yield NavInput(placeholder="max workers override", id="max_workers")
+                yield NavInput(placeholder="save note", id="save_note")
                 yield Static("💾 —", id="disk_space_label")
 
             with Horizontal(classes="row main"):
@@ -418,18 +501,18 @@ class DownloadPanel(Static):
                 with Vertical(classes="right"):
                     yield Label("Model Editor")
                     yield Checkbox("enabled", id="m_enabled", value=True)
-                    yield Input(placeholder="repo_id", id="m_repo_id")
-                    yield Input(placeholder="description", id="m_description")
-                    yield Input(placeholder="local_dir", id="m_local_dir")
-                    yield Input(placeholder="revision", id="m_revision")
-                    yield Input(
+                    yield NavInput(placeholder="repo_id", id="m_repo_id")
+                    yield NavInput(placeholder="description", id="m_description")
+                    yield NavInput(placeholder="local_dir", id="m_local_dir")
+                    yield NavInput(placeholder="revision", id="m_revision")
+                    yield NavInput(
                         placeholder="allow_patterns (comma separated)", id="m_allow"
                     )
-                    yield Input(
+                    yield NavInput(
                         placeholder="ignore_patterns (comma separated)", id="m_ignore"
                     )
                     yield Checkbox("force_download", id="m_force", value=False)
-                    yield Input(
+                    yield NavInput(
                         placeholder="max_workers (blank = null)", id="m_workers"
                     )
 
@@ -930,8 +1013,8 @@ class RunPanel(Static):
                 yield Static("Resources: idle", id="run_resources")
 
             with Horizontal(classes="row"):
-                yield Input(placeholder="filter scripts (Ctrl+F)", id="run_filter")
-                yield Input(
+                yield NavInput(placeholder="filter scripts (Ctrl+F)", id="run_filter")
+                yield NavInput(
                     placeholder="extra args appended to script", id="run_extra_args"
                 )
 
@@ -944,18 +1027,18 @@ class RunPanel(Static):
                     yield RichLog(id="run_log", wrap=True, markup=False)
 
                 with Vertical(classes="right"):
-                    yield Label("Script Editor")
+                    yield Label("Details", id="run_detail_title")
                     yield Static("No script selected", id="run_selected_path")
-                    with Horizontal(classes="row"):
+                    with Horizontal(classes="row", id="run_version_row"):
                         yield Select(
                             [], id="run_version_select", prompt="Script versions"
                         )
-                        yield Input(placeholder="save note", id="run_save_note")
-                    with Horizontal(classes="row"):
+                        yield NavInput(placeholder="save note", id="run_save_note")
+                    with Horizontal(classes="row", id="run_edit_actions"):
                         yield Button("Reload", id="run_edit_reload")
                         yield Button("Save", id="run_edit_save", variant="success")
                         yield Button("Restore", id="run_edit_restore")
-                    yield TextArea("", id="run_editor")
+                    yield NavTextArea("", id="run_editor")
 
     def on_mount(self) -> None:
         table = self.query_one("#run_scripts_table", DataTable)
@@ -963,7 +1046,30 @@ class RunPanel(Static):
         self._install_table_columns()
         self.refresh_script_inventory()
         self.refresh_binary_selector()
+        self._sync_mode_chrome()
         self.focus_table()
+
+    def _sync_mode_chrome(self) -> None:
+        run_mode = self.mode == "run"
+        self.query_one("#run_binary_select", Select).display = not run_mode
+        self.query_one("#run_binary_scan", Button).display = not run_mode
+        self.query_one("#run_extra_args", Input).display = not run_mode
+        self.query_one("#run_version_row", Horizontal).display = not run_mode
+        self.query_one("#run_edit_actions", Horizontal).display = not run_mode
+        self.query_one("#run_detail_title", Label).update(
+            "llama-swap Model" if run_mode else "Bench Script"
+        )
+        self.query_one("#run_filter", Input).placeholder = (
+            "filter llama-swap models (Ctrl+F)"
+            if run_mode
+            else "filter bench scripts (Ctrl+F)"
+        )
+        self.query_one("#run_start", Button).label = (
+            "Load (Ctrl+R)" if run_mode else "Start Bench (Ctrl+R)"
+        )
+        self.query_one("#run_stop", Button).label = (
+            "Unload (Ctrl+S)" if run_mode else "Stop (Ctrl+S)"
+        )
 
     def _install_table_columns(self) -> None:
         if self._installed_table_mode == self.mode:
@@ -1036,6 +1142,7 @@ class RunPanel(Static):
 
     def refresh_table(self) -> None:
         self._install_table_columns()
+        self._sync_mode_chrome()
         table = self.query_one("#run_scripts_table", DataTable)
         table.clear()
         filter_text = self.query_one("#run_filter", Input).value.strip().lower()
@@ -1098,6 +1205,9 @@ class RunPanel(Static):
             f"# name:   {model.name}" if model.name else "",
             f"# state:  {model.state}",
             f"# desc:   {model.description}" if model.description else "",
+            "",
+            "# If LLAMA_SWAP_API_KEY is set, add:",
+            "#   -H 'Authorization: Bearer $LLAMA_SWAP_API_KEY'",
             "",
             "# Trigger load:",
             f"curl -X POST {llama_swap.DEFAULT_BASE_URL}/models/load \\",
@@ -1610,12 +1720,12 @@ class ModelBrowserPanel(Static):
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel"):
             with Horizontal(classes="row"):
-                yield Input(placeholder="GGUF root directory", id="browser_root")
+                yield NavInput(placeholder="GGUF root directory", id="browser_root")
                 yield Checkbox("recursive", value=True, id="browser_recursive")
                 yield Button("Use Download Dir", id="browser_use_download_dir")
                 yield Button("Scan (Alt+R)", id="browser_scan", variant="success")
             with Horizontal(classes="row"):
-                yield Input(
+                yield NavInput(
                     placeholder="filter path / quant / architecture",
                     id="browser_filter",
                 )
@@ -2057,7 +2167,7 @@ class ChatPanel(Static):
             with Horizontal(classes="row"):
                 yield Static("◉ disconnected", id="chat_status")
                 yield Select([], id="chat_model_select", prompt="model")
-                yield Input(
+                yield NavInput(
                     value=str(self.DEFAULT_PORT),
                     placeholder="port",
                     id="chat_port",
@@ -2070,10 +2180,10 @@ class ChatPanel(Static):
 
             # Params row
             with Horizontal(classes="row chat_params_row"):
-                yield Input(placeholder="System prompt…", id="chat_system_prompt")
-                yield Input(value="0.8", id="chat_temp", classes="chat_small_input")
+                yield NavInput(placeholder="System prompt…", id="chat_system_prompt")
+                yield NavInput(value="0.8", id="chat_temp", classes="chat_small_input")
                 yield Label("Temp")
-                yield Input(
+                yield NavInput(
                     value="2048", id="chat_max_tokens", classes="chat_small_input"
                 )
                 yield Label("Max Tokens")
@@ -2089,7 +2199,7 @@ class ChatPanel(Static):
 
             # Input row
             with Horizontal(classes="row chat_input_row"):
-                yield Input(placeholder="Message… (Enter to send)", id="chat_input")
+                yield NavInput(placeholder="Message… (Enter to send)", id="chat_input")
                 yield Button("Send ↵", id="chat_send", variant="success")
 
             yield ShortcutStrip(
@@ -2117,7 +2227,10 @@ class ChatPanel(Static):
     async def _probe_models(self, port: int) -> List[str]:
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
-                r = await client.get(f"http://localhost:{port}/v1/models")
+                r = await client.get(
+                    f"http://localhost:{port}/v1/models",
+                    headers=llama_swap.auth_headers(),
+                )
                 if r.status_code == 200:
                     data = r.json()
                     return [
@@ -2234,7 +2347,13 @@ class ChatPanel(Static):
         try:
             async with httpx.AsyncClient(timeout=None) as client:
                 async with client.stream(
-                    "POST", url, json=payload, headers={"Accept": "text/event-stream"}
+                    "POST",
+                    url,
+                    json=payload,
+                    headers={
+                        **llama_swap.auth_headers(),
+                        "Accept": "text/event-stream",
+                    },
                 ) as resp:
                     if resp.status_code != 200:
                         self._log(f"[red]Server error {resp.status_code}[/red]")
@@ -2418,7 +2537,7 @@ class MaintenancePanel(Static):
                 yield Button("■ Stop (Ctrl+S)", id="maint_stop", variant="error")
                 yield Static("idle", id="maint_status")
             with Horizontal(classes="row"):
-                yield Input(placeholder="filter", id="maint_filter")
+                yield NavInput(placeholder="filter", id="maint_filter")
             with Horizontal(classes="row main"):
                 with Vertical(classes="left"):
                     yield DataTable(id="maint_table")
@@ -2429,7 +2548,7 @@ class MaintenancePanel(Static):
                     with Horizontal(classes="row"):
                         yield Button("Save", id="maint_edit_save", variant="success")
                         yield Button("Reload", id="maint_edit_reload")
-                    yield TextArea("", id="maint_editor")
+                    yield NavTextArea("", id="maint_editor")
             yield ShortcutStrip(
                 "Core: Ctrl+R run · Ctrl+S stop · Ctrl+L clear log · ? full shortcuts"
             )
@@ -2769,67 +2888,267 @@ class JobsPanel(Static):
         self.set_status_label("history: cleared")
 
 
-_START_ACTIONS: Dict[str, str] = {
-    "start_open_download": "tab_download",
-    "start_open_run": "tab_run",
-    "start_open_chat": "tab_chat",
-    "start_open_browser": "tab_browser",
-    "start_open_maintenance": "tab_maintenance",
-    "start_open_jobs": "tab_jobs",
-    "start_show_help": "show_help",
-    "start_show_palette": "show_command_palette",
+_WORKBENCH_ACTIONS: Dict[str, str] = {
+    "workbench_open_download": "nav_download",
+    "workbench_open_run": "nav_run",
+    "workbench_open_chat": "nav_chat",
+    "workbench_open_browser": "nav_browser",
+    "workbench_open_maintenance": "nav_maintenance",
+    "workbench_open_jobs": "nav_jobs",
+    "workbench_show_help": "show_help",
+    "workbench_show_palette": "show_command_palette",
 }
 
 
-class StartPanel(Static):
+class WorkbenchPanel(Static):
+    class LoadRequested(Message):
+        def __init__(self, model_id: str) -> None:
+            super().__init__()
+            self.model_id = model_id
+
     def __init__(self) -> None:
-        super().__init__(id="start_panel")
+        super().__init__(id="workbench_panel")
+        self.models: List[llama_swap.SwapModel] = []
+        self.filtered_models: List[llama_swap.SwapModel] = []
+        self.selected_model_id: Optional[str] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="panel"):
-            yield Label("L3MS Workbench", id="start_title")
-            yield Static(
-                "Script-first local model operations: run, bench, chat, download, inspect, and maintain from one keyboard surface.",
-                id="start_intro",
-            )
-            with Horizontal(classes="row start_grid"):
-                with Vertical(classes="start_column"):
-                    yield Static("[b]Operate[/b]", classes="start_group")
+            with Horizontal(classes="row workbench_top"):
+                with Vertical(id="workbench_identity"):
+                    yield Label("L3MS Workbench", id="workbench_title")
+                    yield Static(
+                        f"llama-swap endpoint: {llama_swap.DEFAULT_BASE_URL}",
+                        id="workbench_endpoint",
+                    )
+                with Horizontal(id="workbench_primary_actions"):
                     yield Button(
-                        "Model Ops",
-                        id="start_open_run",
+                        "Load",
+                        id="workbench_load",
                         variant="success",
-                        classes="start_action",
+                        classes="workbench_action",
                     )
-                    yield Button("Chat", id="start_open_chat", classes="start_action")
-                    yield Button("Jobs", id="start_open_jobs", classes="start_action")
-                with Vertical(classes="start_column"):
-                    yield Static("[b]Inventory[/b]", classes="start_group")
                     yield Button(
-                        "Download", id="start_open_download", classes="start_action"
+                        "Unload",
+                        id="workbench_unload",
+                        variant="error",
+                        classes="workbench_action",
                     )
-                    yield Button("Browser", id="start_open_browser", classes="start_action")
                     yield Button(
-                        "Maintenance",
-                        id="start_open_maintenance",
-                        classes="start_action",
+                        "Chat",
+                        id="workbench_open_chat",
+                        variant="primary",
+                        classes="workbench_action workbench_nav",
                     )
-                with Vertical(classes="start_column"):
-                    yield Static("[b]Command[/b]", classes="start_group")
-                    yield Button("Palette", id="start_show_palette", classes="start_action")
-                    yield Button("Help", id="start_show_help", classes="start_action")
+                    yield Button(
+                        "Bench",
+                        id="workbench_bench",
+                        classes="workbench_action",
+                    )
+            with Horizontal(classes="row workbench_status_row"):
+                yield Static("llama-swap: checking", id="workbench_swap_status")
+                yield Static("model: none selected", id="workbench_model_status")
+            with Horizontal(classes="row"):
+                yield NavInput(
+                    placeholder="filter llama-swap models (Ctrl+F)",
+                    id="workbench_filter",
+                )
+                yield Button("Refresh", id="workbench_refresh")
+                yield Button("Models", id="workbench_open_run", classes="workbench_nav")
+                yield Button("Browser", id="workbench_open_browser", classes="workbench_nav")
+                yield Button("Download", id="workbench_open_download", classes="workbench_nav")
+                yield Button("Jobs", id="workbench_open_jobs", classes="workbench_nav")
+            with Horizontal(classes="row workbench_main"):
+                with Vertical(classes="workbench_models"):
+                    yield DataTable(id="workbench_models_table")
+                with Vertical(classes="workbench_side"):
+                    yield Static("No model selected", id="workbench_details")
+                    yield RichLog(id="workbench_log", wrap=True, markup=False)
             yield ShortcutStrip(
-                "F2 Model Ops · F3 Chat · F7 Browser · Ctrl+P Palette · ? Help"
+                "Fast path: Ctrl+R load · Ctrl+S unload · Enter load · F3 chat · F2 full ops · Ctrl+P palette"
             )
+
+    def on_mount(self) -> None:
+        table = self.query_one("#workbench_models_table", DataTable)
+        table.cursor_type = "row"
+        table.add_columns("state", "model", "name")
+        self.focus_primary()
+        self.refresh_models()
+
+    def set_status(self, text: str) -> None:
+        self.query_one("#workbench_swap_status", Static).update(text)
+
+    def set_model_status(self, text: str) -> None:
+        self.query_one("#workbench_model_status", Static).update(text)
+
+    def write_log(self, text: str) -> None:
+        self.query_one("#workbench_log", RichLog).write(text)
 
     def focus_primary(self) -> None:
-        self.query_one("#start_open_download", Button).focus()
+        self.query_one("#workbench_models_table", DataTable).focus()
 
-    @on(Button.Pressed, ".start_action")
-    def on_start_action(self, event: Button.Pressed) -> None:
-        action = _START_ACTIONS.get(str(event.button.id or ""))
+    def focus_filter(self) -> None:
+        self.query_one("#workbench_filter", Input).focus()
+
+    def refresh_models(self) -> None:
+        self.set_status("llama-swap: refreshing")
+        self.run_worker(
+            self._load_models(),
+            name="workbench-llama-swap-refresh",
+            group="workbench",
+            exclusive=True,
+        )
+
+    async def _load_models(self) -> None:
+        try:
+            self.models = await llama_swap.list_models()
+        except Exception as exc:
+            self.models = []
+            self.filtered_models = []
+            self.selected_model_id = None
+            self.set_status(f"llama-swap: offline ({exc})")
+            self.set_model_status("model: none")
+            self.query_one("#workbench_models_table", DataTable).clear()
+            self.query_one("#workbench_details", Static).update(
+                "Start llama-swap.service, then refresh."
+            )
+            self.write_log(f"llama-swap unavailable: {exc}")
+            return
+        self.set_status(f"llama-swap: online ({len(self.models)} models)")
+        self.refresh_table()
+
+    def refresh_table(self) -> None:
+        table = self.query_one("#workbench_models_table", DataTable)
+        table.clear()
+        filter_text = self.query_one("#workbench_filter", Input).value.strip().lower()
+        self.filtered_models = [
+            model
+            for model in self.models
+            if not filter_text
+            or filter_text in model.id.lower()
+            or filter_text in model.name.lower()
+            or filter_text in model.description.lower()
+        ]
+        for model in self.filtered_models:
+            table.add_row(model.state, model.id, model.name, key=model.id)
+        if self.filtered_models:
+            selected_index = 0
+            if self.selected_model_id:
+                for idx, model in enumerate(self.filtered_models):
+                    if model.id == self.selected_model_id:
+                        selected_index = idx
+                        break
+            table.move_cursor(row=selected_index, column=0)
+            self.select_model(self.filtered_models[selected_index])
+        else:
+            self.selected_model_id = None
+            self.set_model_status("model: none")
+            self.query_one("#workbench_details", Static).update(
+                "No llama-swap model matches the current filter."
+            )
+
+    def select_model(self, model: llama_swap.SwapModel) -> None:
+        self.selected_model_id = model.id
+        self.set_model_status(f"model: {model.id} ({model.state})")
+        details = [
+            f"model: {model.id}",
+            f"state: {model.state}",
+            f"name: {model.name or '-'}",
+            f"description: {model.description or '-'}",
+            "",
+            "Ctrl+R loads this model through llama-swap.",
+            "F3 opens chat against the same endpoint.",
+            "F2 opens the full model ops surface.",
+        ]
+        self.query_one("#workbench_details", Static).update("\n".join(details))
+
+    def selected_model(self) -> Optional[llama_swap.SwapModel]:
+        table = self.query_one("#workbench_models_table", DataTable)
+        if self.filtered_models and 0 <= table.cursor_row < len(self.filtered_models):
+            return self.filtered_models[table.cursor_row]
+        if self.selected_model_id:
+            for model in self.filtered_models:
+                if model.id == self.selected_model_id:
+                    return model
+        return None
+
+    async def load_selected_model(self) -> None:
+        model = self.selected_model()
+        if model is None:
+            self.write_log("No model selected")
+            return
+        self.selected_model_id = model.id
+        self.write_log(f"Loading {model.id} via llama-swap")
+        self.set_model_status(f"model: {model.id} (loading)")
+        self.post_message(WorkbenchPanel.LoadRequested(model.id))
+
+    async def unload_selected_model(self) -> None:
+        model = self.selected_model()
+        if model is None:
+            self.write_log("No model selected")
+            return
+        self.write_log(f"Unloading {model.id} via llama-swap")
+        try:
+            result = await llama_swap.unload_model(model.id)
+        except Exception as exc:
+            self.write_log(f"Unload failed: {exc}")
+            return
+        self.write_log(result)
+        self.refresh_models()
+
+    def open_bench(self) -> None:
+        run_panel = self.app.get_run_panel()
+        if run_panel:
+            run_panel.mode = "bench"
+            try:
+                run_panel.query_one("#run_mode", Select).value = "bench"
+            except Exception:
+                pass
+            run_panel.refresh_script_inventory()
+        self.app.call_later(self.app.dispatch_nav, "nav_run")
+
+    @on(Input.Changed, "#workbench_filter")
+    def on_filter_changed(self, _: Input.Changed) -> None:
+        self.refresh_table()
+
+    @on(Button.Pressed, "#workbench_refresh")
+    def on_refresh(self) -> None:
+        self.refresh_models()
+
+    @on(Button.Pressed, "#workbench_load")
+    async def on_load(self) -> None:
+        await self.load_selected_model()
+
+    @on(Button.Pressed, "#workbench_unload")
+    async def on_unload(self) -> None:
+        await self.unload_selected_model()
+
+    @on(Button.Pressed, "#workbench_bench")
+    def on_bench(self) -> None:
+        self.open_bench()
+
+    @on(Button.Pressed, ".workbench_nav")
+    def on_workbench_action(self, event: Button.Pressed) -> None:
+        action = _WORKBENCH_ACTIONS.get(str(event.button.id or ""))
         if action:
-            self.app.call_later(self.app.run_action, action)
+            self.app.call_later(self.app.dispatch_nav, action)
+
+    @on(DataTable.RowHighlighted, "#workbench_models_table")
+    def on_model_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        key = str(event.row_key.value)
+        for model in self.filtered_models:
+            if model.id == key:
+                self.select_model(model)
+                return
+
+    @on(DataTable.RowSelected, "#workbench_models_table")
+    async def on_model_selected(self, event: DataTable.RowSelected) -> None:
+        key = str(event.row_key.value)
+        for model in self.filtered_models:
+            if model.id == key:
+                self.select_model(model)
+                await self.load_selected_model()
+                return
 
 
 # ---------------------------------------------------------------------------
@@ -2847,27 +3166,29 @@ def _build_help_content() -> str:
                 ("Ctrl+P", "Command palette (all actions)"),
                 ("Alt+1..Alt+7", "Tab switch fallback when F-keys are unreliable"),
                 ("Alt+← / Alt+→", "Previous / next tab"),
-                ("F1", "→ Download tab"),
-                ("F2", "→ Run / Model Ops tab"),
+                ("F1", "→ Workbench tab"),
+                ("F2", "→ Model Ops tab"),
                 ("F3", "→ Chat tab"),
-                ("F4", "→ Maintenance tab"),
-                ("F5", "→ Start tab"),
+                ("F4", "→ Model Browser tab"),
+                ("F5", "→ Download tab"),
                 ("F6", "→ Jobs tab"),
-                ("F7", "→ Model Browser tab"),
+                ("F7", "→ Maintenance tab"),
             ],
         ),
         (
-            "START  (F5)",
+            "WORKBENCH  (F1)",
             [
-                ("Download Models", "Go to Download tab"),
-                ("Run / Bench Scripts", "Go to Model Ops tab"),
-                ("Open Chat", "Go to Chat tab"),
+                ("Ctrl+R", "Load selected llama-swap model"),
+                ("Ctrl+S", "Unload selected llama-swap model"),
+                ("Enter", "Load highlighted model"),
+                ("F3", "Open Chat"),
+                ("F2", "Open full Model Ops"),
                 ("Help (?)", "Open keyboard shortcut help"),
                 ("Command Palette", "Search and run any action"),
             ],
         ),
         (
-            "MODEL BROWSER  (F7)",
+            "MODEL BROWSER  (F4)",
             [
                 ("Alt+R", "Scan GGUF files"),
                 ("Alt+G", "Focus root path input"),
@@ -2907,7 +3228,7 @@ def _build_help_content() -> str:
             ],
         ),
         (
-            "DOWNLOAD  (F1)",
+            "DOWNLOAD  (F5)",
             [
                 ("Alt+D", "Download selected model"),
                 ("Alt+E", "Download all enabled models"),
@@ -2999,13 +3320,13 @@ class ChatHistoryScreen(ModalScreen):
 # ---------------------------------------------------------------------------
 
 PALETTE_COMMANDS: list[tuple[str, str, str]] = [
-    ("Start", "Open Start workbench", "tab_settings"),
-    ("F1", "Open Download", "tab_download"),
-    ("F2", "Open Model Ops", "tab_run"),
-    ("F7", "Open Model Browser", "tab_browser"),
-    ("F3", "Open Chat", "tab_chat"),
-    ("F4", "Open Maintenance", "tab_maintenance"),
-    ("F6", "Open Jobs", "tab_jobs"),
+    ("F1", "Open Workbench", "nav_workbench"),
+    ("F2", "Open Model Ops", "nav_run"),
+    ("F3", "Open Chat", "nav_chat"),
+    ("F4", "Open Model Browser", "nav_browser"),
+    ("F5", "Open Download", "nav_download"),
+    ("F6", "Open Jobs", "nav_jobs"),
+    ("F7", "Open Maintenance", "nav_maintenance"),
     ("Alt+R", "Model Browser: scan GGUF files", "browser_scan"),
     ("Alt+G", "Model Browser: focus root path", "browser_focus_path"),
     ("Alt+J", "Model Browser: focus table", "browser_focus_table"),
@@ -3046,7 +3367,7 @@ class CommandPaletteScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical(id="palette_dialog"):
             yield Static("⌘  Command Palette", id="palette_title")
-            yield Input(placeholder="Type to filter commands…", id="palette_input")
+            yield NavInput(placeholder="Type to filter commands…", id="palette_input")
             yield DataTable(id="palette_table", show_header=False)
             yield Static("[dim]  Enter to run · Esc to cancel[/dim]", id="palette_hint")
 
@@ -3107,25 +3428,30 @@ class MainScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
         yield Static("", id="workbench_bar")
-        with TabbedContent(initial="settings", id="main_tabs"):
-            with TabPane("Download", id="download"):
-                yield DownloadPanel()
+        with TabbedContent(initial="workbench", id="main_tabs"):
+            with TabPane("Workbench", id="workbench"):
+                yield WorkbenchPanel()
             with TabPane("Model Ops", id="run"):
                 yield RunPanel()
-            with TabPane("Model Browser", id="browser"):
-                yield ModelBrowserPanel()
             with TabPane("Chat", id="chat"):
                 yield ChatPanel()
+            with TabPane("Model Browser", id="browser"):
+                yield ModelBrowserPanel()
+            with TabPane("Download", id="download"):
+                yield DownloadPanel()
             with TabPane("Maintenance", id="maintenance"):
                 yield MaintenancePanel()
-            with TabPane("Start", id="settings"):
-                yield StartPanel()
             with TabPane("Jobs", id="jobs"):
                 yield JobsPanel()
         yield Footer()
 
     def on_mount(self) -> None:
+        self.app.call_later(self._activate_initial_tab)
         self.app.call_later(self.app.refresh_workbench_bar)
+
+    def _activate_initial_tab(self) -> None:
+        self.query_one("#main_tabs", TabbedContent).active = "workbench"
+        self.app.refresh_workbench_bar()
 
     @on(TabbedContent.TabActivated, "#main_tabs")
     def on_main_tab_activated(self, _: TabbedContent.TabActivated) -> None:
@@ -3133,8 +3459,8 @@ class MainScreen(Screen):
 
 
 WORKBENCH_HINTS = {
-    "settings": "[b]Workbench[/b]  Ctrl+P palette  ? help  F2 ops  F3 chat  F7 browser",
-    "run": "[b]Model Ops[/b]  Ctrl+R start/load  Ctrl+S stop/unload  Ctrl+M mode  Ctrl+F filter",
+    "workbench": "[b]Workbench[/b]  Ctrl+R load  Ctrl+S unload  Enter load  F3 chat  F2 full ops",
+    "run": "[b]Model Ops[/b]  Ctrl+R load/bench  Ctrl+S unload/stop  Ctrl+M mode  Ctrl+F filter",
     "chat": "[b]Chat[/b]  Ctrl+G connect  Ctrl+B detect  Ctrl+X clear  Alt+S save",
     "browser": "[b]Model Browser[/b]  Alt+R scan  Alt+G path  Alt+J table",
     "download": "[b]Download[/b]  Alt+D selected  Alt+E enabled  Alt+N add  Alt+W save",
@@ -3149,24 +3475,24 @@ class L3MSApp(App[None]):
     BINDINGS = [
         # ── always visible in footer ──────────────────────────────────
         Binding("q", "quit", "Quit", show=True),
-        Binding("?", "show_help", "Help", show=True),
-        Binding("f1", "tab_download", "Download", show=True),
-        Binding("f2", "tab_run", "Run", show=True),
-        Binding("f3", "tab_chat", "Chat", show=True),
-        Binding("f4", "tab_maintenance", "Maint", show=True),
-        Binding("f5", "tab_settings", "Start", show=True),
-        Binding("f6", "tab_jobs", "Jobs", show=True),
-        Binding("f7", "tab_browser", "Browser", show=True),
+        Binding("?", "show_help", "Help", show=True, priority=True),
+        Binding("f1", "nav_workbench", "Workbench", show=True, priority=True),
+        Binding("f2", "nav_run", "Ops", show=True, priority=True),
+        Binding("f3", "nav_chat", "Chat", show=True, priority=True),
+        Binding("f4", "nav_browser", "Browser", show=True, priority=True),
+        Binding("f5", "nav_download", "Download", show=True, priority=True),
+        Binding("f6", "nav_jobs", "Jobs", show=True, priority=True),
+        Binding("f7", "nav_maintenance", "Maint", show=True, priority=True),
         # ── navigation fallbacks (hidden) ──────────────────────────────
-        Binding("alt+1", "tab_download", "Download", show=False),
-        Binding("alt+2", "tab_run", "Run", show=False),
-        Binding("alt+3", "tab_chat", "Chat", show=False),
-        Binding("alt+4", "tab_maintenance", "Maintenance", show=False),
-        Binding("alt+5", "tab_settings", "Start", show=False),
-        Binding("alt+6", "tab_jobs", "Jobs", show=False),
-        Binding("alt+7", "tab_browser", "Browser", show=False),
-        Binding("alt+left", "tab_prev", "Prev Tab", show=False),
-        Binding("alt+right", "tab_next", "Next Tab", show=False),
+        Binding("alt+1", "nav_workbench", "Workbench", show=False, priority=True),
+        Binding("alt+2", "nav_run", "Run", show=False, priority=True),
+        Binding("alt+3", "nav_chat", "Chat", show=False, priority=True),
+        Binding("alt+4", "nav_browser", "Browser", show=False, priority=True),
+        Binding("alt+5", "nav_download", "Download", show=False, priority=True),
+        Binding("alt+6", "nav_jobs", "Jobs", show=False, priority=True),
+        Binding("alt+7", "nav_maintenance", "Maintenance", show=False, priority=True),
+        Binding("alt+left", "nav_prev", "Prev Tab", show=False, priority=True),
+        Binding("alt+right", "nav_next", "Next Tab", show=False, priority=True),
         # ── Run / Model Ops (hidden – see ? Help) ────────────────────
         Binding("ctrl+r", "run_start", "Start Script", show=False),
         Binding("ctrl+s", "run_stop", "Stop Script", show=False),
@@ -3177,7 +3503,7 @@ class L3MSApp(App[None]):
         Binding("ctrl+m", "run_toggle_mode", "Toggle Mode", show=False),
         Binding("alt+p", "run_save_script", "Save Script", show=False),
         # ── Command palette ───────────────────────────────────────────
-        Binding("ctrl+p", "show_command_palette", "Palette", show=True),
+        Binding("ctrl+p", "show_command_palette", "Palette", show=True, priority=True),
         # ── Jobs (hidden) ─────────────────────────────────────────────
         Binding("s", "jobs_stop", "Stop Job", show=False),
         Binding("r", "jobs_retry", "Retry Job", show=False),
@@ -3204,8 +3530,18 @@ class L3MSApp(App[None]):
         Binding("alt+j", "browser_focus_table", "Browser Table", show=False),
     ]
 
-    def on_mount(self) -> None:
-        self.push_screen(MainScreen())
+    async def on_mount(self) -> None:
+        await self.push_screen(MainScreen())
+        self.set_timer(0.1, self.action_nav_workbench)
+
+    async def _on_key(self, event: Key) -> None:
+        action = _NAV_KEY_ACTIONS.get(event.key)
+        if action:
+            event.stop()
+            event.prevent_default()
+            self.dispatch_nav(action)
+            return
+        await super()._on_key(event)
 
     def refresh_workbench_bar(self) -> None:
         if not self.screen:
@@ -3214,8 +3550,24 @@ class L3MSApp(App[None]):
             bar = self.screen.query_one("#workbench_bar", Static)
         except Exception:
             return
-        active = self.active_tab() or "settings"
-        bar.update(WORKBENCH_HINTS.get(active, WORKBENCH_HINTS["settings"]))
+        active = self.active_tab() or "workbench"
+        bar.update(WORKBENCH_HINTS.get(active, WORKBENCH_HINTS["workbench"]))
+
+    async def on_key(self, event: Key) -> None:
+        nav_actions = {
+            "f1": "nav_workbench",
+            "f2": "nav_run",
+            "f3": "nav_chat",
+            "f4": "nav_browser",
+            "f5": "nav_download",
+            "f6": "nav_jobs",
+            "f7": "nav_maintenance",
+        }
+        action = nav_actions.get(event.key)
+        if not action:
+            return
+        event.stop()
+        self.dispatch_nav(action)
 
     async def action_quit(self) -> None:
         """Graceful shutdown: terminate running processes and cancel async tasks."""
@@ -3320,50 +3672,81 @@ class L3MSApp(App[None]):
         except Exception:
             return None
 
-    def get_start_panel(self) -> Optional[StartPanel]:
+    def get_workbench_panel(self) -> Optional[WorkbenchPanel]:
         if not self.screen:
             return None
         try:
-            return self.screen.query_one("#start_panel", StartPanel)
+            return self.screen.query_one("#workbench_panel", WorkbenchPanel)
         except Exception:
             return None
 
-    def action_tab_download(self) -> None:
+    def action_nav_download(self) -> None:
         self.activate_tab("download")
+        panel = self.get_download_panel()
+        if panel:
+            panel.focus_table()
 
-    def action_tab_run(self) -> None:
+    def action_nav_run(self) -> None:
         self.activate_tab("run")
+        panel = self.get_run_panel()
+        if panel:
+            panel.focus_table()
 
-    def action_tab_chat(self) -> None:
+    def action_nav_chat(self) -> None:
         self.activate_tab("chat")
         panel = self.get_chat_panel()
         if panel:
             panel.focus_input()
 
-    def action_tab_maintenance(self) -> None:
+    def action_nav_maintenance(self) -> None:
         self.activate_tab("maintenance")
+        panel = self.get_maintenance_panel()
+        if panel:
+            panel.focus_table()
 
-    def action_tab_settings(self) -> None:
-        self.activate_tab("settings")
-        panel = self.get_start_panel()
+    def action_nav_workbench(self) -> None:
+        self.activate_tab("workbench")
+        panel = self.get_workbench_panel()
         if panel:
             panel.focus_primary()
 
-    def action_tab_jobs(self) -> None:
+    def action_nav_jobs(self) -> None:
         self.activate_tab("jobs")
+        panel = self.get_jobs_panel()
+        if panel:
+            panel.query_one("#jobs_table", DataTable).focus()
 
-    def action_tab_browser(self) -> None:
+    def action_nav_browser(self) -> None:
         self.activate_tab("browser")
+        panel = self.get_model_browser_panel()
+        if panel:
+            panel.focus_table()
 
-    def action_tab_next(self) -> None:
+    def dispatch_nav(self, action: str) -> None:
+        nav_actions = {
+            "nav_workbench": self.action_nav_workbench,
+            "nav_run": self.action_nav_run,
+            "nav_chat": self.action_nav_chat,
+            "nav_browser": self.action_nav_browser,
+            "nav_download": self.action_nav_download,
+            "nav_jobs": self.action_nav_jobs,
+            "nav_maintenance": self.action_nav_maintenance,
+            "nav_next": self.action_nav_next,
+            "nav_prev": self.action_nav_prev,
+        }
+        handler = nav_actions.get(action)
+        if handler:
+            handler()
+
+    def action_nav_next(self) -> None:
         order = [
-            "download",
+            "workbench",
             "run",
             "chat",
-            "maintenance",
-            "settings",
-            "jobs",
             "browser",
+            "download",
+            "jobs",
+            "maintenance",
         ]
         active = self.active_tab() or order[0]
         if active not in order:
@@ -3372,15 +3755,15 @@ class L3MSApp(App[None]):
         idx = (order.index(active) + 1) % len(order)
         self.activate_tab(order[idx])
 
-    def action_tab_prev(self) -> None:
+    def action_nav_prev(self) -> None:
         order = [
-            "download",
+            "workbench",
             "run",
             "chat",
-            "maintenance",
-            "settings",
-            "jobs",
             "browser",
+            "download",
+            "jobs",
+            "maintenance",
         ]
         active = self.active_tab() or order[0]
         if active not in order:
@@ -3396,6 +3779,11 @@ class L3MSApp(App[None]):
             if panel:
                 await panel.run_script()
             return
+        if tab == "workbench":
+            panel = self.get_workbench_panel()
+            if panel:
+                await panel.load_selected_model()
+            return
         if tab != "run":
             return
         panel = self.get_run_panel()
@@ -3409,6 +3797,11 @@ class L3MSApp(App[None]):
             if panel:
                 await panel.stop_script()
             return
+        if tab == "workbench":
+            panel = self.get_workbench_panel()
+            if panel:
+                await panel.unload_selected_model()
+            return
         if tab != "run":
             return
         panel = self.get_run_panel()
@@ -3416,6 +3809,11 @@ class L3MSApp(App[None]):
             await panel.stop_script()
 
     def action_run_focus_filter(self) -> None:
+        if self.active_tab() == "workbench":
+            panel = self.get_workbench_panel()
+            if panel:
+                panel.focus_filter()
+            return
         if self.active_tab() != "run":
             return
         panel = self.get_run_panel()
@@ -3423,6 +3821,11 @@ class L3MSApp(App[None]):
             panel.focus_filter()
 
     def action_run_focus_table(self) -> None:
+        if self.active_tab() == "workbench":
+            panel = self.get_workbench_panel()
+            if panel:
+                panel.focus_primary()
+            return
         if self.active_tab() != "run":
             return
         panel = self.get_run_panel()
@@ -3438,6 +3841,12 @@ class L3MSApp(App[None]):
 
     def action_run_clear_log(self) -> None:
         tab = self.active_tab()
+        if tab == "workbench":
+            panel = self.get_workbench_panel()
+            if panel:
+                panel.query_one("#workbench_log", RichLog).clear()
+                panel.write_log("Workbench log cleared")
+            return
         if tab == "maintenance":
             panel = self.get_maintenance_panel()
             if panel:
@@ -3599,7 +4008,20 @@ class L3MSApp(App[None]):
     def action_show_command_palette(self) -> None:
         def handle_result(action: Optional[str]) -> None:
             if action:
-                self.call_later(self.run_action, action)
+                if action in {
+                    "nav_workbench",
+                    "nav_run",
+                    "nav_chat",
+                    "nav_browser",
+                    "nav_download",
+                    "nav_jobs",
+                    "nav_maintenance",
+                    "nav_next",
+                    "nav_prev",
+                }:
+                    self.call_later(self.dispatch_nav, action)
+                else:
+                    self.call_later(self.run_action, action)
 
         self.push_screen(CommandPaletteScreen(), callback=handle_result)
 
@@ -3627,6 +4049,26 @@ class L3MSApp(App[None]):
         if panel:
             self.activate_tab("run")
             await panel.run_script_by_path(event.script_path, event.mode)
+
+    async def on_workbench_panel_load_requested(
+        self, event: WorkbenchPanel.LoadRequested
+    ) -> None:
+        run_panel = self.get_run_panel()
+        workbench_panel = self.get_workbench_panel()
+        if not run_panel:
+            if workbench_panel:
+                workbench_panel.write_log("Model Ops panel is not ready")
+            return
+        run_panel.mode = "run"
+        try:
+            run_panel.query_one("#run_mode", Select).value = "run"
+        except Exception:
+            pass
+        run_panel.selected_model_id = event.model_id
+        await run_panel.run_script()
+        if workbench_panel:
+            workbench_panel.write_log(f"Load request completed for {event.model_id}")
+            workbench_panel.refresh_models()
 
     def on_run_panel_job_started(self, event: RunPanel.JobStarted) -> None:
         panel = self.get_jobs_panel()

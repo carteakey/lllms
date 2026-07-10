@@ -1,0 +1,29 @@
+[Unit]
+Description=nanobot-gateway (Nanobot Gateway Service)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# Override variables in a drop-in if your layout differs:
+#   systemctl --user edit nanobot-gateway.service
+#   [Service]
+#   Environment=NANOBOT_PORT=8765
+Environment=NANOBOT_BIN=%h/.local/bin/nanobot
+Environment=NANOBOT_PORT=8765
+Environment=NANOBOT_WORKSPACE=%h/.nanobot/workspace
+Environment=NANOBOT_CONFIG=%h/.nanobot/config.json
+WorkingDirectory=%h
+ExecStart=/bin/sh -c '${NANOBOT_BIN} gateway --port ${NANOBOT_PORT} --workspace ${NANOBOT_WORKSPACE} --config ${NANOBOT_CONFIG}'
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+KillSignal=SIGTERM
+KillMode=process
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
