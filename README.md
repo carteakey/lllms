@@ -72,20 +72,21 @@ python3 l3ms.py --run qwen --extra "--ctx-size 32768"
 - Workbench shell:
   - persistent command bar with context-specific shortcut hints
   - richer `Ctrl+P` command palette with shortcut column and token filtering
-- `Start` tab:
-  - workbench hub grouped by Operate / Inventory / Command flows
-  - quick access to Help and the command palette
-  - fallback navigation hints for terminals where F-keys are inconsistent
+- `Workbench` tab:
+  - default first screen for quick llama-swap model loading
+  - live model table from the configured llama-swap endpoint
+  - fast actions for load, unload, chat, bench, browser, downloads, and jobs
+  - delegates model loads to Model Ops so job history and resource telemetry stay consistent
 - `Download` tab:
   - config load/save/validate/restore
   - model row add/apply/delete
   - download selected or enabled models
   - config snapshots in `.toolkit/download_config_versions/`
 - `Model Ops` tab:
-  - run/bench script inventory and filtering
+  - llama-swap run mode and bench script mode
   - live run logs + start/stop
   - current running model + resource telemetry (CPU/RAM/GPU when available)
-  - script editor and per-script snapshots in `.toolkit/script_versions/`
+  - script editor and per-script snapshots in `.toolkit/script_versions/` for bench mode
 - `Model Browser` tab:
   - scan any local directory for `.gguf` files
   - inspect size, quantization, params, architecture, and modified timestamp in a table
@@ -98,15 +99,25 @@ Global:
 
 - `Ctrl+P`: command palette
 - `?`: key binding help
-- `F1`: Download tab
+- `F1`: Workbench tab
 - `F2`: Model Ops tab
 - `F3`: Chat tab
-- `F4`: Maintenance tab
-- `F5`: Start tab
+- `F4`: Model Browser tab
+- `F5`: Download tab
 - `F6`: Jobs tab
-- `F7`: Model Browser tab
+- `F7`: Maintenance tab
 - `Alt+1..Alt+7`: tab fallback when F-keys are unreliable
 - `Alt+←` / `Alt+→`: previous / next tab
+
+Workbench:
+
+- `Ctrl+R` / `Enter`: load selected llama-swap model
+- `Ctrl+S`: unload selected llama-swap model
+- `Ctrl+F`: focus model filter
+- `Ctrl+J`: focus model table
+- `Ctrl+L`: clear workbench log
+- `F3`: chat with the loaded model endpoint
+- `F2`: open full Model Ops
 
 Download (active only on Download tab):
 
@@ -124,13 +135,13 @@ Download (active only on Download tab):
 
 Model Ops (active only on Model Ops tab):
 
-- `Ctrl+F`: focus script filter
-- `Ctrl+J`: focus script table
-- `Ctrl+U`: focus script editor
+- `Ctrl+F`: focus model/script filter
+- `Ctrl+J`: focus model/script table
+- `Ctrl+U`: focus detail/script editor
 - `Ctrl+M`: toggle run/bench mode
-- `Ctrl+R`: run selected script
-- `Ctrl+S`: stop running script
-- `Alt+P`: save edited script snapshot
+- `Ctrl+R`: load selected llama-swap model or run selected bench script
+- `Ctrl+S`: unload selected llama-swap model or stop running bench
+- `Alt+P`: save edited bench script snapshot
 - `Ctrl+L`: clear run log
 
 Model Browser (active only on Model Browser tab):
@@ -145,7 +156,7 @@ Model Browser (active only on Model Browser tab):
 - `llama-swap.yaml`: single source of truth for servable models (see `docs/llama-swap-runbook.md`)
 - `bench-models/`: one `bench-llama-cpp-*.sh` script per model
 - `maintenance/`: system/build scripts
-- `maintenance/systemd/`: user service units (including `llama-swap.service`)
+- `maintenance/systemd/`: user service units (including `llama-swap.service` and `nanobot-gateway.service`)
 - `l3ms/`: TUI app + stores
 - `l3ms.py`: launcher (TUI and CLI modes)
 - `docs/llama-swap-runbook.md`: install, start/stop, curl, add-a-model

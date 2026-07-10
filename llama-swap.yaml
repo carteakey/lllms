@@ -9,6 +9,9 @@
 # (e.g. /home/kchauhan/repos/l3ms on the Linux box). llama-swap evaluates
 # env macros before config load; startup fails loudly if it is unset.
 
+apiKeys:
+  - "${env.LLAMA_SWAP_API_KEY}"
+
 healthCheckTimeout: 500
 logLevel: info
 logToStdout: both

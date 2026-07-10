@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.6.0] - 2026-07-03
+
+### Added
+- Added a Workbench-first llama-swap launcher with live model filtering, load,
+  unload, chat, bench, browser, download, and jobs actions on the first screen.
+- Added `LLAMA_SWAP_API_KEY` support for authenticated llama-swap model and
+  chat requests.
+
+### Changed
+- Replaced the static Start hub with the Workbench tab as the default entry
+  point.
+- Routed Workbench model loads through Model Ops so job history and resource
+  telemetry stay consistent.
+- Reordered top-level shortcuts around the fast path: F1 Workbench, F2 Ops,
+  F3 Chat, F4 Browser, F5 Download, F6 Jobs, F7 Maintenance.
+- Simplified Model Ops run mode by hiding bench-only binary, extra-args,
+  version, and script-save controls until bench mode is active.
+
+## [0.5.3] - 2026-06-17
+
+### Added
+- Added `maintenance/systemd/nanobot-gateway.service` to manage and run the
+  `nanobot gateway` command persistently.
+- Added `maintenance/setup-nanobot-gateway-service.sh` to install, start,
+  stop, restart, enable, disable, and monitor the gateway service.
+
 ## [0.5.2] - 2026-06-22
 
 ### Added
