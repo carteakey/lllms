@@ -3,6 +3,19 @@
   "models": [
     {
       "enabled": false,
+      "repo_id": "nomic-ai/nomic-embed-text-v1.5-GGUF",
+      "local_dir": "/mnt/lab/models/nomic-ai/nomic-embed-text-v1.5-GGUF",
+      "allow_patterns": [
+        "nomic-embed-text-v1.5.f16.gguf"
+      ],
+      "ignore_patterns": [],
+      "revision": "",
+      "force_download": false,
+      "max_workers": 2,
+      "description": "Nomic Embed Text v1.5 F16 (768-dimensional semantic-search embeddings)"
+    },
+    {
+      "enabled": false,
       "repo_id": "Tesslate/OmniCoder-9B-GGUF",
       "local_dir": "/mnt/lab/models/Tesslate/OmniCoder-9B-GGUF",
       "allow_patterns": [

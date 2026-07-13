@@ -41,6 +41,35 @@ macros:
 models:
 
   # ===========================================================================
+  # Embeddings
+  # ===========================================================================
+
+  "nomic-embed-text-v1.5":
+    name: "Nomic Embed Text v1.5 (F16, 768 dimensions)"
+    description: "OpenAI-compatible embeddings for semantic search. Starts on demand and unloads after 5 minutes idle."
+    ttl: 300
+    metadata:
+      task: embeddings
+      dimensions: 768
+      context_length: 2048
+      query_prefix: "search_query: "
+      document_prefix: "search_document: "
+    cmd: |
+      taskset -c ${cpu_range} ${llama_server}
+      -m /mnt/lab/models/nomic-ai/nomic-embed-text-v1.5-GGUF/nomic-embed-text-v1.5.f16.gguf
+      --alias nomic-embed-text-v1.5
+      --embedding
+      --pooling mean
+      --embd-normalize 2
+      --ctx-size 2048
+      --batch-size 2048 --ubatch-size 512
+      --n-gpu-layers 99
+      --parallel 1
+      --threads 10 --threads-batch 12
+      --host 0.0.0.0 --port ${PORT}
+      --no-warmup
+
+  # ===========================================================================
   # gpt-oss family
   # ===========================================================================
 

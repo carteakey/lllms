@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Added an on-demand `nomic-embed-text-v1.5` llama-swap profile with
+  authenticated `/v1/embeddings` routing and a five-minute idle unload TTL.
+- Added a disabled targeted downloader profile and embedding deployment checks.
+
 ## [0.6.0] - 2026-07-03
 
 ### Added

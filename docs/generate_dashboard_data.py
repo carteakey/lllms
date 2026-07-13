@@ -140,7 +140,11 @@ def main() -> None:
     active_ids = {
         model_id
         for model_id, model in parsed.items()
-        if model.get("cmd") and not model.get("unlisted", False)
+        if model.get("cmd")
+        and not model.get("unlisted", False)
+        # The public leaderboard measures token generation. Utility embedding
+        # profiles remain discoverable through llama-swap but do not have TPS.
+        and "--embedding" not in model.get("cmd", "")
     }
     metadata_ids = set(meta["models"])
     if active_ids != metadata_ids:

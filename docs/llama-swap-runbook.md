@@ -120,6 +120,47 @@ curl -X POST http://localhost:8080/models/unload -d '{"model":"qwen3-coder-next"
 4. Restart: `systemctl --user restart llama-swap.service`.
 5. Verify: `curl -s http://localhost:8080/v1/models | jq '.data[].id'`.
 
+## Embeddings
+
+`nomic-embed-text-v1.5` is served through the same authenticated llama-swap
+endpoint as chat models. It is not preloaded: the first embeddings request
+starts it automatically, and its per-model `ttl: 300` unloads it after five
+minutes without a request.
+
+Install the F16 GGUF at:
+
+```text
+/mnt/lab/models/nomic-ai/nomic-embed-text-v1.5-GGUF/nomic-embed-text-v1.5.f16.gguf
+```
+
+The disabled downloader profile can be invoked directly without enabling any
+other configured downloads:
+
+```bash
+./model_downloader/download_hf_model.py \
+  --repo-id nomic-ai/nomic-embed-text-v1.5-GGUF \
+  --allow-patterns 'nomic-embed-text-v1.5.f16.gguf' \
+  --local-dir /mnt/lab/models/nomic-ai/nomic-embed-text-v1.5-GGUF
+```
+
+Nomic requires task prefixes. Use `search_document: ` when building an index
+and `search_query: ` for search input. It returns normalized 768-dimensional
+vectors, so changing to or from another embedding model requires a complete
+index rebuild.
+
+Verify on the serving host (include the configured bearer token):
+
+```bash
+curl -s http://localhost:8080/v1/embeddings \
+  -H "Authorization: Bearer $LLAMA_SWAP_API_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"nomic-embed-text-v1.5","input":["search_query: thoughtful science fiction"]}' \
+  | jq '{model, dimensions: (.data[0].embedding | length)}'
+```
+
+Use `/running` to inspect the active model. To test unloading without waiting
+for the TTL, use `POST /api/models/unload/nomic-embed-text-v1.5`.
+
 ## Ports
 
 - `8080` — llama-swap listener (client-facing OpenAI endpoint)

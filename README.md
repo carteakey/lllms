@@ -169,6 +169,11 @@ a single OpenAI-compatible endpoint (`http://<host>:8080`). The daemon
 hot-swaps models on demand and exposes every entry in `llama-swap.yaml`
 under `/v1/models`. See `docs/llama-swap-runbook.md`.
 
+The same endpoint serves on-demand embeddings through
+`nomic-embed-text-v1.5`. It starts on the first `/v1/embeddings` request and
+unloads after five idle minutes; see the runbook for the model path, task
+prefixes, and verification request.
+
 ## Downloader CLI (direct)
 
 Run with config file (downloads all enabled models):
