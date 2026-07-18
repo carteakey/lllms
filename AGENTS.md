@@ -18,10 +18,13 @@ Build a keyboard-first, script-first homelab LLM toolkit with strong operational
 
 ## Structure
 
-- `l3ms/app.py`: TUI layout, keybindings, workflows
-- `l3ms/config_store.py`: download config CRUD + validation + snapshots
-- `l3ms/script_store.py`: script CRUD + snapshots
-- `l3ms.py`: launcher + interactive CLI (`--run`, `--bench`, `--list`)
+- `src/app.rs`: Ratatui layout, keybindings, workflows, and process supervision
+- `src/cli.rs`: launcher + interactive CLI (`--run`, `--bench`, `--list`)
+- `src/llama_swap.rs`: authenticated llama-swap HTTP boundary
+- `src/config_store.rs`: download config CRUD + validation + snapshots
+- `src/script_store.rs`: script CRUD + snapshots
+- `l3ms/` and `l3ms.py`: legacy Python TUI retained during parity work
+- `model_downloader/`: Python downloader compatibility boundary
 
 ## Versioning
 
@@ -35,5 +38,6 @@ Update `CHANGELOG.md` on every user-visible change.
 
 ## Release Intent
 
-Current implementation is Python-first for speed.
-Future intent is a Rust port once workflows are stable.
+The Rust port is active under `CAR-97` and starts at version `0.7.0`.
+Retain the legacy Python TUI and downloader until their Rust replacement or
+compatibility boundary has explicit parity coverage.

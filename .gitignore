@@ -4,6 +4,9 @@
 # Ignore cloned and built vendor dependencies
 /vendor/
 
+# Rust build output
+/target/
+
 # Ignore log files
 /*.log
 

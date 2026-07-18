@@ -3,9 +3,30 @@
 ## [Unreleased]
 
 ### Added
+- Added the initial Rust `0.7.0` application: a Clap launcher, authenticated
+  llama-swap client, typed configuration/script stores, and seven-view Ratatui
+  workbench.
+- Added atomic, collision-safe configuration and script snapshots with strict
+  validation, traversal protection, runtime-root-aware storage, and Unix mode
+  preservation.
+- Added supervised bench, download, and maintenance processes with bounded
+  output, in-session jobs, and process-group shutdown.
+- Added a pinned Rust toolchain, locked dependencies, unit coverage, strict
+  Clippy checks, and GitHub Actions verification.
 - Added an on-demand `nomic-embed-text-v1.5` llama-swap profile with
   authenticated `/v1/embeddings` routing and a five-minute idle unload TTL.
 - Added a disabled targeted downloader profile and embedding deployment checks.
+
+### Changed
+- Made the Rust launcher use llama-swap for `--run` and `--list run`, while
+  preserving `bench-*.sh` files as the benchmark entry points and retaining the
+  Python downloader as a compatibility child process.
+
+### Fixed
+- Treat llama-swap load and unload HTTP failures as failed operations instead
+  of successful jobs.
+- Correct selected-download handling for multiple allow/ignore patterns and
+  `base_models_dir`.
 
 ## [0.6.0] - 2026-07-03
 

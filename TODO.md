@@ -60,12 +60,9 @@
 ## Repo / Platform
 
 - Rename GitHub repository to `l3ms` (external GitHub action required)
-- Keep TUI stable while preparing Rust port plan
 
 ## Long-term
 
-- Port TUI core to Rust after workflow stabilizes
-- Keep Python downloader compatibility layer during migration
 - Consider WebAssembly port for browser-based access
 
 ## ✅ Done

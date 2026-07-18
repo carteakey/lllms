@@ -103,7 +103,7 @@ Add entries under `CHANGELOG.md` → `## [Unreleased]` → `### Added` listing:
 Run:
 
 ```bash
-python3 l3ms.py --list bench
+cargo run --locked -- --list bench
 bash -n bench-models/bench-llama-cpp-<model>.sh
 bash -n bench-models/bench-llama-cpp-<model>-strategies.sh
 bash -n bench-models/bench-llama-cpp-<model>-fit.sh

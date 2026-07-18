@@ -25,47 +25,70 @@ variables and bind to `127.0.0.1` by default.
 
 ## Install
 
+The active Rust port uses the pinned toolchain in `rust-toolchain.toml`:
+
 ```bash
-python3 -m pip install -r requirements-tui.txt
+rustup show
+cargo build --release --locked
 ```
 
 ## Start TUI
 
 ```bash
-python3 l3ms.py
+cargo run --release --locked
+# or: ./target/release/l3ms
 ```
 
 Show quick-start instructions without opening TUI:
 
 ```bash
-python3 l3ms.py --quickstart
+cargo run --locked -- --quickstart
 ```
 
 ## Interactive CLI Modes
 
-List available scripts:
+List llama-swap models and benchmark entry points:
 
 ```bash
-python3 l3ms.py --list all
+cargo run --locked -- --list all
 ```
 
-Interactively run a model script:
+Interactively select and load a llama-swap model:
 
 ```bash
-python3 l3ms.py --run
+cargo run --locked -- --run
 ```
 
 Interactively run a bench script:
 
 ```bash
-python3 l3ms.py --bench
+cargo run --locked -- --bench
 ```
 
-Filter script picker and pass extra args:
+Filter the bench picker and pass extra arguments without reparsing them through
+a shell:
 
 ```bash
-python3 l3ms.py --run qwen --extra "--ctx-size 32768"
+cargo run --locked -- --bench qwen --extra "--ctx-size 32768"
 ```
+
+## Rust Migration Status
+
+The Rust `0.7.0` foundation now covers the llama-swap run/list CLI, benchmark
+execution, typed configuration and script stores, atomic snapshots, and a
+keyboard-first seven-view Ratatui workbench. The Python downloader remains the
+download implementation and is launched directly by the Rust TUI.
+
+The richer Python TUI remains available during the parity period:
+
+```bash
+python3 -m pip install -r requirements-tui.txt
+python3 l3ms.py
+```
+
+The detailed TUI feature and key list below describes that full legacy surface.
+The Rust binary's current bindings are always available from `?` or `Ctrl+P`.
+See [ARCHITECTURE.md](ARCHITECTURE.md) for the compatibility boundary.
 
 ## TUI Scope
 
@@ -154,11 +177,14 @@ Model Browser (active only on Model Browser tab):
 
 - `model_downloader/`: Hugging Face downloader + model config
 - `llama-swap.yaml`: single source of truth for servable models (see `docs/llama-swap-runbook.md`)
-- `bench-models/`: one `bench-llama-cpp-*.sh` script per model
+- `bench-models/`: editable `bench-*.sh` benchmark entry points and helpers
 - `maintenance/`: system/build scripts
 - `maintenance/systemd/`: user service units (including `llama-swap.service` and `nanobot-gateway.service`)
-- `l3ms/`: TUI app + stores
-- `l3ms.py`: launcher (TUI and CLI modes)
+- `src/`: Rust CLI, llama-swap client, stores, process supervisor, and Ratatui app
+- `Cargo.toml` / `Cargo.lock`: Rust package and locked dependency graph
+- `l3ms/`: legacy Python TUI and stores retained during parity work
+- `l3ms.py`: legacy Python launcher
+- `ARCHITECTURE.md`: source-of-truth boundaries and Rust migration status
 - `docs/llama-swap-runbook.md`: install, start/stop, curl, add-a-model
 - `docs/model-onboarding-playbook.md`: end-to-end checklist for adding new model families
 
@@ -243,5 +269,6 @@ This project uses semantic versioning. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Roadmap Note
 
-L3MS is intentionally Python-first for fast iteration.
-Plan: port L3MS to Rust once feature scope stabilizes.
+The Rust port is active under `CAR-97`. Python remains only where it provides a
+deliberate compatibility path, most notably the Hugging Face downloader and
+legacy TUI workflows that have not yet reached parity.
