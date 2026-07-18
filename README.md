@@ -51,6 +51,17 @@ cargo run --release --locked
 # or: ./target/release/l3ms
 ```
 
+On the KPC test machine, run the deployed checkout with its existing
+llama-swap service configuration:
+
+```bash
+./maintenance/run-l3ms-kpc.sh
+```
+
+The script derives the service port, API key, Rust toolchain environment, and
+downloader Python interpreter. Arguments are passed through to the Rust binary,
+for example `./maintenance/run-l3ms-kpc.sh --list run`.
+
 Show quick-start instructions without opening TUI:
 
 ```bash

@@ -7,6 +7,8 @@ implemented slices and do not assert full legacy parity or a fully green
 verification matrix.
 
 ### Added
+- Added `maintenance/run-l3ms-kpc.sh` to launch the deployed Rust binary with
+  the existing KPC llama-swap service and downloader environment.
 - Added the initial Rust `0.7.0` application: a Clap launcher, authenticated
   llama-swap client, typed configuration/script stores, and seven-view Ratatui
   workbench.
