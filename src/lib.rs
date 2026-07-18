@@ -1,5 +1,10 @@
 pub mod app;
+pub mod chat;
 pub mod cli;
+pub mod commands;
 pub mod config_store;
+pub mod gguf;
 pub mod llama_swap;
 pub mod script_store;
+pub mod state_store;
+pub mod telemetry;

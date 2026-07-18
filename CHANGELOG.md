@@ -11,6 +11,14 @@
   preservation.
 - Added supervised bench, download, and maintenance processes with bounded
   output, in-session jobs, and process-group shutdown.
+- Added streamed chat with bounded SSE parsing, system/temperature/token and
+  thinking controls, token-rate feedback, and authenticated requests.
+- Added a typed command registry, executable `Ctrl+P` palette, and contextual
+  help generated from the same command metadata.
+- Added live process-tree CPU/RAM telemetry with optional NVIDIA memory
+  reporting.
+- Added tested standalone modules for bounded GGUF v2/v3 metadata parsing and
+  legacy-compatible atomic job/chat-session persistence.
 - Added a pinned Rust toolchain, locked dependencies, unit coverage, strict
   Clippy checks, and GitHub Actions verification.
 - Added an on-demand `nomic-embed-text-v1.5` llama-swap profile with

@@ -23,10 +23,19 @@ module tree:
 - `src/cli.rs` owns argument parsing, model/script pickers, repository
   discovery, and headless command execution.
 - `src/llama_swap.rs` owns the authenticated llama-swap HTTP boundary.
+- `src/chat.rs` owns bounded server-sent-event parsing and streaming chat
+  requests.
+- `src/commands.rs` owns typed command metadata, contextual help, and palette
+  search.
 - `src/config_store.rs` owns typed download configuration, normalization,
   validation, atomic writes, and configuration snapshots.
+- `src/gguf.rs` owns bounded GGUF v2/v3 metadata parsing and safe directory
+  inventory.
 - `src/script_store.rs` owns safe repository-contained script access,
   command construction, atomic writes, mode preservation, and snapshots.
+- `src/state_store.rs` owns legacy-compatible job and chat-session persistence.
+- `src/telemetry.rs` owns process-tree CPU/RAM and optional NVIDIA memory
+  sampling.
 - `src/app.rs` owns the Ratatui event loop, shared model selection, background
   operations, supervised child processes, and the seven top-level views.
 
@@ -64,16 +73,27 @@ rapid saves, restore names cannot traverse out of their version directory, and
 script paths must resolve inside the selected repository. Existing Unix script
 permissions are preserved.
 
+The Rust state store also implements bounded, atomic `jobs.json` persistence
+and compatible JSON/Markdown chat sessions under `L3MS_DATA_DIR` (defaulting
+to `~/.l3ms`). Its path containment and malformed-row handling are covered by
+tests; TUI lifecycle integration is intentionally left for the next port pass.
+
 ## Migration boundary
 
 The Rust binary currently provides the headless llama-swap run/list workflow,
-benchmark execution, typed stores, and a functional seven-view TUI foundation
-covering model load/unload, bench and maintenance processes, chat requests,
-GGUF inventory, downloader execution, and in-session jobs.
+benchmark execution, typed stores, and a functional seven-view TUI. The TUI
+now includes streamed chat with request parameters, an executable searchable
+command palette, context-derived help, supervised processes, and live
+CPU/RAM/GPU telemetry. Bounded GGUF metadata and compatible job/chat state
+modules are implemented and tested but are not yet connected to their views.
 
 The Python TUI remains available during the parity period for its richer script
-and download editors, streamed/persisted chat sessions, detailed GGUF metadata,
-resource telemetry, persisted job history, and full command palette. These are
+and download editors, persisted chat/job view integration, detailed GGUF table
+integration, server detection, and remaining browser/editor controls. These are
 not silently emulated with incompatible formats. The Python TUI should only be
 retired after the corresponding Rust workflows have compatibility coverage and
 live llama-swap smoke verification.
+
+Development is paused at this coherent checkpoint. Linear issue `CAR-97`
+contains the authoritative ordered resume checklist; this document records the
+implemented boundary rather than maintaining a second backlog.

@@ -75,9 +75,12 @@ cargo run --locked -- --bench qwen --extra "--ctx-size 32768"
 ## Rust Migration Status
 
 The Rust `0.7.0` foundation now covers the llama-swap run/list CLI, benchmark
-execution, typed configuration and script stores, atomic snapshots, and a
-keyboard-first seven-view Ratatui workbench. The Python downloader remains the
-download implementation and is launched directly by the Rust TUI.
+execution, typed stores, atomic snapshots, streamed chat, runtime telemetry,
+and a keyboard-first seven-view Ratatui workbench with a searchable command
+palette. Bounded GGUF metadata parsing and compatible jobs/chat persistence are
+implemented as tested Rust modules; connecting them to the corresponding TUI
+views is the next migration pass. The Python downloader remains the download
+implementation and is launched directly by the Rust TUI.
 
 The richer Python TUI remains available during the parity period:
 
@@ -87,8 +90,9 @@ python3 l3ms.py
 ```
 
 The detailed TUI feature and key list below describes that full legacy surface.
-The Rust binary's current bindings are always available from `?` or `Ctrl+P`.
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the compatibility boundary.
+In the Rust binary, `?` opens contextual help and `Ctrl+P` opens the executable
+command palette. See [ARCHITECTURE.md](ARCHITECTURE.md) for the compatibility
+boundary and Linear issue `CAR-97` for the authoritative resume checklist.
 
 ## TUI Scope
 

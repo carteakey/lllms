@@ -14,6 +14,16 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
+use crate::{
+    chat::{stream_completion, ChatCompletion, ChatRequest},
+    commands::{command, search_all_commands, visible_commands, CommandContext, CommandId},
+    config_store::{
+        load_config, load_config_strict, save_config_in, validate_config, DownloadConfig,
+    },
+    llama_swap::{SwapClient, SwapModel},
+    script_store::{collect_scripts_in, command_for_script, ScriptMode},
+    telemetry::{find_process_named, snapshot_descendants, snapshot_process_group},
+};
 use anyhow::{Context, Result};
 use crossterm::{
     event::{self, Event, KeyCode, KeyEvent, KeyModifiers},
@@ -31,15 +41,6 @@ use ratatui::{
     },
     Frame, Terminal,
 };
-use serde_json::json;
-
-use crate::{
-    config_store::{
-        load_config, load_config_strict, save_config_in, validate_config, DownloadConfig,
-    },
-    llama_swap::{SwapClient, SwapModel},
-    script_store::{collect_scripts_in, command_for_script, ScriptMode},
-};
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
@@ -55,6 +56,8 @@ const TAB_NAMES: [&str; 7] = [
 const BACKGROUND_QUEUE_CAPACITY: usize = 512;
 const EVENTS_PER_TICK: usize = 128;
 const MAX_PROCESS_LINE_BYTES: usize = 16 * 1024;
+const MAX_CHAT_PREVIEW_BYTES: usize = 64 * 1024;
+const TELEMETRY_INTERVAL: Duration = Duration::from_secs(1);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -105,6 +108,7 @@ enum InputMode {
     ModelFilter,
     BrowserPath,
     ChatMessage,
+    ChatSystemPrompt,
 }
 
 #[derive(Debug, Clone)]
@@ -141,7 +145,8 @@ enum BackgroundEvent {
         result: Result<String, String>,
     },
     BrowserScan(Result<Vec<GgufFile>, String>),
-    ChatReply(Result<String, String>),
+    ChatDelta(String),
+    ChatFinished(Result<ChatCompletion, String>),
     ProcessLine {
         job_id: u64,
         line: String,
@@ -150,6 +155,7 @@ enum BackgroundEvent {
         job_id: u64,
         exit_code: i32,
     },
+    Telemetry(Result<Option<String>, String>),
 }
 
 struct App {
@@ -158,6 +164,9 @@ struct App {
     input_mode: InputMode,
     should_quit: bool,
     show_help: bool,
+    show_palette: bool,
+    palette_query: String,
+    palette_state: TableState,
     status: String,
     log: VecDeque<String>,
     sender: mpsc::SyncSender<BackgroundEvent>,
@@ -176,7 +185,12 @@ struct App {
 
     chat_input: String,
     chat_history: Vec<(String, String)>,
+    chat_streaming: String,
     chat_pending: bool,
+    chat_system_prompt: String,
+    chat_temperature: f64,
+    chat_max_tokens: u32,
+    chat_thinking: bool,
 
     browser_path: String,
     browser_files: Vec<GgufFile>,
@@ -196,6 +210,9 @@ struct App {
     jobs_state: TableState,
     next_job_id: u64,
     running_process: Option<RunningProcess>,
+    telemetry: String,
+    telemetry_pending: bool,
+    telemetry_last_started: Option<Instant>,
 }
 
 impl App {
@@ -214,13 +231,15 @@ impl App {
         } else {
             download_config.base_models_dir.clone()
         };
-
         let mut app = Self {
             root,
             tab: Tab::Workbench,
             input_mode: InputMode::Normal,
             should_quit: false,
             show_help: false,
+            show_palette: false,
+            palette_query: String::new(),
+            palette_state: TableState::default().with_selected(Some(0)),
             status: "Starting Rust workbench…".into(),
             log: VecDeque::new(),
             sender,
@@ -236,7 +255,12 @@ impl App {
             bench_state: ListState::default().with_selected(Some(0)),
             chat_input: String::new(),
             chat_history: Vec::new(),
+            chat_streaming: String::new(),
             chat_pending: false,
+            chat_system_prompt: String::new(),
+            chat_temperature: 0.8,
+            chat_max_tokens: 2048,
+            chat_thinking: false,
             browser_path,
             browser_files: Vec::new(),
             browser_state: TableState::default().with_selected(Some(0)),
@@ -252,6 +276,9 @@ impl App {
             jobs_state: TableState::default().with_selected(Some(0)),
             next_job_id: 1,
             running_process: None,
+            telemetry: "Resources: idle".into(),
+            telemetry_pending: false,
+            telemetry_last_started: None,
         };
         if let Some(warning) = config_warning {
             app.status = "Download config needs attention".into();
@@ -265,6 +292,7 @@ impl App {
     fn run(&mut self, terminal: &mut Tui) -> Result<()> {
         while !self.should_quit {
             self.drain_background_events();
+            self.refresh_telemetry_if_due();
             terminal.draw(|frame| self.draw(frame))?;
             if event::poll(Duration::from_millis(100))? {
                 if let Event::Key(key) = event::read()? {
@@ -377,18 +405,35 @@ impl App {
                         }
                     }
                 }
-                BackgroundEvent::ChatReply(result) => {
+                BackgroundEvent::ChatDelta(delta) => {
+                    append_bounded_text(&mut self.chat_streaming, &delta, MAX_CHAT_PREVIEW_BYTES);
+                }
+                BackgroundEvent::ChatFinished(result) => {
                     self.chat_pending = false;
                     match result {
-                        Ok(reply) => {
-                            self.chat_history.push(("assistant".into(), reply));
-                            self.status = "Chat response received".into();
+                        Ok(completion) => {
+                            let status = match (
+                                completion.completion_tokens,
+                                completion.tokens_per_second(),
+                            ) {
+                                (Some(tokens), Some(rate)) => {
+                                    format!("Chat response: {tokens} tokens · {rate:.1} tok/s")
+                                }
+                                _ => format!(
+                                    "Chat response received in {:.1}s",
+                                    completion.elapsed.as_secs_f64()
+                                ),
+                            };
+                            self.chat_history
+                                .push(("assistant".into(), completion.content));
+                            self.status = status;
                         }
                         Err(error) => {
                             self.status = "Chat request failed".into();
                             self.push_log(error);
                         }
                     }
+                    self.chat_streaming.clear();
                 }
                 BackgroundEvent::ProcessLine { job_id, line } => {
                     if self.jobs.iter().any(|job| job.id == job_id) {
@@ -405,8 +450,59 @@ impl App {
                         self.running_process = None;
                     }
                 }
+                BackgroundEvent::Telemetry(result) => {
+                    self.telemetry_pending = false;
+                    self.telemetry = match result {
+                        Ok(Some(snapshot)) => snapshot,
+                        Ok(None) => "Resources: idle".into(),
+                        Err(error) => format!("Resources: unavailable ({error})"),
+                    };
+                }
             }
         }
+    }
+
+    fn refresh_telemetry_if_due(&mut self) {
+        if self.telemetry_pending
+            || self
+                .telemetry_last_started
+                .is_some_and(|started| started.elapsed() < TELEMETRY_INTERVAL)
+        {
+            return;
+        }
+
+        let running_target = self.running_process.as_ref().map(|running| {
+            let elapsed = self
+                .jobs
+                .iter()
+                .find(|job| job.id == running.job_id)
+                .map_or(0, |job| job.started.elapsed().as_secs());
+            (running.process_group, elapsed)
+        });
+        let monitor_swap = self.loaded_model_id.is_some();
+        if running_target.is_none() && !monitor_swap {
+            self.telemetry = "Resources: idle".into();
+            return;
+        }
+
+        self.telemetry_pending = true;
+        self.telemetry_last_started = Some(Instant::now());
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let result = if let Some((process_group, elapsed)) = running_target {
+                snapshot_process_group(process_group)
+                    .map(|snapshot| Some(snapshot.render("procs", Some(elapsed))))
+            } else {
+                find_process_named("llama-swap").and_then(|process| {
+                    process.map_or(Ok(None), |process| {
+                        snapshot_descendants(process)
+                            .map(|snapshot| Some(snapshot.render("upstreams", None)))
+                    })
+                })
+            }
+            .map_err(|error| format!("{error:#}"));
+            let _ = sender.send(BackgroundEvent::Telemetry(result));
+        });
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
@@ -414,9 +510,15 @@ impl App {
             self.should_quit = true;
             return Ok(());
         }
+        if self.show_palette {
+            return self.handle_palette_key(key);
+        }
         if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.show_help = !self.show_help;
+            self.open_palette();
             return Ok(());
+        }
+        if let Some(command_id) = self.modified_key_command(key) {
+            return self.execute_command(command_id);
         }
         if let KeyCode::F(number @ 1..=7) = key.code {
             self.tab = Tab::from_index(number as usize - 1);
@@ -471,6 +573,88 @@ impl App {
         Ok(())
     }
 
+    fn modified_key_command(&self, key: KeyEvent) -> Option<CommandId> {
+        let control = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        match (self.tab, key.code, control, alt) {
+            (Tab::Workbench, KeyCode::Char('r'), true, _) => Some(CommandId::WorkbenchLoadModel),
+            (Tab::Workbench, KeyCode::Char('s'), true, _) => Some(CommandId::WorkbenchUnloadModel),
+            (Tab::Workbench, KeyCode::Char('f'), true, _) => Some(CommandId::WorkbenchFocusFilter),
+            (Tab::Workbench, KeyCode::Char('j'), true, _) => Some(CommandId::WorkbenchFocusTable),
+            (Tab::ModelOps, KeyCode::Char('r'), true, _) => Some(CommandId::ModelOpsStart),
+            (Tab::ModelOps, KeyCode::Char('s'), true, _) => Some(CommandId::ModelOpsStop),
+            (Tab::ModelOps, KeyCode::Char('m'), true, _) => Some(CommandId::ModelOpsToggleMode),
+            (Tab::ModelOps, KeyCode::Char('f'), true, _) => Some(CommandId::ModelOpsFocusFilter),
+            (Tab::ModelOps, KeyCode::Char('j'), true, _) => Some(CommandId::ModelOpsFocusTable),
+            (Tab::Chat, KeyCode::Char('x'), true, _) => Some(CommandId::ChatClear),
+            (Tab::Browser, KeyCode::Char('r'), _, true) => Some(CommandId::BrowserScan),
+            (Tab::Browser, KeyCode::Char('g'), _, true) => Some(CommandId::BrowserFocusPath),
+            (Tab::Browser, KeyCode::Char('j'), _, true) => Some(CommandId::BrowserFocusTable),
+            (Tab::Download, KeyCode::Char('d'), _, true) => Some(CommandId::DownloadSelected),
+            (Tab::Download, KeyCode::Char('e'), _, true) => Some(CommandId::DownloadEnabled),
+            (Tab::Download, KeyCode::Char('w'), _, true) => Some(CommandId::DownloadSaveConfig),
+            (Tab::Download, KeyCode::Char('v'), _, true) => Some(CommandId::DownloadValidateConfig),
+            (Tab::Download, KeyCode::Char('t'), _, true) => Some(CommandId::DownloadFocusTable),
+            (Tab::Maintenance, KeyCode::Char('r'), true, _) => Some(CommandId::MaintenanceRun),
+            (Tab::Maintenance, KeyCode::Char('s'), true, _) => Some(CommandId::MaintenanceStop),
+            _ => None,
+        }
+    }
+
+    fn open_palette(&mut self) {
+        self.show_help = false;
+        self.show_palette = true;
+        self.palette_query.clear();
+        self.palette_state.select(Some(0));
+    }
+
+    fn handle_palette_key(&mut self, key: KeyEvent) -> Result<()> {
+        match key.code {
+            KeyCode::Esc => self.show_palette = false,
+            KeyCode::Char('p') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                self.show_palette = false;
+            }
+            KeyCode::Up => {
+                let count = self.palette_commands().len();
+                select_previous_table(&mut self.palette_state, count)
+            }
+            KeyCode::Down => {
+                let count = self.palette_commands().len();
+                select_next_table(&mut self.palette_state, count)
+            }
+            KeyCode::Backspace => {
+                self.palette_query.pop();
+                self.palette_state.select(Some(0));
+            }
+            KeyCode::Enter => {
+                let command_id = self
+                    .palette_state
+                    .selected()
+                    .and_then(|index| self.palette_commands().get(index).map(|spec| spec.id));
+                self.show_palette = false;
+                if let Some(command_id) = command_id {
+                    self.execute_command(command_id)?;
+                }
+            }
+            KeyCode::Char(character)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                self.palette_query.push(character);
+                self.palette_state.select(Some(0));
+            }
+            _ => {}
+        }
+        let count = self.palette_commands().len();
+        clamp_table_selection(&mut self.palette_state, count);
+        Ok(())
+    }
+
+    fn palette_commands(&self) -> Vec<&'static crate::commands::CommandSpec> {
+        search_all_commands(&self.palette_query)
+    }
+
     fn handle_input_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Esc => self.input_mode = InputMode::Normal,
@@ -480,6 +664,7 @@ impl App {
                     self.input_mode = InputMode::Normal;
                     self.scan_browser();
                 }
+                InputMode::ChatSystemPrompt => self.input_mode = InputMode::Normal,
                 _ => self.input_mode = InputMode::Normal,
             },
             KeyCode::Backspace => match self.input_mode {
@@ -493,6 +678,9 @@ impl App {
                 InputMode::ChatMessage => {
                     self.chat_input.pop();
                 }
+                InputMode::ChatSystemPrompt => {
+                    self.chat_system_prompt.pop();
+                }
                 InputMode::Normal => {}
             },
             KeyCode::Char(character) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -503,6 +691,7 @@ impl App {
                     }
                     InputMode::BrowserPath => self.browser_path.push(character),
                     InputMode::ChatMessage => self.chat_input.push(character),
+                    InputMode::ChatSystemPrompt => self.chat_system_prompt.push(character),
                     InputMode::Normal => {}
                 }
             }
@@ -520,6 +709,184 @@ impl App {
             Tab::Download => self.handle_download_key(key)?,
             Tab::Jobs => self.handle_jobs_key(key),
             Tab::Maintenance => self.handle_maintenance_key(key),
+        }
+        Ok(())
+    }
+
+    fn command_context(&self) -> CommandContext {
+        match self.tab {
+            Tab::Workbench => CommandContext::Workbench,
+            Tab::ModelOps => CommandContext::ModelOps,
+            Tab::Chat => CommandContext::Chat,
+            Tab::Browser => CommandContext::Browser,
+            Tab::Download => CommandContext::Download,
+            Tab::Jobs => CommandContext::Jobs,
+            Tab::Maintenance => CommandContext::Maintenance,
+        }
+    }
+
+    fn execute_command(&mut self, command_id: CommandId) -> Result<()> {
+        use CommandId::*;
+
+        match command_id {
+            Quit => self.should_quit = true,
+            ShowHelp => self.show_help = true,
+            ShowPalette => self.open_palette(),
+            OpenWorkbench => self.tab = Tab::Workbench,
+            OpenModelOps => self.tab = Tab::ModelOps,
+            OpenChat => self.tab = Tab::Chat,
+            OpenBrowser => self.tab = Tab::Browser,
+            OpenDownload => self.tab = Tab::Download,
+            OpenJobs => self.tab = Tab::Jobs,
+            OpenMaintenance => self.tab = Tab::Maintenance,
+            PreviousTab => {
+                self.tab =
+                    Tab::from_index((self.tab.index() + TAB_NAMES.len() - 1) % TAB_NAMES.len())
+            }
+            NextTab => self.tab = Tab::from_index(self.tab.index() + 1),
+            WorkbenchSelectPrevious => {
+                let count = self.visible_model_count();
+                select_previous_table(&mut self.model_state, count);
+            }
+            WorkbenchSelectNext => {
+                let count = self.visible_model_count();
+                select_next_table(&mut self.model_state, count);
+            }
+            WorkbenchFocusFilter => self.input_mode = InputMode::ModelFilter,
+            WorkbenchFocusTable => self.input_mode = InputMode::Normal,
+            WorkbenchRefreshModels => self.refresh_models(),
+            WorkbenchLoadModel => self.model_action(true),
+            WorkbenchUnloadModel => self.model_action(false),
+            ModelOpsToggleMode => {
+                self.ops_mode = match self.ops_mode {
+                    OpsMode::Run => OpsMode::Bench,
+                    OpsMode::Bench => OpsMode::Run,
+                }
+            }
+            ModelOpsSelectPrevious => match self.ops_mode {
+                OpsMode::Run => {
+                    let count = self.visible_model_count();
+                    select_previous_table(&mut self.model_state, count);
+                }
+                OpsMode::Bench => {
+                    select_previous_list(&mut self.bench_state, self.bench_scripts.len())
+                }
+            },
+            ModelOpsSelectNext => match self.ops_mode {
+                OpsMode::Run => {
+                    let count = self.visible_model_count();
+                    select_next_table(&mut self.model_state, count);
+                }
+                OpsMode::Bench => select_next_list(&mut self.bench_state, self.bench_scripts.len()),
+            },
+            ModelOpsStart => match self.ops_mode {
+                OpsMode::Run => self.model_action(true),
+                OpsMode::Bench => self.run_selected_bench(),
+            },
+            ModelOpsStop => match self.ops_mode {
+                OpsMode::Run => self.model_action(false),
+                OpsMode::Bench => self.stop_running_process(),
+            },
+            ModelOpsRefreshModels => self.refresh_models(),
+            ModelOpsFocusFilter => {
+                if self.ops_mode == OpsMode::Run {
+                    self.input_mode = InputMode::ModelFilter;
+                } else {
+                    self.status = "Bench script filtering is not implemented yet".into();
+                }
+            }
+            ModelOpsFocusTable => self.input_mode = InputMode::Normal,
+            ChatCompose => self.input_mode = InputMode::ChatMessage,
+            ChatSend => {
+                if self.chat_input.trim().is_empty() {
+                    self.input_mode = InputMode::ChatMessage;
+                } else {
+                    self.send_chat_message();
+                }
+            }
+            ChatRefreshModels => self.refresh_models(),
+            ChatClear => {
+                self.chat_history.clear();
+                self.chat_streaming.clear();
+                self.status = "Chat cleared".into();
+            }
+            ChatEditSystemPrompt => self.input_mode = InputMode::ChatSystemPrompt,
+            ChatToggleThinking => self.chat_thinking = !self.chat_thinking,
+            ChatDecreaseTemperature => {
+                self.chat_temperature = (self.chat_temperature - 0.1).max(0.0)
+            }
+            ChatIncreaseTemperature => {
+                self.chat_temperature = (self.chat_temperature + 0.1).min(10.0)
+            }
+            ChatDecreaseMaxTokens => self.chat_max_tokens = (self.chat_max_tokens / 2).max(128),
+            ChatIncreaseMaxTokens => {
+                self.chat_max_tokens = self.chat_max_tokens.saturating_mul(2).min(65_536)
+            }
+            BrowserSelectPrevious => {
+                select_previous_table(&mut self.browser_state, self.browser_files.len())
+            }
+            BrowserSelectNext => {
+                select_next_table(&mut self.browser_state, self.browser_files.len())
+            }
+            BrowserScan => self.scan_browser(),
+            BrowserFocusPath => self.input_mode = InputMode::BrowserPath,
+            BrowserFocusTable => self.input_mode = InputMode::Normal,
+            DownloadSelectPrevious => {
+                select_previous_table(&mut self.download_state, self.download_config.models.len())
+            }
+            DownloadSelectNext => {
+                select_next_table(&mut self.download_state, self.download_config.models.len())
+            }
+            DownloadFocusTable => self.input_mode = InputMode::Normal,
+            DownloadToggleEnabled => {
+                self.handle_download_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))?
+            }
+            DownloadSaveConfig => {
+                self.handle_download_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE))?
+            }
+            DownloadValidateConfig => {
+                self.handle_download_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))?
+            }
+            DownloadSelected => self.download_selected(),
+            DownloadEnabled => self.download_enabled(),
+            JobsSelectPrevious => select_previous_table(&mut self.jobs_state, self.jobs.len()),
+            JobsSelectNext => select_next_table(&mut self.jobs_state, self.jobs.len()),
+            JobsStop => self.stop_running_process(),
+            JobsRetry => self.retry_selected_job(),
+            JobsClear if self.running_process.is_none() => {
+                self.jobs.clear();
+                self.jobs_state.select(None);
+                self.status = "Job history cleared".into();
+            }
+            MaintenanceSelectPrevious => {
+                select_previous_list(&mut self.maintenance_state, self.maintenance_scripts.len())
+            }
+            MaintenanceSelectNext => {
+                select_next_list(&mut self.maintenance_state, self.maintenance_scripts.len())
+            }
+            MaintenanceRun => self.run_selected_maintenance(),
+            MaintenanceStop => self.stop_running_process(),
+            _ => {
+                let label = command(command_id)
+                    .map(|spec| spec.palette_label)
+                    .unwrap_or("Unknown command");
+                self.status = format!("{label} is not implemented yet");
+            }
+        }
+        if matches!(
+            command_id,
+            OpenWorkbench
+                | OpenModelOps
+                | OpenChat
+                | OpenBrowser
+                | OpenDownload
+                | OpenJobs
+                | OpenMaintenance
+                | PreviousTab
+                | NextTab
+        ) {
+            self.input_mode = InputMode::Normal;
+            self.show_help = false;
         }
         Ok(())
     }
@@ -570,9 +937,34 @@ impl App {
             KeyCode::Char('i') | KeyCode::Enter => self.input_mode = InputMode::ChatMessage,
             KeyCode::Char('x') => {
                 self.chat_history.clear();
+                self.chat_streaming.clear();
                 self.status = "Chat cleared".into();
             }
             KeyCode::Char('r') => self.refresh_models(),
+            KeyCode::Char('p') => self.input_mode = InputMode::ChatSystemPrompt,
+            KeyCode::Char('t') => {
+                self.chat_thinking = !self.chat_thinking;
+                self.status = format!(
+                    "Thinking prefix {}",
+                    if self.chat_thinking {
+                        "enabled"
+                    } else {
+                        "disabled"
+                    }
+                );
+            }
+            KeyCode::Char('[') => {
+                self.chat_temperature = (self.chat_temperature - 0.1).max(0.0);
+            }
+            KeyCode::Char(']') => {
+                self.chat_temperature = (self.chat_temperature + 0.1).min(10.0);
+            }
+            KeyCode::Char('-') => {
+                self.chat_max_tokens = (self.chat_max_tokens / 2).max(128);
+            }
+            KeyCode::Char('+') | KeyCode::Char('=') => {
+                self.chat_max_tokens = self.chat_max_tokens.saturating_mul(2).min(65_536);
+            }
             _ => {}
         }
     }
@@ -668,7 +1060,7 @@ impl App {
             }
             KeyCode::Char('s') => self.stop_running_process(),
             KeyCode::Char('r') => self.retry_selected_job(),
-            KeyCode::Char('c') if self.running_process.is_none() => {
+            KeyCode::Char('c') | KeyCode::Delete if self.running_process.is_none() => {
                 self.jobs.clear();
                 self.jobs_state.select(None);
                 self.status = "Job history cleared".into();
@@ -812,13 +1204,28 @@ impl App {
         };
         self.chat_input.clear();
         self.chat_history.push(("user".into(), prompt));
+        self.chat_streaming.clear();
         self.chat_pending = true;
         self.status = format!("Waiting for {}…", model.id);
         let history = self.chat_history.clone();
+        let system_prompt = self.chat_system_prompt.clone();
+        let temperature = self.chat_temperature;
+        let max_tokens = self.chat_max_tokens;
+        let thinking = self.chat_thinking;
         let sender = self.sender.clone();
         thread::spawn(move || {
-            let result = chat_completion(&model.id, &history).map_err(|error| format!("{error:#}"));
-            let _ = sender.send(BackgroundEvent::ChatReply(result));
+            let mut request = ChatRequest::new(model.id, history);
+            request.system_prompt = system_prompt;
+            request.temperature = temperature;
+            request.max_tokens = max_tokens;
+            request.thinking = thinking;
+            let result = stream_completion(&request, |delta| {
+                sender
+                    .send(BackgroundEvent::ChatDelta(delta.to_owned()))
+                    .is_ok()
+            })
+            .map_err(|error| format!("{error:#}"));
+            let _ = sender.send(BackgroundEvent::ChatFinished(result));
         });
     }
 
@@ -1130,7 +1537,9 @@ impl App {
         }
         self.draw_log(frame, areas[3]);
         self.draw_footer(frame, areas[4]);
-        if self.show_help {
+        if self.show_palette {
+            self.draw_palette(frame);
+        } else if self.show_help {
             self.draw_help(frame);
         }
     }
@@ -1205,11 +1614,14 @@ impl App {
         };
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(2), Constraint::Min(4)])
+            .constraints([Constraint::Length(3), Constraint::Min(4)])
             .split(area);
         frame.render_widget(
-            Paragraph::new(format!(" {mode}   m toggle mode · r/Enter start · s stop"))
-                .style(Style::default().fg(Color::Yellow)),
+            Paragraph::new(format!(
+                " {mode}   m toggle mode · r/Enter start · s stop\n {}",
+                self.telemetry
+            ))
+            .style(Style::default().fg(Color::Yellow)),
             chunks[0],
         );
         match self.ops_mode {
@@ -1271,8 +1683,33 @@ impl App {
     fn draw_chat(&self, frame: &mut Frame, area: Rect) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Min(4), Constraint::Length(3)])
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Min(4),
+                Constraint::Length(3),
+            ])
             .split(area);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "system: {} │ temp {:.1} │ max {} │ thinking {}",
+                self.chat_system_prompt,
+                self.chat_temperature,
+                self.chat_max_tokens,
+                if self.chat_thinking { "on" } else { "off" }
+            ))
+            .block(
+                Block::default()
+                    .title("Params · p system · [/] temp · -/+ max tokens · t thinking")
+                    .borders(Borders::ALL),
+            ),
+            chunks[0],
+        );
+        if self.input_mode == InputMode::ChatSystemPrompt {
+            frame.set_cursor_position((
+                chunks[0].x + 9 + self.chat_system_prompt.chars().count() as u16,
+                chunks[0].y + 1,
+            ));
+        }
         let mut lines = Vec::new();
         for (role, content) in self.chat_history.iter().rev().take(14).rev() {
             let color = if role == "user" {
@@ -1287,6 +1724,13 @@ impl App {
             lines.push(Line::from(content.as_str()));
             lines.push(Line::from(""));
         }
+        if !self.chat_streaming.is_empty() {
+            lines.push(Line::from(Span::styled(
+                "assistant (streaming):",
+                Style::default().fg(Color::Green).bold(),
+            )));
+            lines.push(Line::from(self.chat_streaming.as_str()));
+        }
         if lines.is_empty() {
             lines.push(Line::from("Press i or Enter to compose a message."));
             lines.push(Line::from("The selected Workbench model is used."));
@@ -1295,7 +1739,7 @@ impl App {
             Paragraph::new(lines)
                 .block(Block::default().title("Conversation").borders(Borders::ALL))
                 .wrap(Wrap { trim: false }),
-            chunks[0],
+            chunks[1],
         );
         let marker = if self.chat_pending { " waiting…" } else { "" };
         frame.render_widget(
@@ -1304,12 +1748,12 @@ impl App {
                     .title("Message · Enter send · Esc cancel")
                     .borders(Borders::ALL),
             ),
-            chunks[1],
+            chunks[2],
         );
         if self.input_mode == InputMode::ChatMessage {
             frame.set_cursor_position((
-                chunks[1].x + 3 + self.chat_input.chars().count() as u16,
-                chunks[1].y + 1,
+                chunks[2].x + 3 + self.chat_input.chars().count() as u16,
+                chunks[2].y + 1,
             ));
         }
     }
@@ -1493,9 +1937,10 @@ impl App {
             InputMode::ModelFilter => "  FILTER",
             InputMode::BrowserPath => "  PATH INPUT",
             InputMode::ChatMessage => "  CHAT INPUT",
+            InputMode::ChatSystemPrompt => "  SYSTEM PROMPT INPUT",
         };
         let footer = format!(
-            " {}{}  │ F1–F7 tabs │ Alt+←/→ cycle │ Ctrl+P/? help │ q quit ",
+            " {}{}  │ F1–F7 tabs │ Alt+←/→ cycle │ Ctrl+P palette │ ? help │ q quit ",
             self.status, input
         );
         frame.render_widget(
@@ -1507,33 +1952,76 @@ impl App {
     }
 
     fn draw_help(&self, frame: &mut Frame) {
-        let area = centered_rect(76, 78, frame.area());
+        let area = centered_rect(82, 82, frame.area());
         frame.render_widget(Clear, area);
-        let help = vec![
+        let context = self.command_context();
+        let mut help = vec![
             Line::from(Span::styled(
                 "L3MS Rust key bindings",
                 Style::default().fg(Color::Cyan).bold(),
             )),
             Line::from(""),
-            Line::from("Global       F1–F7 tabs · Alt+←/→ cycle · q quit · ?/Ctrl+P help"),
-            Line::from("Workbench    ↑/↓ select · / filter · r refresh · Enter/l load · s unload"),
-            Line::from("Model Ops   m run/bench · ↑/↓ select · r/Enter start · s stop"),
-            Line::from("Chat         i/Enter compose · Enter send · Esc cancel · x clear"),
-            Line::from("Browser      g edit path · r scan · ↑/↓ select"),
-            Line::from(
-                "Download     Space enable · w snapshot/save · v validate · d selected · e enabled",
-            ),
-            Line::from("Jobs         s stop · r retry · c clear"),
-            Line::from("Maintenance  r/Enter run · s stop"),
+            Line::from("Global  F1–F7/Alt+1–7 tabs · Alt+←/→ cycle · Ctrl+P palette · q quit"),
             Line::from(""),
-            Line::from("Press any key to close."),
         ];
+        help.push(Line::from(Span::styled(
+            format!("{} commands", context),
+            Style::default().fg(Color::Yellow).bold(),
+        )));
+        for spec in visible_commands(context)
+            .into_iter()
+            .filter(|spec| !spec.contexts.contains(&CommandContext::Global))
+        {
+            help.push(Line::from(vec![
+                Span::styled(
+                    format!("  {:<20}", spec.shortcut),
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::raw(spec.label),
+            ]));
+        }
+        help.push(Line::from(""));
+        help.push(Line::from("Press any key to close."));
         frame.render_widget(
             Paragraph::new(help)
                 .block(Block::default().title(" Help ").borders(Borders::ALL))
                 .wrap(Wrap { trim: false }),
             area,
         );
+    }
+
+    fn draw_palette(&mut self, frame: &mut Frame) {
+        let area = centered_rect(84, 84, frame.area());
+        frame.render_widget(Clear, area);
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Min(4)])
+            .split(area);
+        frame.render_widget(
+            Paragraph::new(self.palette_query.as_str()).block(
+                Block::default()
+                    .title(" Command palette · type to search · Esc close ")
+                    .borders(Borders::ALL),
+            ),
+            chunks[0],
+        );
+        let commands = self.palette_commands();
+        let rows = commands
+            .iter()
+            .map(|spec| Row::new([Cell::from(spec.shortcut), Cell::from(spec.palette_label)]));
+        let table = Table::new(rows, [Constraint::Length(22), Constraint::Percentage(100)])
+            .block(
+                Block::default()
+                    .title(format!(" {} command(s) · Enter run ", commands.len()))
+                    .borders(Borders::ALL),
+            )
+            .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+            .highlight_symbol("▶ ");
+        frame.render_stateful_widget(table, chunks[1], &mut self.palette_state);
+        frame.set_cursor_position((
+            chunks[0].x + 1 + self.palette_query.chars().count() as u16,
+            chunks[0].y + 1,
+        ));
     }
 }
 
@@ -1703,6 +2191,22 @@ fn stream_reader(
     });
 }
 
+fn append_bounded_text(target: &mut String, addition: &str, max_bytes: usize) {
+    target.push_str(addition);
+    if target.len() <= max_bytes {
+        return;
+    }
+    if max_bytes == 0 {
+        target.clear();
+        return;
+    }
+    let mut remove = target.len() - max_bytes;
+    while remove < target.len() && !target.is_char_boundary(remove) {
+        remove += 1;
+    }
+    target.drain(..remove);
+}
+
 #[cfg(unix)]
 fn signal_process_group(process_group: u32, signal: &str) -> std::result::Result<(), String> {
     let status = Command::new("/bin/kill")
@@ -1827,42 +2331,6 @@ fn infer_quantization(path: &Path) -> String {
         }
     }
     "unknown".into()
-}
-
-fn chat_completion(model: &str, history: &[(String, String)]) -> Result<String> {
-    let base_url = env::var("LLAMA_SWAP_URL")
-        .unwrap_or_else(|_| "http://localhost:8080".into())
-        .trim_end_matches('/')
-        .to_owned();
-    let client = reqwest::blocking::Client::builder()
-        .connect_timeout(Duration::from_secs(2))
-        .timeout(Duration::from_secs(120))
-        .build()?;
-    let messages = history
-        .iter()
-        .map(|(role, content)| json!({"role": role, "content": content}))
-        .collect::<Vec<_>>();
-    let mut request = client
-        .post(format!("{base_url}/v1/chat/completions"))
-        .json(&json!({
-            "model": model,
-            "messages": messages,
-            "temperature": 0.8,
-            "max_tokens": 2048,
-            "stream": false
-        }));
-    if let Ok(api_key) = env::var("LLAMA_SWAP_API_KEY") {
-        if !api_key.trim().is_empty() {
-            request = request.bearer_auth(api_key.trim());
-        }
-    }
-    let response = request.send()?.error_for_status()?;
-    let value: serde_json::Value = response.json()?;
-    value
-        .pointer("/choices/0/message/content")
-        .and_then(serde_json::Value::as_str)
-        .map(ToOwned::to_owned)
-        .context("chat response did not include choices[0].message.content")
 }
 
 fn display_name(path: &Path) -> String {
@@ -2077,6 +2545,15 @@ mod tests {
         assert_eq!(job_id, 42);
         assert!(line.len() < MAX_PROCESS_LINE_BYTES + 64);
         assert!(line.ends_with("[line truncated]"));
+    }
+
+    #[test]
+    fn streaming_preview_is_bounded_at_utf8_boundaries() {
+        let mut preview = "old".to_owned();
+        append_bounded_text(&mut preview, "éclair", 6);
+        assert_eq!(preview, "clair");
+        append_bounded_text(&mut preview, "ignored", 0);
+        assert!(preview.is_empty());
     }
 
     #[cfg(unix)]
