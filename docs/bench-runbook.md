@@ -23,6 +23,18 @@ shared weights stay on GPU.
 For coding agents running multi-turn long sessions, **tg is the bottleneck**.
 Optimise pp only if first-token latency is visibly painful.
 
+### Evidence required for a published profile
+
+Save one record from the same run with: PP, TG, tested context, cold/warm cache
+state, speculative draft acceptance when applicable, the exact llama.cpp
+commit, and the exact benchmark command. Do not fill a missing field from a
+different run just because the model and quant match. Historical dashboard
+profiles show `not recorded` where the old scripts did not preserve this data.
+
+External hardware results use `docs/community-runs.schema.json`. They stay in
+the dashboard's separate community view and never enter the local RTX 4070
+ranking.
+
 **Reference hardware (these scripts were tuned on):**
 
 - GPU: RTX 4070 12 GB

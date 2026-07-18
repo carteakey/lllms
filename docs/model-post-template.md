@@ -105,6 +105,19 @@ llama-server \
 
 ## Bench
 
+Record these from the same run. Use `not recorded` for a historical gap; do
+not combine PP from one configuration with TG or acceptance from another.
+
+```text
+llama.cpp commit: [FULL_OR_SHORT_SHA]
+benchmark command: [EXACT_COMMAND]
+tested context: [TOKENS]
+cache state: [cold / warm / mixed, plus K/V precision]
+PP: [TOKENS_PER_SECOND]
+TG: [TOKENS_PER_SECOND]
+draft acceptance: [PERCENT_OR_NOT_APPLICABLE]
+```
+
 ```bash
 llama-bench \
   -m ~/models/[HF_REPO]/[MODEL_FILE] \

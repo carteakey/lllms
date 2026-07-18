@@ -11,7 +11,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "llama-swap.yaml"
 META = ROOT / "docs" / "dashboard-meta.json"
+COMMUNITY_RUNS = ROOT / "docs" / "community-runs.json"
 OUTPUT = ROOT / "docs" / "generated-models.js"
+
+EVIDENCE_FIELDS = (
+    "pp",
+    "tg",
+    "testedContext",
+    "cacheState",
+    "draftAcceptance",
+    "llamaCppCommit",
+    "benchmarkCommand",
+)
 
 
 def parse_scalar(value: str):
@@ -86,6 +97,71 @@ def context_from_command(command: str) -> str:
     return f"{round(size / 1024)}k" if size >= 1024 else str(size)
 
 
+def benchmark_command(path_value: str) -> str | None:
+    if Path(path_value).name.startswith("run-"):
+        return None
+    if path_value.endswith(".py"):
+        return f"python3 {path_value}"
+    if path_value.endswith(".sh"):
+        return f"bash {path_value}"
+    return path_value or None
+
+
+def profile_evidence(display: dict) -> dict:
+    evidence = {
+        "scope": "local",
+        "pp": display.get("pp"),
+        "tg": display["tps"],
+        "testedContext": display.get("testedContext"),
+        "cacheState": display.get("cacheState"),
+        "draftAcceptance": display.get("draftAcceptance"),
+        "llamaCppCommit": display.get("llamaCppCommit"),
+        "benchmarkCommand": display.get(
+            "benchmarkCommand", benchmark_command(display["benchmark"])
+        ),
+    }
+    missing = [field for field in EVIDENCE_FIELDS if field not in evidence]
+    if missing:
+        raise SystemExit(f"Profile evidence is missing fields: {missing}")
+    return evidence
+
+
+def validate_community_runs(data: dict) -> list[dict]:
+    runs = data.get("runs")
+    if not isinstance(runs, list):
+        raise SystemExit("community-runs.json must contain a runs array")
+
+    required = {
+        "id",
+        "submittedAt",
+        "sourceUrl",
+        "hardware",
+        "software",
+        "model",
+        "benchmark",
+        "metrics",
+    }
+    seen_ids = set()
+    for index, run in enumerate(runs):
+        if not isinstance(run, dict):
+            raise SystemExit(f"Community run {index} must be an object")
+        missing = sorted(required - set(run))
+        if missing:
+            raise SystemExit(f"Community run {index} is missing: {', '.join(missing)}")
+        if run["id"] in seen_ids:
+            raise SystemExit(f"Duplicate community run id: {run['id']}")
+        seen_ids.add(run["id"])
+        if not str(run["sourceUrl"]).startswith("https://"):
+            raise SystemExit(f"Community run {run['id']} needs an HTTPS sourceUrl")
+        if run["benchmark"].get("command") in {None, ""}:
+            raise SystemExit(f"Community run {run['id']} needs an exact benchmark command")
+        if run["software"].get("llamaCppCommit") in {None, ""}:
+            raise SystemExit(f"Community run {run['id']} needs a llama.cpp commit")
+        if run["metrics"].get("tg") is None:
+            raise SystemExit(f"Community run {run['id']} needs a TG result")
+    return runs
+
+
 def portable_command(model: dict) -> str:
     command = model.get("cmd", "")
     command = re.sub(r"(?m)^\s*#.*\n?", "", command).strip()
@@ -136,6 +212,7 @@ def portable_command(model: dict) -> str:
 def main() -> None:
     parsed = parse_models(CONFIG.read_text())
     meta = json.loads(META.read_text())
+    community_runs = validate_community_runs(json.loads(COMMUNITY_RUNS.read_text()))
     public_models = []
     active_ids = {
         model_id
@@ -167,6 +244,7 @@ def main() -> None:
                 "name": display.get("displayName", source.get("name", model_id)),
                 "description": display.get("summary", source.get("description", "")),
                 "context": context_from_command(source.get("cmd", "")),
+                "evidence": profile_evidence(display),
                 "command": portable_command(source),
                 "sourceUrl": "https://github.com/carteakey/l3ms/blob/main/llama-swap.yaml",
                 "benchmarkUrl": f"https://github.com/carteakey/l3ms/blob/main/{display['benchmark']}",
@@ -180,6 +258,9 @@ def main() -> None:
         "methodology": meta["methodology"],
         "models": public_models,
         "benchmarks": meta["benchmarks"],
+        # Deliberately separate from models: community hardware must never
+        # enter the local RTX 4070 ranking or its sort order.
+        "communityRuns": community_runs,
         "archived": meta["archived"],
     }
     OUTPUT.write_text(

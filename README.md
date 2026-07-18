@@ -221,12 +221,20 @@ Throttle concurrency (useful on metered connections):
 
 The served-profile data and commands in `docs/generated-models.js` are
 generated from `llama-swap.yaml`. Presentation-only values such as measured
-throughput and benchmark comparisons live in `docs/dashboard-meta.json`.
+throughput and benchmark comparisons live in `docs/dashboard-meta.json`. Every
+published local profile receives the same evidence fields; missing historical
+values are rendered as `not recorded` rather than inferred from another run.
+
+Reviewed external results live in `docs/community-runs.json` and follow
+`docs/community-runs.schema.json`. They render in a separate unranked view and
+are never merged into the local RTX 4070 profile array. See
+`docs/community-runs.md` for the submission format.
 
 Regenerate after changing either source:
 
 ```bash
 python3 docs/generate_dashboard_data.py
+python3 -m unittest docs/test_generate_dashboard_data.py
 ```
 
 Preview locally:

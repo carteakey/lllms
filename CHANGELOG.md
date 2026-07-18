@@ -6,6 +6,15 @@
 - Added an on-demand `nomic-embed-text-v1.5` llama-swap profile with
   authenticated `/v1/embeddings` routing and a five-minute idle unload TTL.
 - Added a disabled targeted downloader profile and embedding deployment checks.
+- Added a reproducibility evidence record to every published local profile,
+  including explicit historical gaps for PP, tested context, cache state,
+  draft acceptance, llama.cpp commit, and benchmark command.
+- Added a validated community-run schema, submission guide, generator tests,
+  and a separate unranked dashboard view for non-local hardware.
+
+### Changed
+- Kept community runs structurally separate from the local RTX 4070 ranking
+  and updated the dashboard methodology to make that boundary visible.
 
 ## [0.6.0] - 2026-07-03
 
