@@ -77,9 +77,12 @@ cargo run --locked -- --bench qwen --extra "--ctx-size 32768"
 The Rust `0.7.0` foundation now covers the llama-swap run/list CLI, benchmark
 execution, typed stores, atomic snapshots, streamed chat, runtime telemetry,
 and a keyboard-first seven-view Ratatui workbench with a searchable command
-palette. Bounded GGUF metadata parsing and compatible jobs/chat persistence are
-implemented as tested Rust modules; connecting them to the corresponding TUI
-views is the next migration pass. The Python downloader remains the download
+palette. Jobs and chat sessions now persist through the compatible legacy
+formats. The GGUF view uses bounded metadata parsing with recursive inventory,
+filtering, deterministic sorting, detailed metadata, and per-file warnings.
+Reusable script/download editor engines implement validation, dirty tracking,
+and snapshot save/reload/restore; wiring their editing surfaces into the TUI is
+the next migration pass. The Python downloader remains the download
 implementation and is launched directly by the Rust TUI.
 
 The richer Python TUI remains available during the parity period:

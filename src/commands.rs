@@ -113,6 +113,7 @@ pub enum CommandId {
     BrowserFocusTable,
     BrowserFocusFilter,
     BrowserChangeSort,
+    BrowserToggleRecursive,
 
     DownloadSelectPrevious,
     DownloadSelectNext,
@@ -149,7 +150,7 @@ pub enum CommandId {
 impl CommandId {
     /// Every command identifier. Kept in declaration order for completeness
     /// checks and integrations which want to validate their dispatch table.
-    pub const ALL: [Self; 82] = [
+    pub const ALL: [Self; 83] = [
         Self::Quit,
         Self::ShowHelp,
         Self::ShowPalette,
@@ -204,6 +205,7 @@ impl CommandId {
         Self::BrowserFocusTable,
         Self::BrowserFocusFilter,
         Self::BrowserChangeSort,
+        Self::BrowserToggleRecursive,
         Self::DownloadSelectPrevious,
         Self::DownloadSelectNext,
         Self::DownloadFocusTable,
@@ -291,6 +293,7 @@ impl CommandId {
             Self::BrowserFocusTable => "browser.focus-table",
             Self::BrowserFocusFilter => "browser.focus-filter",
             Self::BrowserChangeSort => "browser.change-sort",
+            Self::BrowserToggleRecursive => "browser.toggle-recursive",
             Self::DownloadSelectPrevious => "download.select-previous",
             Self::DownloadSelectNext => "download.select-next",
             Self::DownloadFocusTable => "download.focus-table",
@@ -743,16 +746,16 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Alt+S",
         "Save session",
         "Chat: save session as Markdown and JSON",
-        false,
+        true,
         ["persist", "history"]
     ),
     command!(
         ChatSessions,
         Chat,
-        "—",
+        "o",
         "Saved sessions",
         "Chat: browse and load saved sessions",
-        false,
+        true,
         ["restore", "history", "open"]
     ),
     command!(
@@ -857,20 +860,29 @@ pub static COMMANDS: &[CommandSpec] = &[
     command!(
         BrowserFocusFilter,
         Browser,
-        "—",
+        "/",
         "Filter files",
         "Model Browser: focus path and metadata filter",
-        false,
+        true,
         ["find", "search", "quantization", "architecture"]
     ),
     command!(
         BrowserChangeSort,
         Browser,
-        "—",
+        "c",
         "Sort files",
         "Model Browser: change GGUF sort order",
-        false,
+        true,
         ["size", "modified", "path", "quantization"]
+    ),
+    command!(
+        BrowserToggleRecursive,
+        Browser,
+        "t",
+        "Toggle recursive scan",
+        "Model Browser: toggle recursive or top-level scan",
+        true,
+        ["directory", "tree", "depth"]
     ),
     command!(
         DownloadSelectPrevious,
@@ -1325,7 +1337,7 @@ mod tests {
         assert!(visible_browser
             .iter()
             .any(|spec| spec.id == CommandId::BrowserScan));
-        assert!(!visible_browser
+        assert!(visible_browser
             .iter()
             .any(|spec| spec.id == CommandId::BrowserFocusFilter));
     }

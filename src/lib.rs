@@ -1,10 +1,14 @@
 pub mod app;
 pub mod chat;
+pub mod chat_history;
 pub mod cli;
 pub mod commands;
 pub mod config_store;
+pub mod download_editor;
 pub mod gguf;
+pub mod job_history;
 pub mod llama_swap;
+pub mod script_editor;
 pub mod script_store;
 pub mod state_store;
 pub mod telemetry;

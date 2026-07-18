@@ -16,12 +16,16 @@ use std::os::unix::process::CommandExt;
 
 use crate::{
     chat::{stream_completion, ChatCompletion, ChatRequest},
+    chat_history::ChatHistory,
     commands::{command, search_all_commands, visible_commands, CommandContext, CommandId},
     config_store::{
         load_config, load_config_strict, save_config_in, validate_config, DownloadConfig,
     },
+    gguf::{self, GgufFile},
+    job_history::{persist_with_context, JobHistory},
     llama_swap::{SwapClient, SwapModel},
     script_store::{collect_scripts_in, command_for_script, ScriptMode},
+    state_store::{ChatSession, ChatSessionList, ChatSessionSummary, SavedChatSession},
     telemetry::{find_process_named, snapshot_descendants, snapshot_process_group},
 };
 use anyhow::{Context, Result};
@@ -107,27 +111,43 @@ enum InputMode {
     Normal,
     ModelFilter,
     BrowserPath,
+    BrowserFilter,
     ChatMessage,
     ChatSystemPrompt,
 }
 
-#[derive(Debug, Clone)]
-struct GgufFile {
-    path: PathBuf,
-    size: u64,
-    quantization: String,
-    modified: Option<SystemTime>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BrowserSort {
+    NameAsc,
+    SizeDesc,
+    SizeAsc,
+    ModifiedDesc,
+    ModifiedAsc,
+    QuantizationAsc,
 }
 
-#[derive(Debug, Clone)]
-struct JobRecord {
-    id: u64,
-    name: String,
-    kind: String,
-    status: String,
-    command: Vec<String>,
-    started: Instant,
-    exit_code: Option<i32>,
+impl BrowserSort {
+    fn next(self) -> Self {
+        match self {
+            Self::NameAsc => Self::SizeDesc,
+            Self::SizeDesc => Self::SizeAsc,
+            Self::SizeAsc => Self::ModifiedDesc,
+            Self::ModifiedDesc => Self::ModifiedAsc,
+            Self::ModifiedAsc => Self::QuantizationAsc,
+            Self::QuantizationAsc => Self::NameAsc,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::NameAsc => "name ↑",
+            Self::SizeDesc => "size ↓",
+            Self::SizeAsc => "size ↑",
+            Self::ModifiedDesc => "modified ↓",
+            Self::ModifiedAsc => "modified ↑",
+            Self::QuantizationAsc => "quant ↑",
+        }
+    }
 }
 
 struct RunningProcess {
@@ -147,6 +167,9 @@ enum BackgroundEvent {
     BrowserScan(Result<Vec<GgufFile>, String>),
     ChatDelta(String),
     ChatFinished(Result<ChatCompletion, String>),
+    ChatSessionsListed(Result<ChatSessionList, String>),
+    ChatSessionLoaded(Result<ChatSession, String>),
+    ChatSessionSaved(Result<SavedChatSession, String>),
     ProcessLine {
         job_id: u64,
         line: String,
@@ -184,15 +207,23 @@ struct App {
     bench_state: ListState,
 
     chat_input: String,
-    chat_history: Vec<(String, String)>,
+    chat_history: ChatHistory,
     chat_streaming: String,
     chat_pending: bool,
     chat_system_prompt: String,
     chat_temperature: f64,
     chat_max_tokens: u32,
     chat_thinking: bool,
+    chat_sessions: Vec<ChatSessionSummary>,
+    chat_sessions_state: TableState,
+    show_chat_sessions: bool,
+    chat_session_pending: bool,
 
     browser_path: String,
+    browser_filter: String,
+    browser_recursive: bool,
+    browser_sort: BrowserSort,
+    browser_scanned_root: PathBuf,
     browser_files: Vec<GgufFile>,
     browser_state: TableState,
     browser_scanning: bool,
@@ -206,9 +237,8 @@ struct App {
     maintenance_scripts: Vec<PathBuf>,
     maintenance_state: ListState,
 
-    jobs: Vec<JobRecord>,
+    job_history: JobHistory,
     jobs_state: TableState,
-    next_job_id: u64,
     running_process: Option<RunningProcess>,
     telemetry: String,
     telemetry_pending: bool,
@@ -230,6 +260,19 @@ impl App {
             root.join("models").display().to_string()
         } else {
             download_config.base_models_dir.clone()
+        };
+        let (job_history, job_warning) = match JobHistory::load(&root) {
+            Ok((history, notice)) => {
+                let warning =
+                    (!notice.is_empty()).then(|| format!("Job history: {}", notice.summary()));
+                (history, warning)
+            }
+            Err(error) => (
+                JobHistory::unavailable(),
+                Some(format!(
+                    "Job history unavailable (clear Jobs to recover): {error:#}"
+                )),
+            ),
         };
         let mut app = Self {
             root,
@@ -254,14 +297,22 @@ impl App {
             bench_scripts: Vec::new(),
             bench_state: ListState::default().with_selected(Some(0)),
             chat_input: String::new(),
-            chat_history: Vec::new(),
+            chat_history: ChatHistory::default(),
             chat_streaming: String::new(),
             chat_pending: false,
             chat_system_prompt: String::new(),
             chat_temperature: 0.8,
             chat_max_tokens: 2048,
             chat_thinking: false,
+            chat_sessions: Vec::new(),
+            chat_sessions_state: TableState::default().with_selected(Some(0)),
+            show_chat_sessions: false,
+            chat_session_pending: false,
             browser_path,
+            browser_filter: String::new(),
+            browser_recursive: true,
+            browser_sort: BrowserSort::SizeDesc,
+            browser_scanned_root: PathBuf::new(),
             browser_files: Vec::new(),
             browser_state: TableState::default().with_selected(Some(0)),
             browser_scanning: false,
@@ -272,9 +323,8 @@ impl App {
             download_dirty: false,
             maintenance_scripts: Vec::new(),
             maintenance_state: ListState::default().with_selected(Some(0)),
-            jobs: Vec::new(),
+            job_history,
             jobs_state: TableState::default().with_selected(Some(0)),
-            next_job_id: 1,
             running_process: None,
             telemetry: "Resources: idle".into(),
             telemetry_pending: false,
@@ -284,6 +334,10 @@ impl App {
             app.status = "Download config needs attention".into();
             app.push_log(warning);
         }
+        if let Some(warning) = job_warning {
+            app.push_log(warning);
+        }
+        clamp_table_selection(&mut app.jobs_state, app.job_history.records().len());
         app.refresh_local_inventories();
         app.refresh_models();
         app
@@ -392,12 +446,21 @@ impl App {
                     match result {
                         Ok(files) => {
                             self.browser_files = files;
-                            clamp_table_selection(
-                                &mut self.browser_state,
+                            let visible_count = self.visible_browser_files().len();
+                            clamp_table_selection(&mut self.browser_state, visible_count);
+                            let warnings = self
+                                .browser_files
+                                .iter()
+                                .filter(|file| file.parse_error.is_some())
+                                .count();
+                            let total_size: u64 =
+                                self.browser_files.iter().map(|file| file.size).sum();
+                            self.status = format!(
+                                "Found {} GGUF file(s), {} total, {} warning(s)",
                                 self.browser_files.len(),
+                                format_bytes(total_size),
+                                warnings
                             );
-                            self.status =
-                                format!("Found {} GGUF file(s)", self.browser_files.len());
                         }
                         Err(error) => {
                             self.status = "GGUF scan failed".into();
@@ -424,8 +487,7 @@ impl App {
                                     completion.elapsed.as_secs_f64()
                                 ),
                             };
-                            self.chat_history
-                                .push(("assistant".into(), completion.content));
+                            self.chat_history.push("assistant", completion.content);
                             self.status = status;
                         }
                         Err(error) => {
@@ -435,8 +497,77 @@ impl App {
                     }
                     self.chat_streaming.clear();
                 }
+                BackgroundEvent::ChatSessionsListed(result) => {
+                    self.chat_session_pending = false;
+                    match result {
+                        Ok(list) => {
+                            self.chat_sessions = list.sessions;
+                            clamp_table_selection(
+                                &mut self.chat_sessions_state,
+                                self.chat_sessions.len(),
+                            );
+                            self.status =
+                                format!("{} saved chat session(s)", self.chat_sessions.len());
+                            if !list.issues.is_empty() {
+                                self.push_log(format!(
+                                    "Ignored {} malformed chat session(s)",
+                                    list.issues.len()
+                                ));
+                            }
+                            if list.truncated_entries > 0 {
+                                self.push_log(format!(
+                                    "Chat session list omitted {} older file(s)",
+                                    list.truncated_entries
+                                ));
+                            }
+                        }
+                        Err(error) => {
+                            self.status = "Could not list chat sessions".into();
+                            self.push_log(error);
+                        }
+                    }
+                }
+                BackgroundEvent::ChatSessionLoaded(result) => {
+                    self.chat_session_pending = false;
+                    match result {
+                        Ok(session) => {
+                            let count = session.history.len();
+                            let saved = session.saved.clone();
+                            self.chat_history.replace_with_session(session);
+                            self.chat_streaming.clear();
+                            self.show_chat_sessions = false;
+                            self.status = format!("Loaded chat {saved} · {count} message(s)");
+                        }
+                        Err(error) => {
+                            self.status = "Could not load chat session".into();
+                            self.push_log(error);
+                        }
+                    }
+                }
+                BackgroundEvent::ChatSessionSaved(result) => {
+                    self.chat_session_pending = false;
+                    match result {
+                        Ok(saved) => {
+                            let file_name = saved
+                                .json_path
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy();
+                            self.status = format!("Saved chat session {file_name}");
+                        }
+                        Err(error) => {
+                            self.status = "Could not save chat session".into();
+                            self.push_log(error);
+                        }
+                    }
+                }
                 BackgroundEvent::ProcessLine { job_id, line } => {
-                    if self.jobs.iter().any(|job| job.id == job_id) {
+                    if self
+                        .job_history
+                        .records()
+                        .iter()
+                        .any(|job| job.id == job_id)
+                    {
                         self.push_log(line);
                     }
                 }
@@ -473,10 +604,12 @@ impl App {
 
         let running_target = self.running_process.as_ref().map(|running| {
             let elapsed = self
-                .jobs
+                .job_history
+                .records()
                 .iter()
                 .find(|job| job.id == running.job_id)
-                .map_or(0, |job| job.started.elapsed().as_secs());
+                .and_then(|job| job.elapsed_seconds())
+                .unwrap_or_default();
             (running.process_group, elapsed)
         });
         let monitor_swap = self.loaded_model_id.is_some();
@@ -515,6 +648,10 @@ impl App {
         }
         if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.open_palette();
+            return Ok(());
+        }
+        if self.show_chat_sessions {
+            self.handle_chat_sessions_key(key);
             return Ok(());
         }
         if let Some(command_id) = self.modified_key_command(key) {
@@ -587,6 +724,7 @@ impl App {
             (Tab::ModelOps, KeyCode::Char('f'), true, _) => Some(CommandId::ModelOpsFocusFilter),
             (Tab::ModelOps, KeyCode::Char('j'), true, _) => Some(CommandId::ModelOpsFocusTable),
             (Tab::Chat, KeyCode::Char('x'), true, _) => Some(CommandId::ChatClear),
+            (Tab::Chat, KeyCode::Char('s'), _, true) => Some(CommandId::ChatSave),
             (Tab::Browser, KeyCode::Char('r'), _, true) => Some(CommandId::BrowserScan),
             (Tab::Browser, KeyCode::Char('g'), _, true) => Some(CommandId::BrowserFocusPath),
             (Tab::Browser, KeyCode::Char('j'), _, true) => Some(CommandId::BrowserFocusTable),
@@ -655,6 +793,21 @@ impl App {
         search_all_commands(&self.palette_query)
     }
 
+    fn handle_chat_sessions_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('o') => self.show_chat_sessions = false,
+            KeyCode::Up | KeyCode::Char('k') => {
+                select_previous_table(&mut self.chat_sessions_state, self.chat_sessions.len())
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                select_next_table(&mut self.chat_sessions_state, self.chat_sessions.len())
+            }
+            KeyCode::Enter => self.load_selected_chat_session(),
+            KeyCode::Char('r') => self.refresh_chat_sessions(),
+            _ => {}
+        }
+    }
+
     fn handle_input_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Esc => self.input_mode = InputMode::Normal,
@@ -664,6 +817,7 @@ impl App {
                     self.input_mode = InputMode::Normal;
                     self.scan_browser();
                 }
+                InputMode::BrowserFilter => self.input_mode = InputMode::Normal,
                 InputMode::ChatSystemPrompt => self.input_mode = InputMode::Normal,
                 _ => self.input_mode = InputMode::Normal,
             },
@@ -674,6 +828,11 @@ impl App {
                 }
                 InputMode::BrowserPath => {
                     self.browser_path.pop();
+                }
+                InputMode::BrowserFilter => {
+                    self.browser_filter.pop();
+                    let count = self.visible_browser_files().len();
+                    clamp_table_selection(&mut self.browser_state, count);
                 }
                 InputMode::ChatMessage => {
                     self.chat_input.pop();
@@ -690,6 +849,11 @@ impl App {
                         self.model_state.select(Some(0));
                     }
                     InputMode::BrowserPath => self.browser_path.push(character),
+                    InputMode::BrowserFilter => {
+                        self.browser_filter.push(character);
+                        let count = self.visible_browser_files().len();
+                        clamp_table_selection(&mut self.browser_state, count);
+                    }
                     InputMode::ChatMessage => self.chat_input.push(character),
                     InputMode::ChatSystemPrompt => self.chat_system_prompt.push(character),
                     InputMode::Normal => {}
@@ -810,6 +974,8 @@ impl App {
                 self.chat_streaming.clear();
                 self.status = "Chat cleared".into();
             }
+            ChatSave => self.save_chat_session(),
+            ChatSessions => self.open_chat_sessions(),
             ChatEditSystemPrompt => self.input_mode = InputMode::ChatSystemPrompt,
             ChatToggleThinking => self.chat_thinking = !self.chat_thinking,
             ChatDecreaseTemperature => {
@@ -823,14 +989,32 @@ impl App {
                 self.chat_max_tokens = self.chat_max_tokens.saturating_mul(2).min(65_536)
             }
             BrowserSelectPrevious => {
-                select_previous_table(&mut self.browser_state, self.browser_files.len())
+                let count = self.visible_browser_files().len();
+                select_previous_table(&mut self.browser_state, count)
             }
             BrowserSelectNext => {
-                select_next_table(&mut self.browser_state, self.browser_files.len())
+                let count = self.visible_browser_files().len();
+                select_next_table(&mut self.browser_state, count)
             }
             BrowserScan => self.scan_browser(),
             BrowserFocusPath => self.input_mode = InputMode::BrowserPath,
             BrowserFocusTable => self.input_mode = InputMode::Normal,
+            BrowserFocusFilter => self.input_mode = InputMode::BrowserFilter,
+            BrowserChangeSort => {
+                self.browser_sort = self.browser_sort.next();
+                self.browser_state.select(Some(0));
+            }
+            BrowserToggleRecursive => {
+                self.browser_recursive = !self.browser_recursive;
+                self.status = format!(
+                    "GGUF scan mode: {}",
+                    if self.browser_recursive {
+                        "recursive"
+                    } else {
+                        "top-level"
+                    }
+                );
+            }
             DownloadSelectPrevious => {
                 select_previous_table(&mut self.download_state, self.download_config.models.len())
             }
@@ -849,14 +1033,20 @@ impl App {
             }
             DownloadSelected => self.download_selected(),
             DownloadEnabled => self.download_enabled(),
-            JobsSelectPrevious => select_previous_table(&mut self.jobs_state, self.jobs.len()),
-            JobsSelectNext => select_next_table(&mut self.jobs_state, self.jobs.len()),
-            JobsStop => self.stop_running_process(),
+            JobsSelectPrevious => {
+                select_previous_table(&mut self.jobs_state, self.job_history.records().len())
+            }
+            JobsSelectNext => {
+                select_next_table(&mut self.jobs_state, self.job_history.records().len())
+            }
+            JobsStop => self.stop_active_job(),
             JobsRetry => self.retry_selected_job(),
-            JobsClear if self.running_process.is_none() => {
-                self.jobs.clear();
-                self.jobs_state.select(None);
-                self.status = "Job history cleared".into();
+            JobsClear => {
+                if self.can_clear_job_history() {
+                    self.clear_job_history();
+                } else {
+                    self.status = "Cannot clear job history while an operation is running".into();
+                }
             }
             MaintenanceSelectPrevious => {
                 select_previous_list(&mut self.maintenance_state, self.maintenance_scripts.len())
@@ -941,6 +1131,7 @@ impl App {
                 self.status = "Chat cleared".into();
             }
             KeyCode::Char('r') => self.refresh_models(),
+            KeyCode::Char('o') => self.open_chat_sessions(),
             KeyCode::Char('p') => self.input_mode = InputMode::ChatSystemPrompt,
             KeyCode::Char('t') => {
                 self.chat_thinking = !self.chat_thinking;
@@ -970,14 +1161,31 @@ impl App {
     }
 
     fn handle_browser_key(&mut self, key: KeyEvent) {
+        let visible_count = self.visible_browser_files().len();
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                select_previous_table(&mut self.browser_state, self.browser_files.len())
+                select_previous_table(&mut self.browser_state, visible_count)
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                select_next_table(&mut self.browser_state, self.browser_files.len())
+                select_next_table(&mut self.browser_state, visible_count)
             }
             KeyCode::Char('g') => self.input_mode = InputMode::BrowserPath,
+            KeyCode::Char('/') => self.input_mode = InputMode::BrowserFilter,
+            KeyCode::Char('c') => {
+                self.browser_sort = self.browser_sort.next();
+                self.browser_state.select(Some(0));
+            }
+            KeyCode::Char('t') => {
+                self.browser_recursive = !self.browser_recursive;
+                self.status = format!(
+                    "GGUF scan mode: {}",
+                    if self.browser_recursive {
+                        "recursive"
+                    } else {
+                        "top-level"
+                    }
+                );
+            }
             KeyCode::Char('r') | KeyCode::Enter => self.scan_browser(),
             _ => {}
         }
@@ -1053,17 +1261,19 @@ impl App {
     fn handle_jobs_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                select_previous_table(&mut self.jobs_state, self.jobs.len())
+                select_previous_table(&mut self.jobs_state, self.job_history.records().len())
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                select_next_table(&mut self.jobs_state, self.jobs.len())
+                select_next_table(&mut self.jobs_state, self.job_history.records().len())
             }
-            KeyCode::Char('s') => self.stop_running_process(),
+            KeyCode::Char('s') => self.stop_active_job(),
             KeyCode::Char('r') => self.retry_selected_job(),
-            KeyCode::Char('c') | KeyCode::Delete if self.running_process.is_none() => {
-                self.jobs.clear();
-                self.jobs_state.select(None);
-                self.status = "Job history cleared".into();
+            KeyCode::Char('c') | KeyCode::Delete => {
+                if self.can_clear_job_history() {
+                    self.clear_job_history();
+                } else {
+                    self.status = "Cannot clear job history while an operation is running".into();
+                }
             }
             _ => {}
         }
@@ -1102,6 +1312,62 @@ impl App {
             .map(|model| (*model).clone())
     }
 
+    fn visible_browser_files(&self) -> Vec<GgufFile> {
+        let filter = self.browser_filter.trim().to_ascii_lowercase();
+        let mut files = self
+            .browser_files
+            .iter()
+            .filter(|file| {
+                if filter.is_empty() {
+                    return true;
+                }
+                let metadata = file.metadata.as_ref();
+                self.browser_relative_path(file)
+                    .to_ascii_lowercase()
+                    .contains(&filter)
+                    || file.quantization.to_ascii_lowercase().contains(&filter)
+                    || metadata
+                        .and_then(|metadata| metadata.architecture.as_deref())
+                        .is_some_and(|value| value.to_ascii_lowercase().contains(&filter))
+                    || metadata
+                        .and_then(|metadata| metadata.name.as_deref())
+                        .is_some_and(|value| value.to_ascii_lowercase().contains(&filter))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        files.sort_by(|left, right| {
+            let ordering = match self.browser_sort {
+                BrowserSort::NameAsc => self
+                    .browser_relative_path(left)
+                    .to_ascii_lowercase()
+                    .cmp(&self.browser_relative_path(right).to_ascii_lowercase()),
+                BrowserSort::SizeDesc => right.size.cmp(&left.size),
+                BrowserSort::SizeAsc => left.size.cmp(&right.size),
+                BrowserSort::ModifiedDesc => right.modified.cmp(&left.modified),
+                BrowserSort::ModifiedAsc => left.modified.cmp(&right.modified),
+                BrowserSort::QuantizationAsc => left
+                    .quantization
+                    .to_ascii_lowercase()
+                    .cmp(&right.quantization.to_ascii_lowercase()),
+            };
+            ordering.then_with(|| left.path.cmp(&right.path))
+        });
+        files
+    }
+
+    fn browser_relative_path(&self, file: &GgufFile) -> String {
+        file.path
+            .strip_prefix(&self.browser_scanned_root)
+            .unwrap_or(&file.path)
+            .to_string_lossy()
+            .replace('\\', "/")
+    }
+
+    fn selected_browser_file(&self) -> Option<GgufFile> {
+        let index = self.browser_state.selected()?;
+        self.visible_browser_files().get(index).cloned()
+    }
+
     fn model_action(&mut self, load: bool) {
         if self.model_action_pending {
             self.status = "A llama-swap action is already in progress".into();
@@ -1136,22 +1402,20 @@ impl App {
             if load { "Loading" } else { "Unloading" },
             model_id
         );
-        let job_id = self.next_job_id;
-        self.next_job_id += 1;
         let verb = if load { "load" } else { "unload" };
-        self.jobs.insert(
-            0,
-            JobRecord {
-                id: job_id,
-                name: model_id.clone(),
-                kind: format!("model-{verb}"),
-                status: "running".into(),
-                command: vec!["llama-swap".into(), verb.into(), model_id.clone()],
-                started: Instant::now(),
-                exit_code: None,
+        let job_id = self.job_history.begin(
+            model_id.clone(),
+            format!("model-{verb}"),
+            vec!["llama-swap".into(), verb.into(), model_id.clone()],
+            "run".into(),
+            if load {
+                model_id.clone()
+            } else {
+                String::new()
             },
         );
         self.jobs_state.select(Some(0));
+        self.persist_jobs("model action start");
         let sender = self.sender.clone();
         thread::spawn(move || {
             let result = SwapClient::from_env()
@@ -1177,11 +1441,18 @@ impl App {
             return;
         }
         let path = PathBuf::from(expand_tilde(&self.browser_path));
+        let recursive = self.browser_recursive;
+        self.browser_scanned_root = path.clone();
         self.browser_scanning = true;
-        self.status = format!("Scanning {}…", path.display());
+        self.status = format!(
+            "Scanning {} ({})…",
+            path.display(),
+            if recursive { "recursive" } else { "top-level" }
+        );
         let sender = self.sender.clone();
         thread::spawn(move || {
-            let result = scan_gguf_files(&path).map_err(|error| format!("{error:#}"));
+            let result =
+                gguf::scan_directory(&path, recursive).map_err(|error| format!("{error:#}"));
             let _ = sender.send(BackgroundEvent::BrowserScan(result));
         });
     }
@@ -1203,11 +1474,11 @@ impl App {
             return;
         };
         self.chat_input.clear();
-        self.chat_history.push(("user".into(), prompt));
+        self.chat_history.push("user", prompt);
         self.chat_streaming.clear();
         self.chat_pending = true;
         self.status = format!("Waiting for {}…", model.id);
-        let history = self.chat_history.clone();
+        let history = self.chat_history.request_messages();
         let system_prompt = self.chat_system_prompt.clone();
         let temperature = self.chat_temperature;
         let max_tokens = self.chat_max_tokens;
@@ -1226,6 +1497,66 @@ impl App {
             })
             .map_err(|error| format!("{error:#}"));
             let _ = sender.send(BackgroundEvent::ChatFinished(result));
+        });
+    }
+
+    fn save_chat_session(&mut self) {
+        if self.chat_history.is_empty() {
+            self.status = "Nothing to save; chat is empty".into();
+            return;
+        }
+        if self.chat_session_pending {
+            self.status = "A chat session operation is already in progress".into();
+            return;
+        }
+        self.chat_session_pending = true;
+        self.status = "Saving chat session…".into();
+        let history = self.chat_history.clone();
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let result = history.save().map_err(|error| format!("{error:#}"));
+            let _ = sender.send(BackgroundEvent::ChatSessionSaved(result));
+        });
+    }
+
+    fn open_chat_sessions(&mut self) {
+        self.show_chat_sessions = true;
+        self.refresh_chat_sessions();
+    }
+
+    fn refresh_chat_sessions(&mut self) {
+        if self.chat_session_pending {
+            return;
+        }
+        self.chat_session_pending = true;
+        self.status = "Loading chat sessions…".into();
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let result = ChatHistory::list_sessions().map_err(|error| format!("{error:#}"));
+            let _ = sender.send(BackgroundEvent::ChatSessionsListed(result));
+        });
+    }
+
+    fn load_selected_chat_session(&mut self) {
+        if self.chat_session_pending {
+            return;
+        }
+        let Some(index) = self.chat_sessions_state.selected() else {
+            return;
+        };
+        let Some(file_name) = self
+            .chat_sessions
+            .get(index)
+            .map(|session| session.file_name.clone())
+        else {
+            return;
+        };
+        self.chat_session_pending = true;
+        self.status = format!("Loading chat session {file_name}…");
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let result = ChatHistory::load_session(file_name).map_err(|error| format!("{error:#}"));
+            let _ = sender.send(BackgroundEvent::ChatSessionLoaded(result));
         });
     }
 
@@ -1333,8 +1664,18 @@ impl App {
             }
         };
 
-        let job_id = self.next_job_id;
-        self.next_job_id += 1;
+        let script_path = if matches!(kind, "bench" | "maintenance") {
+            command_text.get(1).cloned().unwrap_or_default()
+        } else {
+            String::new()
+        };
+        let job_id = self.job_history.begin(
+            name.clone(),
+            kind.into(),
+            command_text.clone(),
+            kind.into(),
+            script_path,
+        );
         let process_group = child.id();
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -1344,19 +1685,8 @@ impl App {
             process_group,
             child: Arc::clone(&child),
         });
-        self.jobs.insert(
-            0,
-            JobRecord {
-                id: job_id,
-                name: name.clone(),
-                kind: kind.into(),
-                status: "running".into(),
-                command: command_text.clone(),
-                started: Instant::now(),
-                exit_code: None,
-            },
-        );
         self.jobs_state.select(Some(0));
+        self.persist_jobs("process start");
         self.status = format!("Running {name}");
         self.push_log(format!("$ {}", command_text.join(" ")));
 
@@ -1471,9 +1801,17 @@ impl App {
         let Some(index) = self.jobs_state.selected() else {
             return;
         };
-        let Some(job) = self.jobs.get(index).cloned() else {
+        let Some(job) = self.job_history.get(index).cloned() else {
             return;
         };
+        if job.is_running() {
+            self.status = "The selected job is still running".into();
+            return;
+        }
+        if job.command.is_empty() {
+            self.status = "The selected historical job cannot be retried safely".into();
+            return;
+        }
         if matches!(job.kind.as_str(), "model-load" | "model-unload") {
             let Some(model_id) = job.command.get(2).cloned() else {
                 self.status = "Model job has no model identifier".into();
@@ -1489,6 +1827,41 @@ impl App {
         );
     }
 
+    fn stop_active_job(&mut self) {
+        if self.running_process.is_some() {
+            self.stop_running_process();
+        } else if self.model_action_pending {
+            self.status = "The current llama-swap request cannot be cancelled safely".into();
+        } else if self.loaded_model_id.is_some() {
+            self.model_action(false);
+        } else {
+            self.status = "No active job to stop".into();
+        }
+    }
+
+    fn can_clear_job_history(&self) -> bool {
+        self.running_process.is_none()
+            && !self.model_action_pending
+            && !self
+                .job_history
+                .records()
+                .iter()
+                .any(|job| job.is_running())
+    }
+
+    fn clear_job_history(&mut self) {
+        self.job_history.clear_for_recovery();
+        self.jobs_state.select(None);
+        self.status = "Job history cleared".into();
+        self.persist_jobs("clear");
+    }
+
+    fn persist_jobs(&mut self, context: &str) {
+        if let Err(error) = persist_with_context(&self.job_history, context) {
+            self.push_log(format!("Job history save failed: {error:#}"));
+        }
+    }
+
     fn push_log(&mut self, message: impl Into<String>) {
         self.log.push_back(message.into());
         while self.log.len() > 300 {
@@ -1497,18 +1870,16 @@ impl App {
     }
 
     fn finish_job(&mut self, job_id: u64, exit_code: i32) {
-        if let Some(job) = self.jobs.iter_mut().find(|job| job.id == job_id) {
-            job.status = if exit_code == 0 {
-                "done".into()
-            } else {
-                "failed".into()
-            };
-            job.exit_code = Some(exit_code);
-            self.status = format!(
-                "{} exited with {exit_code} after {}s",
-                job.name,
-                job.started.elapsed().as_secs()
-            );
+        let summary = self.job_history.finish(job_id, exit_code).map(|job| {
+            (
+                job.name.clone(),
+                job.elapsed_label.clone(),
+                job.exit_label.clone(),
+            )
+        });
+        if let Some((name, elapsed, exit)) = summary {
+            self.status = format!("{name} exited with {exit} after {elapsed}");
+            self.persist_jobs("finish");
         }
     }
 
@@ -1541,6 +1912,8 @@ impl App {
             self.draw_palette(frame);
         } else if self.show_help {
             self.draw_help(frame);
+        } else if self.show_chat_sessions {
+            self.draw_chat_sessions(frame);
         }
     }
 
@@ -1711,17 +2084,17 @@ impl App {
             ));
         }
         let mut lines = Vec::new();
-        for (role, content) in self.chat_history.iter().rev().take(14).rev() {
-            let color = if role == "user" {
+        for message in self.chat_history.records().iter().rev().take(14).rev() {
+            let color = if message.role == "user" {
                 Color::Cyan
             } else {
                 Color::Green
             };
             lines.push(Line::from(Span::styled(
-                format!("{role}:"),
+                format!("{}:", message.role),
                 Style::default().fg(color).bold(),
             )));
-            lines.push(Line::from(content.as_str()));
+            lines.push(Line::from(message.content.as_str()));
             lines.push(Line::from(""));
         }
         if !self.chat_streaming.is_empty() {
@@ -1737,7 +2110,11 @@ impl App {
         }
         frame.render_widget(
             Paragraph::new(lines)
-                .block(Block::default().title("Conversation").borders(Borders::ALL))
+                .block(
+                    Block::default()
+                        .title("Conversation · Alt+S save · o sessions")
+                        .borders(Borders::ALL),
+                )
                 .wrap(Wrap { trim: false }),
             chunks[1],
         );
@@ -1759,65 +2136,125 @@ impl App {
     }
 
     fn draw_browser(&mut self, frame: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
+        let outer = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Min(4)])
+            .constraints([
+                Constraint::Length(3),
+                Constraint::Length(1),
+                Constraint::Min(4),
+            ])
             .split(area);
         frame.render_widget(
             Paragraph::new(self.browser_path.as_str()).block(
                 Block::default()
-                    .title("GGUF path · g edit · r scan")
+                    .title(format!(
+                        "GGUF path · g edit · r scan · t {}",
+                        if self.browser_recursive {
+                            "recursive"
+                        } else {
+                            "top-level"
+                        }
+                    ))
                     .borders(Borders::ALL),
             ),
-            chunks[0],
+            outer[0],
         );
         if self.input_mode == InputMode::BrowserPath {
             frame.set_cursor_position((
-                chunks[0].x + 1 + self.browser_path.chars().count() as u16,
-                chunks[0].y + 1,
+                outer[0].x + 1 + self.browser_path.chars().count() as u16,
+                outer[0].y + 1,
             ));
         }
-        let rows = self.browser_files.iter().map(|file| {
+
+        let files = self.visible_browser_files();
+        let shown_size: u64 = files.iter().map(|file| file.size).sum();
+        let warning_count = self
+            .browser_files
+            .iter()
+            .filter(|file| file.parse_error.is_some())
+            .count();
+        frame.render_widget(
+            Paragraph::new(format!(
+                " / filter: {} │ sort: {} │ {} shown / {} total │ {} shown │ {} warning(s)",
+                self.browser_filter,
+                self.browser_sort.label(),
+                files.len(),
+                self.browser_files.len(),
+                format_bytes(shown_size),
+                warning_count,
+            ))
+            .style(Style::default().fg(Color::Yellow)),
+            outer[1],
+        );
+        if self.input_mode == InputMode::BrowserFilter {
+            frame.set_cursor_position((
+                outer[1].x + 11 + self.browser_filter.chars().count() as u16,
+                outer[1].y,
+            ));
+        }
+
+        let main = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(68), Constraint::Percentage(32)])
+            .split(outer[2]);
+        let rows = files.iter().enumerate().map(|(index, file)| {
+            let metadata = file.metadata.as_ref();
             Row::new(vec![
-                Cell::from(
-                    file.path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy()
-                        .into_owned(),
-                ),
+                Cell::from(index.to_string()),
+                Cell::from(self.browser_relative_path(file)),
                 Cell::from(file.quantization.clone()),
                 Cell::from(format_bytes(file.size)),
+                Cell::from(format_parameter_count(
+                    metadata.and_then(|metadata| metadata.parameter_count),
+                )),
                 Cell::from(
-                    file.modified
-                        .and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok())
-                        .map(|duration| duration.as_secs().to_string())
+                    metadata
+                        .and_then(|metadata| metadata.architecture.clone())
                         .unwrap_or_else(|| "—".into()),
                 ),
+                Cell::from(format_system_time(file.modified)),
             ])
         });
         let table = Table::new(
             rows,
             [
-                Constraint::Percentage(55),
-                Constraint::Length(14),
-                Constraint::Length(12),
-                Constraint::Length(14),
+                Constraint::Length(4),
+                Constraint::Percentage(42),
+                Constraint::Length(10),
+                Constraint::Length(10),
+                Constraint::Length(9),
+                Constraint::Length(10),
+                Constraint::Length(17),
             ],
         )
         .header(
-            Row::new(["File", "Quant", "Size", "Modified (unix)"])
+            Row::new(["#", "GGUF", "Quant", "Size", "Params", "Arch", "Modified"])
                 .yellow()
                 .bold(),
         )
         .block(
             Block::default()
-                .title(format!("Inventory · {} file(s)", self.browser_files.len()))
+                .title("Inventory · / filter · c cycle sort")
                 .borders(Borders::ALL),
         )
-        .row_highlight_style(Style::default().bg(Color::DarkGray))
+        .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
         .highlight_symbol("▶ ");
-        frame.render_stateful_widget(table, chunks[1], &mut self.browser_state);
+        frame.render_stateful_widget(table, main[0], &mut self.browser_state);
+
+        let details = self.selected_browser_file().map_or_else(
+            || Text::from("No GGUF file selected."),
+            |file| gguf_details(&file),
+        );
+        frame.render_widget(
+            Paragraph::new(details)
+                .block(
+                    Block::default()
+                        .title("Selected GGUF")
+                        .borders(Borders::ALL),
+                )
+                .wrap(Wrap { trim: false }),
+            main[1],
+        );
     }
 
     fn draw_download(&mut self, frame: &mut Frame, area: Rect) {
@@ -1859,31 +2296,31 @@ impl App {
     }
 
     fn draw_jobs(&mut self, frame: &mut Frame, area: Rect) {
-        let rows = self.jobs.iter().map(|job| {
+        let rows = self.job_history.records().iter().map(|job| {
             Row::new(vec![
                 Cell::from(job.id.to_string()),
                 Cell::from(job.kind.clone()),
                 Cell::from(job.name.clone()),
                 Cell::from(job.status.clone()),
-                Cell::from(
-                    job.exit_code
-                        .map(|code| code.to_string())
-                        .unwrap_or_else(|| "—".into()),
-                ),
+                Cell::from(job.started_label.clone()),
+                Cell::from(job.elapsed_label.clone()),
+                Cell::from(job.exit_label.clone()),
             ])
         });
         let table = Table::new(
             rows,
             [
                 Constraint::Length(5),
-                Constraint::Length(13),
-                Constraint::Percentage(55),
                 Constraint::Length(12),
-                Constraint::Length(7),
+                Constraint::Percentage(45),
+                Constraint::Length(11),
+                Constraint::Length(10),
+                Constraint::Length(8),
+                Constraint::Length(8),
             ],
         )
         .header(
-            Row::new(["ID", "Kind", "Name", "Status", "Exit"])
+            Row::new(["ID", "Kind", "Name", "Status", "Started", "Elapsed", "Exit"])
                 .yellow()
                 .bold(),
         )
@@ -1936,6 +2373,7 @@ impl App {
             InputMode::Normal => "",
             InputMode::ModelFilter => "  FILTER",
             InputMode::BrowserPath => "  PATH INPUT",
+            InputMode::BrowserFilter => "  GGUF FILTER",
             InputMode::ChatMessage => "  CHAT INPUT",
             InputMode::ChatSystemPrompt => "  SYSTEM PROMPT INPUT",
         };
@@ -2022,6 +2460,36 @@ impl App {
             chunks[0].x + 1 + self.palette_query.chars().count() as u16,
             chunks[0].y + 1,
         ));
+    }
+
+    fn draw_chat_sessions(&mut self, frame: &mut Frame) {
+        let area = centered_rect(78, 72, frame.area());
+        frame.render_widget(Clear, area);
+        let rows = self.chat_sessions.iter().map(|session| {
+            Row::new([
+                Cell::from(session.saved.clone()),
+                Cell::from(session.message_count.to_string()),
+                Cell::from(session.file_name.clone()),
+            ])
+        });
+        let title = if self.chat_session_pending {
+            " Chat sessions · loading… "
+        } else {
+            " Chat sessions · Enter load · r refresh · o/Esc close "
+        };
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(20),
+                Constraint::Length(10),
+                Constraint::Percentage(100),
+            ],
+        )
+        .header(Row::new(["Saved", "Messages", "File"]).yellow().bold())
+        .block(Block::default().title(title).borders(Borders::ALL))
+        .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+        .highlight_symbol("▶ ");
+        frame.render_stateful_widget(table, area, &mut self.chat_sessions_state);
     }
 }
 
@@ -2277,62 +2745,6 @@ fn build_selected_download_command(
     Ok((model.repo_id.clone(), parts))
 }
 
-fn scan_gguf_files(root: &Path) -> Result<Vec<GgufFile>> {
-    anyhow::ensure!(root.is_dir(), "{} is not a directory", root.display());
-    let mut pending = vec![root.to_path_buf()];
-    let mut files = Vec::new();
-    while let Some(directory) = pending.pop() {
-        let entries = match fs::read_dir(&directory) {
-            Ok(entries) => entries,
-            Err(_) => continue,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let file_type = match entry.file_type() {
-                Ok(file_type) => file_type,
-                Err(_) => continue,
-            };
-            if file_type.is_dir() && !file_type.is_symlink() {
-                pending.push(path);
-                continue;
-            }
-            if !file_type.is_file()
-                || !path.extension().is_some_and(|extension| {
-                    extension.to_string_lossy().eq_ignore_ascii_case("gguf")
-                })
-            {
-                continue;
-            }
-            if let Ok(metadata) = entry.metadata() {
-                files.push(GgufFile {
-                    quantization: infer_quantization(&path),
-                    path,
-                    size: metadata.len(),
-                    modified: metadata.modified().ok(),
-                });
-            }
-        }
-    }
-    files.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(files)
-}
-
-fn infer_quantization(path: &Path) -> String {
-    let name = path
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_ascii_uppercase();
-    for marker in [
-        "MXFP4", "BF16", "F16", "Q8_0", "Q6_K", "Q5_K_M", "Q5_K", "Q4_K_M", "Q4_K", "Q3_K", "Q2_K",
-    ] {
-        if name.contains(marker) {
-            return marker.into();
-        }
-    }
-    "unknown".into()
-}
-
 fn display_name(path: &Path) -> String {
     path.file_stem()
         .unwrap_or_default()
@@ -2368,6 +2780,110 @@ fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{value:.1} {}", UNITS[unit])
     }
+}
+
+fn format_parameter_count(parameters: Option<u64>) -> String {
+    let Some(parameters) = parameters.filter(|parameters| *parameters > 0) else {
+        return "—".into();
+    };
+    if parameters >= 1_000_000_000 {
+        format!("{:.1}B", parameters as f64 / 1_000_000_000.0)
+    } else if parameters >= 1_000_000 {
+        format!("{:.1}M", parameters as f64 / 1_000_000.0)
+    } else if parameters >= 1_000 {
+        format!("{:.1}K", parameters as f64 / 1_000.0)
+    } else {
+        parameters.to_string()
+    }
+}
+
+fn format_system_time(time: Option<SystemTime>) -> String {
+    let Some(seconds) = time
+        .and_then(|time| time.duration_since(SystemTime::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs())
+    else {
+        return "—".into();
+    };
+    let days = (seconds / 86_400) as i64;
+    let seconds_of_day = seconds % 86_400;
+    let hour = seconds_of_day / 3_600;
+    let minute = (seconds_of_day % 3_600) / 60;
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let day_of_era = z - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let mut year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    year += i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}Z")
+}
+
+fn gguf_details(file: &GgufFile) -> Text<'static> {
+    let metadata = file.metadata.as_ref();
+    let value = |value: Option<&str>| {
+        value
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("—")
+            .to_owned()
+    };
+    let mut lines = vec![
+        Line::from(file.path.display().to_string()),
+        Line::from(""),
+        Line::from(format!(
+            "model: {}",
+            value(metadata.and_then(|metadata| metadata.name.as_deref()))
+        )),
+        Line::from(format!("quantization: {}", file.quantization)),
+        Line::from(format!(
+            "size: {} ({} bytes)",
+            format_bytes(file.size),
+            file.size
+        )),
+        Line::from(format!(
+            "architecture: {}",
+            value(metadata.and_then(|metadata| metadata.architecture.as_deref()))
+        )),
+        Line::from(format!(
+            "parameters: {}",
+            format_parameter_count(metadata.and_then(|metadata| metadata.parameter_count))
+        )),
+        Line::from(format!("modified: {}", format_system_time(file.modified))),
+        Line::from(format!(
+            "gguf version: {}",
+            metadata
+                .map(|metadata| metadata.version.to_string())
+                .unwrap_or_else(|| "—".into())
+        )),
+        Line::from(format!(
+            "tensor count: {}",
+            metadata
+                .map(|metadata| metadata.tensor_count.to_string())
+                .unwrap_or_else(|| "—".into())
+        )),
+        Line::from(format!(
+            "file type id: {}",
+            metadata
+                .and_then(|metadata| metadata.file_type)
+                .map(|file_type| file_type.to_string())
+                .unwrap_or_else(|| "—".into())
+        )),
+        Line::from(format!(
+            "tokenizer: {}",
+            value(metadata.and_then(|metadata| metadata.tokenizer_model.as_deref()))
+        )),
+    ];
+    if let Some(error) = &file.parse_error {
+        lines.push(Line::from(""));
+        lines.push(Line::from(Span::styled(
+            format!("parse warning: {error}"),
+            Style::default().fg(Color::Yellow),
+        )));
+    }
+    Text::from(lines)
 }
 
 fn expand_tilde(value: &str) -> String {
@@ -2467,18 +2983,15 @@ mod tests {
     use crate::config_store::ModelConfig;
 
     #[test]
-    fn quantization_is_inferred_from_filename() {
-        assert_eq!(
-            infer_quantization(Path::new("model-UD-Q4_K_XL.gguf")),
-            "Q4_K"
-        );
-        assert_eq!(infer_quantization(Path::new("model.gguf")), "unknown");
-    }
-
-    #[test]
     fn byte_formatter_is_readable() {
         assert_eq!(format_bytes(10), "10 B");
         assert_eq!(format_bytes(1536), "1.5 KiB");
+        assert_eq!(format_parameter_count(Some(7_200_000_000)), "7.2B");
+        assert_eq!(format_parameter_count(None), "—");
+        assert_eq!(
+            format_system_time(Some(SystemTime::UNIX_EPOCH)),
+            "1970-01-01 00:00Z"
+        );
     }
 
     #[test]

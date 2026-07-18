@@ -19,6 +19,8 @@
   reporting.
 - Added tested standalone modules for bounded GGUF v2/v3 metadata parsing and
   legacy-compatible atomic job/chat-session persistence.
+- Added reusable bench, maintenance, and download editor state with validation,
+  dirty tracking, safe selection, and snapshot save/reload/restore operations.
 - Added a pinned Rust toolchain, locked dependencies, unit coverage, strict
   Clippy checks, and GitHub Actions verification.
 - Added an on-demand `nomic-embed-text-v1.5` llama-swap profile with
@@ -29,6 +31,12 @@
 - Made the Rust launcher use llama-swap for `--run` and `--list run`, while
   preserving `bench-*.sh` files as the benchmark entry points and retaining the
   Python downloader as a compatibility child process.
+- Connected jobs and chat sessions to their legacy-compatible persistent state,
+  including stale-job reconciliation, bounded history, safe retry reconstruction,
+  and saved-session browsing.
+- Replaced the Rust GGUF view's filename-only inventory with bounded metadata
+  scanning, recursive/top-level modes, filtering, deterministic sorting, file
+  details, and per-file parse warnings.
 
 ### Fixed
 - Treat llama-swap load and unload HTTP failures as failed operations instead
