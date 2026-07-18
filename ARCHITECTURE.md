@@ -150,6 +150,37 @@ retired after compatibility coverage and live llama-swap smoke verification
 pass. `CAR-97` is still in progress; this is not a claim of full parity or a
 fully green verification matrix.
 
+## Rust vs. Textual readiness
+
+The legacy Textual application is `l3ms.py` and `l3ms/app.py` on `main`. The
+Rust application is the `l3ms` binary on the `CAR-97` branch. The comparison
+below records the current replacement decision rather than maintaining a
+second implementation backlog.
+
+| Area | Rust | Textual | Current assessment |
+| --- | --- | --- | --- |
+| Workbench and model load/unload | Authenticated typed client, TUI, and headless CLI | Mature TUI workflow | Rust has the stronger boundary |
+| CLI | `--run`, `--bench`, `--list`, `--quickstart`, filters, and extra args | Similar interactive modes | Rust has the stronger packaging |
+| Chat | Streaming, parameters, sessions, token feedback | Detect, Connect, endpoint editing, model selection, streaming, cancellation, sessions | Textual remains ahead |
+| Downloads | CRUD, validation, snapshots, restore, preflight, disk feedback, shell-free execution | Broadly complete workflow | Rust has the stronger safety model |
+| Bench and Maintenance | Run/stop, UTF-8 editing, reload/restore, snapshots, supervised processes | Run/stop, editing, and snapshots | Rust is the stronger long-term base |
+| Jobs | Bounded persistence, stale-run reconciliation, stop/retry, safe reconstruction | Persistence, stop/retry, and history | Rust is ahead on recovery safety |
+| GGUF browser | Bounded v2/v3 parsing, recursive inventory, metadata, symlink and budget protection | Similar browsing features | Rust is ahead on malformed-input safety |
+| Keyboard and navigation | Command palette, contextual help, keyboard-first focus | Better mouse/widget ergonomics | Rust matches the project direction |
+| Automated confidence | Locked toolchain, CI, format/lint gates, and 186 Rust tests | No comparable Textual TUI test suite in `main` | Rust is ahead |
+| Runtime boundary | Compiled binary plus the intentional Python downloader boundary | Python/Textual runtime | Rust is lighter after build |
+
+The Rust branch is the preferred application for Workbench, model operations,
+Downloads, Bench, Maintenance, Jobs, and GGUF browsing. Keep Textual as the
+Chat fallback until Rust has endpoint draft/committed state, real Connect and
+Detect handlers, independent Chat model selection, app-owned cancellation with
+stale-stream protection, and live authenticated Chat smoke coverage.
+
+Rust is the better long-term foundation because its process supervision,
+persistence, input bounds, and automated verification are stronger and better
+fit the keyboard-first operating model. Textual remains the better complete
+application for Chat and the lower-friction fallback during the parity period.
+
 Linear issue `CAR-97` contains the authoritative ordered implementation
 checklist; this document records the implemented boundary rather than
 maintaining a second backlog.
