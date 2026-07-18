@@ -36,6 +36,8 @@ module tree:
   Ratatui.
 - `src/downloader_command.rs` owns portable, shell-free Python interpreter and
   downloader-script argv construction.
+- `src/download_preflight.rs` owns strict estimator JSON validation, bounded
+  cancellable estimator execution, and platform-aware disk-space probing.
 - `src/gguf.rs` owns bounded GGUF v2/v3 metadata parsing and safe directory
   inventory.
 - `src/job_history.rs` owns the persisted job lifecycle and safe reconstruction
@@ -82,6 +84,17 @@ boundary still owns Hugging Face downloads while Rust supervises the child.
 Runtime worker precedence is global override, then per-model value, then the
 optional slow preset.
 
+Before starting a Download job, Rust clones the exact launch argv and appends
+`--estimate-json` only to the preflight copy. The Python boundary uses the same
+revision and allow/ignore filters with Hugging Face `dry_run` metadata, then
+emits one bounded schema-versioned JSON document containing total, cached, and
+remaining bytes. Rust validates aggregate counts and byte totals, probes the
+target filesystem off the rendering thread, and reports advisory size-versus-
+free-space feedback. Estimator failure does not change the legacy launch
+behavior: it is logged and the immutable original command can still run. A
+pending preflight is single-flight, request-ID guarded, cancellable with `Esc`,
+and reaps its child process group on Unix.
+
 ## Persistence and safety
 
 Download configuration snapshots remain under
@@ -127,12 +140,15 @@ and per-file parse warnings.
 The Rust TUI now wires safe inline editors for bench and maintenance scripts and
 an expanding typed Download configuration surface, including model CRUD,
 strict load/save/restore, dirty guards, speed controls, disk feedback, and
-dedicated process output. The Python TUI remains available during the parity
-period for Chat endpoint editing, server detection/connect, explicit model
-selection, visible response cancellation, and any remaining live-only
-operational gaps. It should only be retired after compatibility coverage and
-live llama-swap smoke verification pass. `CAR-97` is still in progress; this is
-not a claim of full parity or a fully green verification matrix.
+dedicated process output. Download launches now include bounded asynchronous
+cache-aware size/disk preflight, responsive wide/compact/focused-pane layouts,
+and verified selected/enabled execution through the real Hugging Face boundary.
+The Python TUI remains available during the parity period for Chat endpoint
+editing, server detection/connect, explicit model selection, visible response
+cancellation, and any remaining live-only operational gaps. It should only be
+retired after compatibility coverage and live llama-swap smoke verification
+pass. `CAR-97` is still in progress; this is not a claim of full parity or a
+fully green verification matrix.
 
 Linear issue `CAR-97` contains the authoritative ordered implementation
 checklist; this document records the implemented boundary rather than

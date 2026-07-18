@@ -1,6 +1,6 @@
 # Dynamic Model Downloader
 
-A flexible and configurable tool for downloading models from HuggingFace Hub with support for patterns, custom directories, and batch downloads.
+A flexible and configurable tool for downloading models from Hugging Face Hub with support for patterns, custom directories, batch downloads, and machine-readable size estimates.
 
 ## Features
 
@@ -9,18 +9,21 @@ A flexible and configurable tool for downloading models from HuggingFace Hub wit
 - **Batch Downloads**: Download multiple models in one go
 - **Enable/Disable Models**: Toggle models on/off without removing them from config
 - **Auto-directory Generation**: Automatically organize models by repository structure
-- **Fast Downloads**: Uses `hf_transfer` for improved download speeds
+- **Supported Download Backend**: Reports `hf_xet` when available and otherwise uses the `huggingface_hub` default transport
 - **Incremental Sync**: `--update` pulls only changed/new files for already-downloaded models
+- **Dry-run Estimates**: Reports filtered, cache-aware byte totals as machine-readable JSON without downloading model files
 - **Error Handling**: Robust error handling with detailed feedback
 - **Download Throttling**: Control concurrency with `--slow` or `--max-workers`
 
 ## Installation
 
-First, install the required dependencies:
+From the repository root, install the downloader dependencies:
 
 ```bash
-pip install huggingface_hub hf_transfer
+python -m pip install -r requirements-downloader.txt
 ```
+
+The script uses `hf_xet` when it is installed and supported by `huggingface_hub`. Otherwise, it uses the Hub client's default download path. The former `hf_transfer` backend is deprecated and is not required.
 
 ## Usage
 
@@ -30,25 +33,25 @@ Download a single model with command-line arguments:
 
 ```bash
 # Basic download
-python download_hf_model.py --repo-id microsoft/DialoGPT-medium
+python model_downloader/download_hf_model.py --repo-id microsoft/DialoGPT-medium
 
 # Download with specific patterns
-python download_hf_model.py --repo-id Qwen/Qwen3-32B-GGUF --allow-patterns "*Q6_K*"
+python model_downloader/download_hf_model.py --repo-id Qwen/Qwen3-32B-GGUF --allow-patterns "*Q6_K*"
 
 # Download to custom directory
-python download_hf_model.py --repo-id microsoft/DialoGPT-medium --local-dir ./my_models/dialog
+python model_downloader/download_hf_model.py --repo-id microsoft/DialoGPT-medium --local-dir ./my_models/dialog
 
 # Download specific revision/branch
-python download_hf_model.py --repo-id microsoft/DialoGPT-medium --revision main
+python model_downloader/download_hf_model.py --repo-id microsoft/DialoGPT-medium --revision main
 
 # Slow preset (equivalent to --max-workers 4)
-python download_hf_model.py --repo-id microsoft/DialoGPT-medium --slow
+python model_downloader/download_hf_model.py --repo-id microsoft/DialoGPT-medium --slow
 
 # Throttle bandwidth/parallelism by lowering workers
-python download_hf_model.py --repo-id microsoft/DialoGPT-medium --max-workers 2
+python model_downloader/download_hf_model.py --repo-id microsoft/DialoGPT-medium --max-workers 2
 
 # Force re-download existing files
-python download_hf_model.py --repo-id microsoft/DialoGPT-medium --force-download
+python model_downloader/download_hf_model.py --repo-id microsoft/DialoGPT-medium --force-download
 ```
 
 ### 2. Batch Download with Configuration
@@ -57,13 +60,13 @@ Create a configuration file and download multiple models:
 
 ```bash
 # Use existing config
-./download_hf_model.py --config models_config.json
+python model_downloader/download_hf_model.py --config model_downloader/models_config.json
 
 # Sync updates for already-downloaded models
-./download_hf_model.py --config models_config.json --update
+python model_downloader/download_hf_model.py --config model_downloader/models_config.json --update
 
 # Throttle concurrency
-./download_hf_model.py --config models_config.json --slow
+python model_downloader/download_hf_model.py --config model_downloader/models_config.json --slow
 ```
 
 ### 3. Configuration File Format
@@ -97,6 +100,39 @@ Create a configuration file and download multiple models:
 }
 ```
 
+### 4. Machine-readable Download Estimate
+
+Use `--estimate-json` with either a repository or a configuration file to ask Hugging Face Hub for filtered dry-run metadata. It does not download model files.
+
+```bash
+# Estimate one filtered repository
+python model_downloader/download_hf_model.py --estimate-json \
+  --repo-id hf-internal-testing/tiny-random-gpt2 \
+  --allow-patterns "config.json"
+
+# Estimate all eligible models in a configuration
+python model_downloader/download_hf_model.py --estimate-json \
+  --config model_downloader/models_config.json
+```
+
+Successful output is exactly one compact JSON object on stdout, with no progress messages or backend banner:
+
+```json
+{"schema_version":1,"models":[{"repo_id":"hf-internal-testing/tiny-random-gpt2","revision":"main","matched_files":1,"total_bytes":807,"download_bytes":807,"cached_bytes":0}],"totals":{"models":1,"matched_files":1,"total_bytes":807,"download_bytes":807,"cached_bytes":0}}
+```
+
+The schema contains:
+
+- `schema_version`: currently `1`
+- `models`: one summary per estimated repository, including the resolved revision, number of matched files, total matched bytes, bytes still requiring download, and bytes already cached
+- `totals`: the same counts and byte fields aggregated across all returned models
+
+The estimate honors repository, revision, local directory, allow/ignore patterns, and force-download selection. In configuration mode, disabled entries and entries without a valid `repo_id` are skipped. Pattern values may be a string or an array of strings. Worker settings do not affect byte totals.
+
+Cache status is evaluated for the selected local directory at the time of the request. A file contributes to `cached_bytes` only when the Hub reports it cached and not scheduled for download; a file scheduled for transfer contributes to `download_bytes`. Estimates are bounded to 256 eligible models and 10,000 matched files.
+
+This mode is intended for programs rather than interactive output. On failure, stdout is empty, the process exits nonzero, and stderr contains one bounded error line.
+
 ## Command-Line Options
 
 | Option | Short | Description |
@@ -112,6 +148,7 @@ Create a configuration file and download multiple models:
 | `--max-workers` | | Max concurrent download workers |
 | `--slow` | | Slow preset (`max_workers=4`) |
 | `--base-models-dir` | | Base directory for all models |
+| `--estimate-json` | | Emit one machine-readable dry-run estimate without downloading model files |
 
 ## Configuration Options
 
@@ -120,10 +157,10 @@ Create a configuration file and download multiple models:
 Each model in the configuration can have these properties:
 
 - `enabled` (optional, default: `true`): Set to `false` to skip this model without removing it
-- `repo_id` (required): HuggingFace repository ID
+- `repo_id` (required): Hugging Face repository ID
 - `local_dir` (optional): Custom local directory path
-- `allow_patterns` (optional): List of file patterns to include
-- `ignore_patterns` (optional): List of file patterns to exclude
+- `allow_patterns` (optional): File pattern string or list of patterns to include
+- `ignore_patterns` (optional): File pattern string or list of patterns to exclude
 - `revision` (optional): Specific git revision/branch/tag
 - `force_download` (optional): Whether to re-download existing files
 - `max_workers` (optional): Max concurrent file downloads
@@ -159,24 +196,24 @@ models/
 
 ```bash
 # Download only Q8 quantized models
-python download_hf_model.py --repo-id unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF --allow-patterns "*Q8*"
+python model_downloader/download_hf_model.py --repo-id unsloth/Qwen3-30B-A3B-Instruct-2507-GGUF --allow-patterns "*Q8*"
 
 # Download multiple quantization levels
-python download_hf_model.py --repo-id Qwen/Qwen3-32B-GGUF --allow-patterns "*Q4_K_M*" "*Q6_K*"
+python model_downloader/download_hf_model.py --repo-id Qwen/Qwen3-32B-GGUF --allow-patterns "*Q4_K_M*" "*Q6_K*"
 ```
 
 ### Exclude Large Files
 
 ```bash
 # Skip documentation and large unquantized files
-python download_hf_model.py --repo-id microsoft/DialoGPT-medium --ignore-patterns "*.md" "*F32*" "*F16*"
+python model_downloader/download_hf_model.py --repo-id microsoft/DialoGPT-medium --ignore-patterns "*.md" "*F32*" "*F16*"
 ```
 
 ### Custom Organization
 
 ```bash
 # Download to specific directory structure
-python download_hf_model.py --repo-id microsoft/DialoGPT-medium --local-dir ./conversations/dialog-medium
+python model_downloader/download_hf_model.py --repo-id microsoft/DialoGPT-medium --local-dir ./conversations/dialog-medium
 ```
 
 ### Enable/Disable Models in Config
@@ -205,6 +242,7 @@ You can temporarily disable models in your configuration without deleting or com
 ```
 
 This is useful for:
+
 - Testing with a subset of models
 - Temporarily skipping large downloads
 - Keeping model configurations for future use
@@ -214,15 +252,16 @@ This is useful for:
 
 ### Common Issues
 
-1. **Import Error**: Make sure `huggingface_hub` and `hf_transfer` are installed
+1. **Import Error**: Install the root downloader requirements with `python -m pip install -r requirements-downloader.txt`
 2. **Permission Errors**: Check write permissions for the target directory
-3. **Network Issues**: Verify internet connection and HuggingFace Hub access
+3. **Network Issues**: Verify internet connection and Hugging Face Hub access
 4. **Disk Space**: Ensure sufficient disk space for large models
 
 ### Environment Variables
 
-- `HF_HUB_ENABLE_HF_TRANSFER=1`: Enables faster downloads (set automatically)
-- `HF_TOKEN`: Your HuggingFace token for private repositories
+- `HF_TOKEN`: Your Hugging Face token for private repositories
+
+If `HF_HUB_ENABLE_HF_TRANSFER=1` remains in an older environment, unset it. When `hf_xet` is unavailable, the script reports that legacy `hf_transfer` setting as deprecated; current downloads use `hf_xet` when available or the `huggingface_hub` default transport.
 
 ### Debugging
 
@@ -237,6 +276,7 @@ Add verbose output by checking the console messages. The script provides detaile
 If you're migrating from the old static script, you can:
 
 1. Create a config file with your existing models:
+
 ```json
 {
   "models": [
@@ -250,8 +290,9 @@ If you're migrating from the old static script, you can:
 ```
 
 2. Run with the config:
+
 ```bash
-python download_hf_model.py --config your_models.json
+python model_downloader/download_hf_model.py --config your_models.json
 ```
 
 This provides the same functionality with much more flexibility for future use.

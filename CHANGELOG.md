@@ -32,6 +32,9 @@ verification matrix.
   runtime controls, model CRUD and all typed fields, validation, atomic save,
   snapshot restore, dedicated logs, disk-space feedback, and supervised
   selected/enabled launches.
+- Added a schema-versioned Hugging Face dry-run estimator and a strict Rust
+  preflight boundary with bounded output, timeout/cancellation, child cleanup,
+  cache-aware byte totals, and platform-aware target disk probing.
 - Added a reusable Unicode-safe text buffer with character-boundary editing,
   terminal-cell cursor positioning, and vertical/page navigation.
 - Added a pinned Rust toolchain, locked dependencies, unit coverage, strict
@@ -57,6 +60,12 @@ verification matrix.
   Python from `L3MS_DOWNLOADER_PYTHON`, the platform repository venv, or
   `python3`, in that order. The downloader script now has a portable
   `#!/usr/bin/env python3` shebang for direct CLI use.
+- Made Download launches preflight the immutable selected/enabled command off
+  the rendering thread, report cached/remaining size against free space, allow
+  `Esc` cancellation, and preserve legacy launch behavior when estimation is
+  unavailable.
+- Made the Download view responsive across wide, compact, and focused-pane
+  terminal layouts while keeping the active field and cursor visible.
 - Isolated new Download histories with stable path-hashed snapshot namespaces
   while retaining list and restore compatibility with legacy snapshot
   directories.
@@ -77,6 +86,9 @@ verification matrix.
   rendered scroll window.
 - Apply batch download slow/global worker controls when normalized model rows
   contain `max_workers: null`.
+- Prevent synchronous disk probing and stale preflight events from blocking or
+  mutating the active Download view, and reap canceled estimator descendants on
+  Unix even when they retain inherited output pipes.
 
 ## [0.6.0] - 2026-07-03
 

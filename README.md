@@ -32,6 +32,18 @@ rustup show
 cargo build --release --locked
 ```
 
+Downloads continue to use the repository's Python compatibility boundary.
+Install that dependency into the repository virtual environment so the Rust
+TUI can discover it automatically:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python3 -m pip install -r requirements-downloader.txt
+```
+
+Set `L3MS_DOWNLOADER_PYTHON` to another Python executable when the dependency
+lives elsewhere.
+
 ## Start TUI
 
 ```bash
@@ -83,7 +95,9 @@ filtering, deterministic sorting, detailed metadata, and per-file warnings.
 Bench and maintenance now have inline UTF-8 script editors with dirty guards
 and snapshot save/reload/restore. The Download view exposes the legacy JSON
 fields, runtime speed controls, model CRUD, strict validation, atomic snapshots,
-dedicated output, and supervised selected/enabled launches. The Python
+dedicated output, responsive narrow-terminal rendering, and supervised
+selected/enabled launches. Each launch first runs a bounded, cancellable,
+cache-aware size and disk-space preflight off the rendering thread. The Python
 downloader remains the download implementation behind a portable, shell-free
 Rust command boundary.
 
@@ -94,7 +108,7 @@ matrix.
 The Python TUI remains available during the parity period:
 
 ```bash
-python3 -m pip install -r requirements-tui.txt
+python3 -m pip install -r requirements-tui.txt -r requirements-downloader.txt
 python3 l3ms.py
 ```
 
@@ -117,6 +131,8 @@ and Linear issue `CAR-97` for the authoritative remaining-work checklist.
   - config load/save/validate/restore
   - model row add/apply/delete
   - download selected or enabled models
+  - asynchronous cache-aware download-size and target-disk preflight
+  - responsive wide, compact, and focused-pane layouts
   - repeat-action confirmation before dirty reload or restore
   - restore validates the snapshot and saves displaced config bytes for undo
     before atomic replacement
@@ -175,6 +191,7 @@ Download (active only on Download tab):
 - `Alt+D`: download selected model
 - `Alt+E`: download enabled models
 - `Alt+Y`: clear download log
+- `Esc`: cancel a pending download preflight
 
 Model Ops (active only on Model Ops tab):
 
@@ -214,6 +231,7 @@ Model Browser (active only on Model Browser tab):
 - `maintenance/systemd/`: user service units (including `llama-swap.service` and `nanobot-gateway.service`)
 - `src/`: Rust CLI, llama-swap client, stores, process supervisor, and Ratatui app
 - `Cargo.toml` / `Cargo.lock`: Rust package and locked dependency graph
+- `requirements-downloader.txt`: Python Hugging Face downloader dependency
 - `l3ms/`: legacy Python TUI and stores retained during parity work
 - `l3ms.py`: legacy Python launcher
 - `ARCHITECTURE.md`: source-of-truth boundaries and Rust migration status

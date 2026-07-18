@@ -14,7 +14,22 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from download_hf_model import ModelDownloader
+from download_hf_model import download_model, resolve_local_dir
+
+
+class ModelDownloader:
+    """Small adapter keeping this manual smoke script on the current function API."""
+
+    def __init__(self, base_models_dir):
+        self.base_models_dir = base_models_dir
+
+    def download_model(self, repo_id, **kwargs):
+        local_dir = kwargs.pop("local_dir", None)
+        return download_model(
+            repo_id=repo_id,
+            local_dir=resolve_local_dir(repo_id, self.base_models_dir, local_dir),
+            **kwargs,
+        )
 
 
 def test_basic_download():

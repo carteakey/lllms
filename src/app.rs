@@ -6,7 +6,10 @@ use std::{
     io::{self, BufRead, BufReader, Stdout},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::{mpsc, Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, Mutex,
+    },
     thread,
     time::{Duration, Instant, SystemTime},
 };
@@ -20,6 +23,9 @@ use crate::{
     commands::{command, search_all_commands, visible_commands, CommandContext, CommandId},
     config_store::{load_config, DownloadConfig},
     download_editor::DownloadEditor,
+    download_preflight::{
+        probe_disk_space, run_download_preflight_cancellable, DiskSpace, DownloadPreflight,
+    },
     download_ui::{DownloadFocus, DownloadUiState, ModelField},
     downloader_command::downloader_command_prefix,
     gguf::{self, GgufFile},
@@ -66,6 +72,8 @@ const EVENTS_PER_TICK: usize = 128;
 const MAX_PROCESS_LINE_BYTES: usize = 16 * 1024;
 const MAX_CHAT_PREVIEW_BYTES: usize = 64 * 1024;
 const TELEMETRY_INTERVAL: Duration = Duration::from_secs(1);
+const DOWNLOAD_ESTIMATE_TIMEOUT: Duration = Duration::from_secs(180);
+const DOWNLOAD_DISK_TIMEOUT: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -182,6 +190,15 @@ struct RunningProcess {
     child: Arc<Mutex<Option<Child>>>,
 }
 
+struct PendingDownloadPreflight {
+    request_id: u64,
+    name: String,
+    parts: Vec<OsString>,
+    target: PathBuf,
+    cancellation: Arc<AtomicBool>,
+    worker: Option<thread::JoinHandle<()>>,
+}
+
 enum BackgroundEvent {
     Models(Result<Vec<SwapModel>, String>),
     ModelAction {
@@ -203,6 +220,15 @@ enum BackgroundEvent {
     ProcessFinished {
         job_id: u64,
         exit_code: i32,
+    },
+    DownloadDiskSpace {
+        request_id: u64,
+        target: PathBuf,
+        result: Result<DiskSpace, String>,
+    },
+    DownloadPreflight {
+        request_id: u64,
+        result: Result<DownloadPreflight, String>,
     },
     Telemetry(Result<Option<String>, String>),
 }
@@ -262,6 +288,9 @@ struct App {
     download_log: VecDeque<String>,
     download_load_error: Option<String>,
     download_disk_space: String,
+    download_disk_request_id: u64,
+    download_preflight_request_id: u64,
+    download_preflight_pending: Option<PendingDownloadPreflight>,
     download_reload_armed: bool,
     download_restore_armed: bool,
 
@@ -379,6 +408,9 @@ impl App {
             download_log: VecDeque::new(),
             download_load_error: config_warning.clone(),
             download_disk_space: "Disk: —".into(),
+            download_disk_request_id: 0,
+            download_preflight_request_id: 0,
+            download_preflight_pending: None,
             download_reload_armed: false,
             download_restore_armed: false,
             maintenance_scripts: Vec::new(),
@@ -669,6 +701,71 @@ impl App {
                     {
                         self.running_process = None;
                     }
+                }
+                BackgroundEvent::DownloadDiskSpace {
+                    request_id,
+                    target,
+                    result,
+                } => {
+                    if request_id != self.download_disk_request_id {
+                        continue;
+                    }
+                    self.download_disk_space = match result {
+                        Ok(disk_space) => format_disk_space(&target, disk_space),
+                        Err(error) => {
+                            self.push_download_log(format!(
+                                "Disk-space probe unavailable for {}: {error}",
+                                target.display()
+                            ));
+                            format!("Disk: unavailable [{}]", target.display())
+                        }
+                    };
+                }
+                BackgroundEvent::DownloadPreflight { request_id, result } => {
+                    let matches_pending = self
+                        .download_preflight_pending
+                        .as_ref()
+                        .is_some_and(|pending| pending.request_id == request_id);
+                    if !matches_pending {
+                        continue;
+                    }
+                    let mut pending = self
+                        .download_preflight_pending
+                        .take()
+                        .expect("matching download preflight is present");
+                    if let Some(worker) = pending.worker.take() {
+                        let _ = worker.join();
+                    }
+                    if pending.cancellation.load(Ordering::Acquire) {
+                        self.status = "Download preflight cancelled".into();
+                        self.push_download_log(format!(
+                            "Download preflight cancelled for {}",
+                            pending.name
+                        ));
+                        continue;
+                    }
+
+                    match result {
+                        Ok(preflight) => {
+                            self.record_download_preflight(&pending.target, &preflight);
+                        }
+                        Err(error) => {
+                            self.push_download_log(format!(
+                                "Download preflight unavailable for {}: {error}",
+                                pending.name
+                            ));
+                        }
+                    }
+                    if self.running_process.is_some() {
+                        self.status = format!(
+                            "Did not start {}; another process started during preflight",
+                            pending.name
+                        );
+                        self.push_download_log(self.status.clone());
+                        continue;
+                    }
+                    self.status = format!("Preflight complete; starting {}", pending.name);
+                    self.start_process_from_parts(pending.name, "download", pending.parts);
                 }
                 BackgroundEvent::Telemetry(result) => {
                     self.telemetry_pending = false;
@@ -1856,6 +1953,9 @@ impl App {
     }
 
     fn handle_download_key(&mut self, key: KeyEvent) -> Result<()> {
+        if key.code == KeyCode::Esc && self.cancel_download_preflight() {
+            return Ok(());
+        }
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => self.select_download_previous(),
             KeyCode::Down | KeyCode::Char('j') => self.select_download_next(),
@@ -1879,6 +1979,9 @@ impl App {
     }
 
     fn handle_download_input_key(&mut self, key: KeyEvent) {
+        if key.code == KeyCode::Esc && self.cancel_download_preflight() {
+            return;
+        }
         match key.code {
             KeyCode::Esc => {
                 self.focus_download_table();
@@ -2236,6 +2339,7 @@ impl App {
 
     fn refresh_download_disk_space(&mut self) {
         let raw = self.download.base_models_dir_buffer().content().trim();
+        self.download_disk_request_id = next_request_id(self.download_disk_request_id);
         if raw.is_empty() {
             self.download_disk_space = "Disk: —".into();
             return;
@@ -2246,7 +2350,105 @@ impl App {
         } else {
             self.root.join(path)
         };
-        self.download_disk_space = disk_space_summary(&path);
+        let request_id = self.download_disk_request_id;
+        self.download_disk_space = format!("Disk: checking… [{}]", path.display());
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let result = probe_disk_space(&path, DOWNLOAD_DISK_TIMEOUT)
+                .map_err(|error| format!("{error:#}"));
+            let _ = sender.send(BackgroundEvent::DownloadDiskSpace {
+                request_id,
+                target: path,
+                result,
+            });
+        });
+    }
+
+    fn download_launch_is_busy(&mut self) -> bool {
+        if self.download_preflight_pending.is_some() {
+            self.status = "A download preflight is already running; Esc cancels it".into();
+            return true;
+        }
+        if self.running_process.is_some() {
+            self.status = "A process is already running; stop it first".into();
+            return true;
+        }
+        false
+    }
+
+    fn begin_download_preflight(&mut self, name: String, parts: Vec<OsString>, target: PathBuf) {
+        if self.download_launch_is_busy() {
+            return;
+        }
+        if parts.is_empty() {
+            self.status = "Could not build download command".into();
+            self.push_download_log("Download command is empty");
+            return;
+        }
+
+        self.download_preflight_request_id = next_request_id(self.download_preflight_request_id);
+        let request_id = self.download_preflight_request_id;
+        let mut estimate_parts = parts.clone();
+        estimate_parts.push("--estimate-json".into());
+        let cancellation = Arc::new(AtomicBool::new(false));
+        let worker_cancellation = Arc::clone(&cancellation);
+        let worker_target = target.clone();
+        let sender = self.sender.clone();
+        let worker = thread::spawn(move || {
+            let result = run_download_preflight_cancellable(
+                estimate_parts,
+                &worker_target,
+                DOWNLOAD_ESTIMATE_TIMEOUT,
+                DOWNLOAD_DISK_TIMEOUT,
+                &worker_cancellation,
+            )
+            .map_err(|error| format!("{error:#}"));
+            let _ = sender.send(BackgroundEvent::DownloadPreflight { request_id, result });
+        });
+
+        self.status = format!("Checking remote sizes for {name}… · Esc cancels");
+        self.push_download_log(format!(
+            "Checking remote sizes and disk space for {name} [{}]",
+            target.display()
+        ));
+        self.download_preflight_pending = Some(PendingDownloadPreflight {
+            request_id,
+            name,
+            parts,
+            target,
+            cancellation,
+            worker: Some(worker),
+        });
+    }
+
+    fn cancel_download_preflight(&mut self) -> bool {
+        let Some(pending) = self.download_preflight_pending.as_ref() else {
+            return false;
+        };
+        if !pending.cancellation.swap(true, Ordering::AcqRel) {
+            self.status = format!("Cancelling download preflight for {}…", pending.name);
+        }
+        true
+    }
+
+    fn record_download_preflight(&mut self, target: &Path, preflight: &DownloadPreflight) {
+        self.download_disk_request_id = next_request_id(self.download_disk_request_id);
+        self.download_disk_space = preflight.disk_space.map_or_else(
+            || format!("Disk: unavailable [{}]", target.display()),
+            |disk_space| format_disk_space(target, disk_space),
+        );
+        let totals = &preflight.estimate.totals;
+        self.push_download_log(format!(
+            "Estimate: {} to download / {} matched · {} file(s) · {} cached · {} model(s)",
+            format_bytes(totals.download_bytes),
+            format_bytes(totals.total_bytes),
+            totals.matched_files,
+            format_bytes(totals.cached_bytes),
+            totals.models,
+        ));
+        if let Some(warning) = &preflight.warning {
+            self.push_download_log(format!("Preflight warning: {warning}"));
+        }
     }
 
     fn handle_jobs_key(&mut self, key: KeyEvent) {
@@ -2600,6 +2802,9 @@ impl App {
     }
 
     fn download_selected(&mut self) {
+        if self.download_launch_is_busy() {
+            return;
+        }
         if !self.download_config_is_usable() {
             return;
         }
@@ -2640,7 +2845,15 @@ impl App {
             index,
             &speed_args,
         ) {
-            Ok((name, parts)) => self.start_process_from_parts(name, "download", parts),
+            Ok((name, parts)) => {
+                match selected_download_target(&self.root, self.download.config(), index) {
+                    Ok(target) => self.begin_download_preflight(name, parts, target),
+                    Err(error) => {
+                        self.status = "Could not resolve download target".into();
+                        self.record_download_message(format!("{error:#}"));
+                    }
+                }
+            }
             Err(error) => {
                 self.status = "Could not build download command".into();
                 self.record_download_message(format!("{error:#}"));
@@ -2649,6 +2862,9 @@ impl App {
     }
 
     fn download_enabled(&mut self) {
+        if self.download_launch_is_busy() {
+            return;
+        }
         if !self.download_config_is_usable() {
             return;
         }
@@ -2668,7 +2884,8 @@ impl App {
         parts.push("--config".into());
         parts.push(self.download.editor().config_path().as_os_str().to_owned());
         parts.extend(speed_args.into_iter().map(OsString::from));
-        self.start_process_from_parts("enabled downloads".into(), "download", parts);
+        let target = config_download_target(&self.root, self.download.config());
+        self.begin_download_preflight("enabled downloads".into(), parts, target);
     }
 
     fn selected_download_speed_args(&self, index: usize) -> Result<Vec<String>> {
@@ -2691,6 +2908,10 @@ impl App {
     }
 
     fn start_process_from_parts(&mut self, name: String, kind: &str, parts: Vec<OsString>) {
+        if self.download_preflight_pending.is_some() {
+            self.status = "A download preflight is running; Esc cancels it".into();
+            return;
+        }
         if self.running_process.is_some() {
             self.status = "A process is already running; stop it first".into();
             return;
@@ -2896,6 +3117,8 @@ impl App {
     fn stop_active_job(&mut self) {
         if self.running_process.is_some() {
             self.stop_running_process();
+        } else if self.download_preflight_pending.is_some() {
+            self.cancel_download_preflight();
         } else if self.model_action_pending {
             self.status = "The current llama-swap request cannot be cancelled safely".into();
         } else if self.loaded_model_id.is_some() {
@@ -3453,88 +3676,112 @@ impl App {
     }
 
     fn draw_download(&mut self, frame: &mut Frame, area: Rect) {
-        let sections = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
+        let compact = area.width < 120 || area.height < 24;
+        let section_constraints = if compact && area.height < 12 {
+            [
+                Constraint::Length(3),
+                Constraint::Min(3),
+                Constraint::Length(2),
+            ]
+        } else if compact {
+            [
+                Constraint::Length(6),
+                Constraint::Min(3),
+                Constraint::Length(3),
+            ]
+        } else {
+            [
                 Constraint::Length(6),
                 Constraint::Min(6),
                 Constraint::Length(4),
-            ])
-            .split(area);
-        let setting_rows = Layout::default()
+            ]
+        };
+        let sections = Layout::default()
             .direction(Direction::Vertical)
-            .constraints([Constraint::Length(3), Constraint::Length(3)])
-            .split(sections[0]);
-        let top = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(62), Constraint::Percentage(38)])
-            .split(setting_rows[0]);
-        let bottom = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(36),
-                Constraint::Percentage(16),
-                Constraint::Percentage(22),
-                Constraint::Percentage(26),
-            ])
-            .split(setting_rows[1]);
+            .constraints(section_constraints)
+            .split(area);
 
-        render_download_text_field(
-            frame,
-            top[0],
-            "Config path · Alt+O load",
-            self.download.config_path_buffer(),
-            self.download.focus() == DownloadFocus::ConfigPath,
-        );
-        let version = self.download.selected_version().unwrap_or("—");
-        render_download_value_field(
-            frame,
-            top[1],
-            "Snapshot · Alt+R restore",
-            version,
-            self.download.focus() == DownloadFocus::Versions,
-        );
-        render_download_text_field(
-            frame,
-            bottom[0],
-            "Base models dir",
-            self.download.base_models_dir_buffer(),
-            self.download.focus() == DownloadFocus::BaseModelsDir,
-        );
-        render_download_value_field(
-            frame,
-            bottom[1],
-            "Speed preset",
-            if self.download.slow() {
-                "[x] slow"
-            } else {
-                "[ ] slow"
-            },
-            self.download.focus() == DownloadFocus::SlowPreset,
-        );
-        render_download_text_field(
-            frame,
-            bottom[2],
-            "Global workers",
-            self.download.global_workers_buffer(),
-            self.download.focus() == DownloadFocus::GlobalWorkers,
-        );
-        render_download_text_field(
-            frame,
-            bottom[3],
-            "Save note",
-            self.download.save_note_buffer(),
-            self.download.focus() == DownloadFocus::SaveNote,
-        );
+        if compact {
+            render_download_compact_settings(frame, sections[0], &self.download);
+        } else {
+            let setting_rows = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Length(3), Constraint::Length(3)])
+                .split(sections[0]);
+            let top = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(62), Constraint::Percentage(38)])
+                .split(setting_rows[0]);
+            let bottom = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Percentage(36),
+                    Constraint::Percentage(16),
+                    Constraint::Percentage(22),
+                    Constraint::Percentage(26),
+                ])
+                .split(setting_rows[1]);
 
-        let panes = Layout::default()
-            .direction(if sections[1].width >= 88 {
-                Direction::Horizontal
-            } else {
-                Direction::Vertical
-            })
-            .constraints([Constraint::Percentage(54), Constraint::Percentage(46)])
-            .split(sections[1]);
+            render_download_text_field(
+                frame,
+                top[0],
+                "Config path · Alt+O load",
+                self.download.config_path_buffer(),
+                self.download.focus() == DownloadFocus::ConfigPath,
+            );
+            let version = self.download.selected_version().unwrap_or("—");
+            render_download_value_field(
+                frame,
+                top[1],
+                "Snapshot · Alt+R restore",
+                version,
+                self.download.focus() == DownloadFocus::Versions,
+            );
+            render_download_text_field(
+                frame,
+                bottom[0],
+                "Base models dir",
+                self.download.base_models_dir_buffer(),
+                self.download.focus() == DownloadFocus::BaseModelsDir,
+            );
+            render_download_value_field(
+                frame,
+                bottom[1],
+                "Speed preset",
+                if self.download.slow() {
+                    "[x] slow"
+                } else {
+                    "[ ] slow"
+                },
+                self.download.focus() == DownloadFocus::SlowPreset,
+            );
+            render_download_text_field(
+                frame,
+                bottom[2],
+                "Global workers",
+                self.download.global_workers_buffer(),
+                self.download.focus() == DownloadFocus::GlobalWorkers,
+            );
+            render_download_text_field(
+                frame,
+                bottom[3],
+                "Save note",
+                self.download.save_note_buffer(),
+                self.download.focus() == DownloadFocus::SaveNote,
+            );
+        }
+
+        let (table_area, editor_area) = if !compact || sections[1].width >= 72 {
+            let panes = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([Constraint::Percentage(54), Constraint::Percentage(46)])
+                .split(sections[1]);
+            (Some(panes[0]), Some(panes[1]))
+        } else if matches!(self.download.focus(), DownloadFocus::Model(_)) {
+            (None, Some(sections[1]))
+        } else {
+            (Some(sections[1]), None)
+        };
 
         let rows = self
             .download
@@ -3542,6 +3789,13 @@ impl App {
             .iter()
             .enumerate()
             .map(|(index, model)| {
+                if compact {
+                    return Row::new(vec![
+                        Cell::from((index + 1).to_string()),
+                        Cell::from(if model.enabled { "yes" } else { "no" }),
+                        Cell::from(model.repo_id.clone()),
+                    ]);
+                }
                 let pattern = model
                     .allow_patterns
                     .first()
@@ -3568,78 +3822,53 @@ impl App {
         } else {
             Style::default()
         };
-        let table = Table::new(
-            rows,
-            [
+        let table_widths = if compact {
+            vec![
+                Constraint::Length(3),
+                Constraint::Length(4),
+                Constraint::Min(10),
+            ]
+        } else {
+            vec![
                 Constraint::Length(4),
                 Constraint::Length(8),
                 Constraint::Percentage(35),
                 Constraint::Percentage(28),
                 Constraint::Percentage(37),
-            ],
-        )
-        .header(
-            Row::new(["#", "Enabled", "Repository", "Pattern", "Local dir"])
-                .yellow()
-                .bold(),
-        )
-        .block(
-            Block::default()
-                .title(format!(
-                    "Models{state} · Space toggle · Alt+N/A/K CRUD · Alt+D/E download"
-                ))
-                .borders(Borders::ALL)
-                .border_style(table_border),
-        )
-        .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
-        .highlight_symbol("▶ ");
-        frame.render_stateful_widget(table, panes[0], &mut self.download_state);
-
-        let editor_lines = ModelField::ALL
-            .iter()
-            .map(|field| {
-                let value = match field {
-                    ModelField::Enabled | ModelField::ForceDownload => self
-                        .download
-                        .draft()
-                        .boolean(*field)
-                        .map(|value| if value { "[x]" } else { "[ ]" })
-                        .unwrap_or("[ ]")
-                        .to_owned(),
-                    _ => self
-                        .download
-                        .draft()
-                        .buffer(*field)
-                        .map(|buffer| buffer.content().to_owned())
-                        .unwrap_or_default(),
-                };
-                let line = format!("{}: {value}", field.label());
-                if self.download.focus() == DownloadFocus::Model(*field) {
-                    Line::styled(
-                        line,
-                        Style::default().fg(Color::Black).bg(Color::Cyan).bold(),
-                    )
-                } else {
-                    Line::from(line)
-                }
-            })
-            .collect::<Vec<_>>();
-        let editor_border = if matches!(self.download.focus(), DownloadFocus::Model(_)) {
-            Style::default().fg(Color::Cyan)
-        } else {
-            Style::default()
+            ]
         };
-        frame.render_widget(
-            Paragraph::new(editor_lines)
-                .block(
-                    Block::default()
-                        .title("Model editor · Alt+I focus · Tab/Shift+Tab fields")
-                        .borders(Borders::ALL)
-                        .border_style(editor_border),
-                )
-                .wrap(Wrap { trim: false }),
-            panes[1],
-        );
+        let table_header = if compact {
+            Row::new(["#", "On", "Repository"])
+        } else {
+            Row::new(["#", "Enabled", "Repository", "Pattern", "Local dir"])
+        }
+        .yellow()
+        .bold();
+        let table_title = if compact {
+            format!("Models{state} · Space toggle · Alt+D/E download")
+        } else {
+            format!("Models{state} · Space toggle · Alt+N/A/K CRUD · Alt+D/E download")
+        };
+        let table = Table::new(rows, table_widths)
+            .header(table_header)
+            .block(
+                Block::default()
+                    .title(table_title)
+                    .borders(Borders::ALL)
+                    .border_style(table_border),
+            )
+            .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+            .highlight_symbol("▶ ");
+        if let Some(table_area) = table_area {
+            frame.render_stateful_widget(table, table_area, &mut self.download_state);
+        }
+        if let Some(editor_area) = editor_area {
+            if compact {
+                render_download_compact_model_editor(frame, editor_area, &self.download);
+            } else {
+                render_download_model_editor(frame, editor_area, &self.download);
+            }
+        }
 
         let log_lines = self
             .download_log
@@ -3662,24 +3891,6 @@ impl App {
                 .wrap(Wrap { trim: false }),
             sections[2],
         );
-
-        if let DownloadFocus::Model(field) = self.download.focus() {
-            if let Some(buffer) = self.download.draft().buffer(field) {
-                let line = ModelField::ALL
-                    .iter()
-                    .position(|candidate| *candidate == field)
-                    .unwrap_or_default();
-                let inner_height = panes[1].height.saturating_sub(2) as usize;
-                let inner_width = panes[1].width.saturating_sub(2) as usize;
-                if line < inner_height && inner_width > 0 {
-                    let prefix = UnicodeWidthStr::width(format!("{}: ", field.label()).as_str());
-                    let column = prefix + text_buffer_cursor_display_width(buffer);
-                    let x = panes[1].x + 1 + column.min(inner_width.saturating_sub(1)) as u16;
-                    let y = panes[1].y + 1 + line as u16;
-                    frame.set_cursor_position((x, y));
-                }
-            }
-        }
     }
 
     fn draw_jobs(&mut self, frame: &mut Frame, area: Rect) {
@@ -3954,6 +4165,19 @@ impl App {
 
 impl Drop for App {
     fn drop(&mut self) {
+        if let Some(mut pending) = self.download_preflight_pending.take() {
+            pending.cancellation.store(true, Ordering::Release);
+            if let Some(worker) = pending.worker.take() {
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while !worker.is_finished() && Instant::now() < deadline {
+                    while self.receiver.try_recv().is_ok() {}
+                    thread::sleep(Duration::from_millis(10));
+                }
+                if worker.is_finished() {
+                    let _ = worker.join();
+                }
+            }
+        }
         if self.running_process.is_some() {
             self.stop_running_process();
         }
@@ -4199,6 +4423,35 @@ fn build_selected_download_command(
     Ok((model.repo_id.clone(), parts))
 }
 
+fn selected_download_target(root: &Path, config: &DownloadConfig, index: usize) -> Result<PathBuf> {
+    let model = config
+        .models
+        .get(index)
+        .with_context(|| format!("download model index {index} is out of range"))?;
+    if !model.local_dir.trim().is_empty() {
+        return Ok(resolve_runtime_download_path(root, model.local_dir.trim()));
+    }
+    Ok(config_download_target(root, config))
+}
+
+fn config_download_target(root: &Path, config: &DownloadConfig) -> PathBuf {
+    let base = config.base_models_dir.trim();
+    if base.is_empty() {
+        root.join("model_downloader/models")
+    } else {
+        resolve_runtime_download_path(root, base)
+    }
+}
+
+fn resolve_runtime_download_path(root: &Path, value: &str) -> PathBuf {
+    let path = PathBuf::from(value);
+    if path.is_absolute() {
+        path
+    } else {
+        root.join(path)
+    }
+}
+
 fn display_name(path: &Path) -> String {
     path.file_stem()
         .unwrap_or_default()
@@ -4232,6 +4485,330 @@ fn text_buffer_cursor_display_width(buffer: &TextBuffer) -> usize {
 fn visible_cursor_offset(cursor: usize, rendered_scroll: u16, visible_extent: u16) -> Option<u16> {
     let offset = cursor.checked_sub(rendered_scroll as usize)?;
     (offset < visible_extent as usize).then_some(offset as u16)
+}
+
+fn download_compact_focus_style(focused: bool) -> Style {
+    if focused {
+        Style::default().fg(Color::Black).bg(Color::Cyan).bold()
+    } else {
+        Style::default()
+    }
+}
+
+fn download_compact_field_areas(area: Rect, label: &str) -> (Rect, Rect, String) {
+    let prefix = format!("{label}: ");
+    let label_width = UnicodeWidthStr::width(prefix.as_str()).min(area.width as usize) as u16;
+    let label_area = Rect::new(area.x, area.y, label_width, area.height);
+    let value_area = Rect::new(
+        area.x.saturating_add(label_width),
+        area.y,
+        area.width.saturating_sub(label_width),
+        area.height,
+    );
+    (label_area, value_area, prefix)
+}
+
+fn render_download_compact_value_field(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    value: &str,
+    focused: bool,
+) {
+    if area.is_empty() {
+        return;
+    }
+    let style = download_compact_focus_style(focused);
+    let (label_area, value_area, prefix) = download_compact_field_areas(area, label);
+    frame.render_widget(Paragraph::new(prefix).style(style), label_area);
+    if !value_area.is_empty() {
+        frame.render_widget(Paragraph::new(value).style(style), value_area);
+    }
+}
+
+fn render_download_compact_text_field(
+    frame: &mut Frame,
+    area: Rect,
+    label: &str,
+    buffer: &TextBuffer,
+    focused: bool,
+) {
+    if area.is_empty() {
+        return;
+    }
+    let style = download_compact_focus_style(focused);
+    let (label_area, value_area, prefix) = download_compact_field_areas(area, label);
+    frame.render_widget(Paragraph::new(prefix).style(style), label_area);
+    if value_area.is_empty() {
+        return;
+    }
+
+    let visible_width = value_area.width as usize;
+    let cursor_column = text_buffer_cursor_display_width(buffer);
+    let logical_scroll = if focused {
+        cursor_column.saturating_sub(visible_width.saturating_sub(1))
+    } else {
+        0
+    };
+    let rendered_scroll = logical_scroll.min(u16::MAX as usize) as u16;
+    frame.render_widget(
+        Paragraph::new(buffer.content())
+            .style(style)
+            .scroll((0, rendered_scroll)),
+        value_area,
+    );
+    if focused {
+        let visible_column = cursor_column
+            .saturating_sub(rendered_scroll as usize)
+            .min(visible_width.saturating_sub(1));
+        frame.set_cursor_position((value_area.x + visible_column as u16, value_area.y));
+    }
+}
+
+fn render_download_compact_settings(frame: &mut Frame, area: Rect, download: &DownloadUiState) {
+    let settings_focused = matches!(
+        download.focus(),
+        DownloadFocus::ConfigPath
+            | DownloadFocus::Versions
+            | DownloadFocus::BaseModelsDir
+            | DownloadFocus::SlowPreset
+            | DownloadFocus::GlobalWorkers
+            | DownloadFocus::SaveNote
+    );
+    let block = Block::default()
+        .title("Settings · Tab/Shift+Tab")
+        .borders(Borders::ALL)
+        .border_style(if settings_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default()
+        });
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.is_empty() {
+        return;
+    }
+
+    if inner.height < 4 {
+        match download.focus() {
+            DownloadFocus::Versions => render_download_compact_value_field(
+                frame,
+                inner,
+                "Snapshot",
+                download.selected_version().unwrap_or("—"),
+                true,
+            ),
+            DownloadFocus::BaseModelsDir => render_download_compact_text_field(
+                frame,
+                inner,
+                "Base",
+                download.base_models_dir_buffer(),
+                true,
+            ),
+            DownloadFocus::SlowPreset => render_download_compact_value_field(
+                frame,
+                inner,
+                "Slow",
+                if download.slow() {
+                    "[x] slow"
+                } else {
+                    "[ ] slow"
+                },
+                true,
+            ),
+            DownloadFocus::GlobalWorkers => render_download_compact_text_field(
+                frame,
+                inner,
+                "Workers",
+                download.global_workers_buffer(),
+                true,
+            ),
+            DownloadFocus::SaveNote => render_download_compact_text_field(
+                frame,
+                inner,
+                "Note",
+                download.save_note_buffer(),
+                true,
+            ),
+            DownloadFocus::Table | DownloadFocus::ConfigPath | DownloadFocus::Model(_) => {
+                render_download_compact_text_field(
+                    frame,
+                    inner,
+                    "Config",
+                    download.config_path_buffer(),
+                    download.focus() == DownloadFocus::ConfigPath,
+                );
+            }
+        }
+        return;
+    }
+
+    let row = |offset| Rect::new(inner.x, inner.y + offset, inner.width, 1);
+    render_download_compact_text_field(
+        frame,
+        row(0),
+        "Config",
+        download.config_path_buffer(),
+        download.focus() == DownloadFocus::ConfigPath,
+    );
+    render_download_compact_value_field(
+        frame,
+        row(1),
+        "Snapshot",
+        download.selected_version().unwrap_or("—"),
+        download.focus() == DownloadFocus::Versions,
+    );
+    render_download_compact_text_field(
+        frame,
+        row(2),
+        "Base",
+        download.base_models_dir_buffer(),
+        download.focus() == DownloadFocus::BaseModelsDir,
+    );
+    let runtime = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(24),
+            Constraint::Percentage(34),
+            Constraint::Percentage(42),
+        ])
+        .split(row(3));
+    render_download_compact_value_field(
+        frame,
+        runtime[0],
+        "Slow",
+        if download.slow() {
+            "[x] slow"
+        } else {
+            "[ ] slow"
+        },
+        download.focus() == DownloadFocus::SlowPreset,
+    );
+    render_download_compact_text_field(
+        frame,
+        runtime[1],
+        "Workers",
+        download.global_workers_buffer(),
+        download.focus() == DownloadFocus::GlobalWorkers,
+    );
+    render_download_compact_text_field(
+        frame,
+        runtime[2],
+        "Note",
+        download.save_note_buffer(),
+        download.focus() == DownloadFocus::SaveNote,
+    );
+}
+
+fn render_download_model_editor(frame: &mut Frame, area: Rect, download: &DownloadUiState) {
+    let editor_lines = ModelField::ALL
+        .iter()
+        .map(|field| {
+            let value = match field {
+                ModelField::Enabled | ModelField::ForceDownload => download
+                    .draft()
+                    .boolean(*field)
+                    .map(|value| if value { "[x]" } else { "[ ]" })
+                    .unwrap_or("[ ]")
+                    .to_owned(),
+                _ => download
+                    .draft()
+                    .buffer(*field)
+                    .map(|buffer| buffer.content().to_owned())
+                    .unwrap_or_default(),
+            };
+            let line = format!("{}: {value}", field.label());
+            if download.focus() == DownloadFocus::Model(*field) {
+                Line::styled(line, download_compact_focus_style(true))
+            } else {
+                Line::from(line)
+            }
+        })
+        .collect::<Vec<_>>();
+    let editor_border = if matches!(download.focus(), DownloadFocus::Model(_)) {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+    frame.render_widget(
+        Paragraph::new(editor_lines)
+            .block(
+                Block::default()
+                    .title("Model editor · Alt+I focus · Tab/Shift+Tab fields")
+                    .borders(Borders::ALL)
+                    .border_style(editor_border),
+            )
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+
+    if let DownloadFocus::Model(field) = download.focus() {
+        if let Some(buffer) = download.draft().buffer(field) {
+            let line = ModelField::ALL
+                .iter()
+                .position(|candidate| *candidate == field)
+                .unwrap_or_default();
+            let inner_height = area.height.saturating_sub(2) as usize;
+            let inner_width = area.width.saturating_sub(2) as usize;
+            if line < inner_height && inner_width > 0 {
+                let prefix = UnicodeWidthStr::width(format!("{}: ", field.label()).as_str());
+                let column = prefix + text_buffer_cursor_display_width(buffer);
+                let x = area.x + 1 + column.min(inner_width.saturating_sub(1)) as u16;
+                let y = area.y + 1 + line as u16;
+                frame.set_cursor_position((x, y));
+            }
+        }
+    }
+}
+
+fn render_download_compact_model_editor(frame: &mut Frame, area: Rect, download: &DownloadUiState) {
+    let editor_focused = matches!(download.focus(), DownloadFocus::Model(_));
+    let block = Block::default()
+        .title("Model editor · Tab/Shift+Tab")
+        .borders(Borders::ALL)
+        .border_style(if editor_focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default()
+        });
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let visible_rows = (inner.height as usize).min(ModelField::ALL.len());
+    if visible_rows == 0 {
+        return;
+    }
+
+    let focused_index = match download.focus() {
+        DownloadFocus::Model(field) => ModelField::ALL
+            .iter()
+            .position(|candidate| *candidate == field),
+        _ => None,
+    };
+    let max_start = ModelField::ALL.len().saturating_sub(visible_rows);
+    let start = focused_index
+        .map(|index| index.saturating_sub(visible_rows.saturating_sub(1)))
+        .unwrap_or_default()
+        .min(max_start);
+
+    for (offset, field) in ModelField::ALL
+        .iter()
+        .skip(start)
+        .take(visible_rows)
+        .enumerate()
+    {
+        let row = Rect::new(inner.x, inner.y + offset as u16, inner.width, 1);
+        let focused = download.focus() == DownloadFocus::Model(*field);
+        if field.is_boolean() {
+            let value = download
+                .draft()
+                .boolean(*field)
+                .map(|value| if value { "[x]" } else { "[ ]" })
+                .unwrap_or("[ ]");
+            render_download_compact_value_field(frame, row, field.label(), value, focused);
+        } else if let Some(buffer) = download.draft().buffer(*field) {
+            render_download_compact_text_field(frame, row, field.label(), buffer, focused);
+        }
+    }
 }
 
 fn render_download_value_field(
@@ -4351,50 +4928,22 @@ fn format_bytes(bytes: u64) -> String {
     }
 }
 
-fn disk_space_summary(target: &Path) -> String {
-    let mut check = target.to_path_buf();
-    while !check.exists() {
-        if !check.pop() {
-            return format!("Disk: unavailable [{}]", target.display());
-        }
-    }
+fn format_disk_space(target: &Path, disk_space: DiskSpace) -> String {
+    format!(
+        "Disk: {} / {} free [{}]",
+        format_bytes(disk_space.free_bytes),
+        format_bytes(disk_space.total_bytes),
+        target.display()
+    )
+}
 
-    #[cfg(unix)]
-    {
-        let output = Command::new("df").args(["-Pk"]).arg(&check).output();
-        let Ok(output) = output else {
-            return format!("Disk: unavailable [{}]", target.display());
-        };
-        if !output.status.success() {
-            return format!("Disk: unavailable [{}]", target.display());
-        }
-        let text = String::from_utf8_lossy(&output.stdout);
-        let Some(line) = text.lines().rfind(|line| !line.trim().is_empty()) else {
-            return format!("Disk: unavailable [{}]", target.display());
-        };
-        let columns = line.split_whitespace().collect::<Vec<_>>();
-        if columns.len() < 4 {
-            return format!("Disk: unavailable [{}]", target.display());
-        }
-        let total = columns[1]
-            .parse::<u64>()
-            .ok()
-            .and_then(|value| value.checked_mul(1024));
-        let available = columns[3]
-            .parse::<u64>()
-            .ok()
-            .and_then(|value| value.checked_mul(1024));
-        if let (Some(total), Some(available)) = (total, available) {
-            return format!(
-                "Disk: {} / {} free [{}]",
-                format_bytes(available),
-                format_bytes(total),
-                check.display()
-            );
-        }
+fn next_request_id(current: u64) -> u64 {
+    let next = current.wrapping_add(1);
+    if next == 0 {
+        1
+    } else {
+        next
     }
-
-    format!("Disk: unavailable [{}]", target.display())
 }
 
 fn format_parameter_count(parameters: Option<u64>) -> String {
@@ -4637,7 +5186,22 @@ mod tests {
             let downloader_script = downloader.join("download_hf_model.py");
             fs::write(
                 &downloader_script,
-                "#!/usr/bin/env python3\nimport sys\nfor argument in sys.argv[1:]:\n    print(argument)\n",
+                concat!(
+                    "#!/usr/bin/env python3\n",
+                    "import json\n",
+                    "import sys\n",
+                    "if '--estimate-json' in sys.argv:\n",
+                    "    print(json.dumps({",
+                    "'schema_version': 1, ",
+                    "'models': [{'repo_id': 'org/one', 'revision': 'main', ",
+                    "'matched_files': 2, 'total_bytes': 300, ",
+                    "'download_bytes': 200, 'cached_bytes': 100}], ",
+                    "'totals': {'models': 1, 'matched_files': 2, ",
+                    "'total_bytes': 300, 'download_bytes': 200, 'cached_bytes': 100}}))\n",
+                    "else:\n",
+                    "    for argument in sys.argv[1:]:\n",
+                    "        print(argument)\n",
+                ),
             )
             .unwrap();
             #[cfg(unix)]
@@ -4662,14 +5226,43 @@ mod tests {
         }
     }
 
-    fn wait_for_process(app: &mut App) {
-        let deadline = Instant::now() + Duration::from_secs(2);
-        while app.running_process.is_some() && Instant::now() < deadline {
+    fn wait_for_download(app: &mut App) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while (app.download_preflight_pending.is_some() || app.running_process.is_some())
+            && Instant::now() < deadline
+        {
             thread::sleep(Duration::from_millis(10));
             app.drain_background_events();
         }
         app.drain_background_events();
-        assert!(app.running_process.is_none(), "test process did not finish");
+        assert!(
+            app.download_preflight_pending.is_none(),
+            "test download preflight did not finish"
+        );
+        assert!(
+            app.running_process.is_none(),
+            "test download did not finish"
+        );
+    }
+
+    fn terminal_text(terminal: &Terminal<TestBackend>) -> String {
+        terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
+    }
+
+    fn terminal_row(terminal: &Terminal<TestBackend>, y: u16) -> String {
+        let buffer = terminal.backend().buffer();
+        let width = buffer.area.width as usize;
+        let start = y as usize * width;
+        buffer.content()[start..start + width]
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect()
     }
 
     #[test]
@@ -5002,8 +5595,9 @@ mod tests {
         app.download.global_workers_buffer_mut().set_content("7");
 
         app.download_selected();
-        assert!(app.running_process.is_some());
-        wait_for_process(&mut app);
+        assert!(app.download_preflight_pending.is_some());
+        app.download.global_workers_buffer_mut().set_content("99");
+        wait_for_download(&mut app);
         let selected = &app.job_history.records()[0];
         assert_eq!(selected.kind, "download");
         assert!(selected
@@ -5015,6 +5609,14 @@ mod tests {
             .windows(2)
             .any(|parts| parts == ["--max-workers", "7"]));
         assert!(!selected.command.iter().any(|part| part == "--slow"));
+        assert!(!selected
+            .command
+            .iter()
+            .any(|part| part == "--estimate-json"));
+        assert!(app
+            .download_log
+            .iter()
+            .any(|line| line.contains("Estimate: 200 B to download / 300 B matched")));
 
         let job_id = selected.id;
         app.sender
@@ -5031,12 +5633,141 @@ mod tests {
 
         app.download.global_workers_buffer_mut().set_content("");
         app.download_enabled();
-        assert!(app.running_process.is_some());
-        wait_for_process(&mut app);
+        assert!(app.download_preflight_pending.is_some());
+        wait_for_download(&mut app);
         let enabled = &app.job_history.records()[0];
         assert_eq!(enabled.kind, "download");
         assert!(enabled.command.iter().any(|part| part == "--config"));
         assert!(enabled.command.iter().any(|part| part == "--slow"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_download_preflight_is_visible_and_preserves_the_actual_launch() {
+        let fixture = AppFixture::new();
+        fs::write(
+            fixture.root.join("model_downloader/download_hf_model.py"),
+            concat!(
+                "#!/usr/bin/env python3\n",
+                "import sys\n",
+                "if '--estimate-json' in sys.argv:\n",
+                "    print('estimate exploded', file=sys.stderr)\n",
+                "    raise SystemExit(7)\n",
+                "print('actual-download-ran')\n",
+            ),
+        )
+        .unwrap();
+        let mut app = fixture.app();
+        app.tab = Tab::Download;
+
+        app.download_selected();
+        wait_for_download(&mut app);
+
+        let job = &app.job_history.records()[0];
+        assert_eq!(job.kind, "download");
+        assert!(!job.command.iter().any(|part| part == "--estimate-json"));
+        assert!(app.download_log.iter().any(
+            |line| line.contains("preflight unavailable") && line.contains("estimate exploded")
+        ));
+        assert!(app
+            .download_log
+            .iter()
+            .any(|line| line == "actual-download-ran"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn escape_cancels_download_preflight_without_starting_the_download() {
+        let fixture = AppFixture::new();
+        fs::write(
+            fixture.root.join("model_downloader/download_hf_model.py"),
+            concat!(
+                "#!/usr/bin/env python3\n",
+                "import sys\n",
+                "import time\n",
+                "if '--estimate-json' in sys.argv:\n",
+                "    time.sleep(5)\n",
+                "    raise SystemExit(0)\n",
+                "print('actual-download-must-not-run')\n",
+            ),
+        )
+        .unwrap();
+        let mut app = fixture.app();
+        app.tab = Tab::Download;
+        app.download_selected();
+        assert!(app.download_preflight_pending.is_some());
+
+        let started = Instant::now();
+        app.handle_download_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.download_preflight_pending.is_some() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+            app.drain_background_events();
+        }
+
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert!(app.download_preflight_pending.is_none());
+        assert!(app.running_process.is_none());
+        assert!(app.job_history.records().is_empty());
+        assert_eq!(app.status, "Download preflight cancelled");
+        assert!(!app
+            .download_log
+            .iter()
+            .any(|line| line.contains("actual-download-must-not-run")));
+    }
+
+    #[test]
+    fn stale_download_disk_results_are_ignored() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.download_disk_request_id = 10;
+        app.download_disk_space = "current disk state".into();
+        app.sender
+            .send(BackgroundEvent::DownloadDiskSpace {
+                request_id: 9,
+                target: PathBuf::from("/stale"),
+                result: Ok(DiskSpace {
+                    total_bytes: 200,
+                    free_bytes: 100,
+                }),
+            })
+            .unwrap();
+
+        app.drain_background_events();
+
+        assert_eq!(app.download_disk_space, "current disk state");
+    }
+
+    #[test]
+    fn download_targets_follow_runtime_root_and_custom_directories() {
+        let root = Path::new("/runtime/repository");
+        let mut config = DownloadConfig {
+            base_models_dir: "relative/models".into(),
+            models: vec![ModelConfig {
+                repo_id: "org/model".into(),
+                ..ModelConfig::default()
+            }],
+        };
+        assert_eq!(
+            selected_download_target(root, &config, 0).unwrap(),
+            root.join("relative/models")
+        );
+        config.models[0].local_dir = "custom/model".into();
+        assert_eq!(
+            selected_download_target(root, &config, 0).unwrap(),
+            root.join("custom/model")
+        );
+        config.models[0].local_dir = "/mounted/model".into();
+        assert_eq!(
+            selected_download_target(root, &config, 0).unwrap(),
+            PathBuf::from("/mounted/model")
+        );
+        config.base_models_dir.clear();
+        assert_eq!(
+            config_download_target(root, &config),
+            root.join("model_downloader/models")
+        );
     }
 
     #[test]
@@ -5071,13 +5802,7 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| app.draw(frame)).unwrap();
 
-        let rendered = terminal
-            .backend()
-            .buffer()
-            .content()
-            .iter()
-            .map(|cell| cell.symbol())
-            .collect::<String>();
+        let rendered = terminal_text(&terminal);
         for expected in [
             "Config path",
             "Base models dir",
@@ -5094,6 +5819,122 @@ mod tests {
                 "missing rendered text: {expected}"
             );
         }
+    }
+
+    #[test]
+    fn compact_download_view_keeps_late_model_field_and_cursor_visible_at_80x24() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::Download;
+        app.push_download_log("compact-download-marker");
+        app.download
+            .draft_mut()
+            .buffer_mut(ModelField::MaxWorkers)
+            .unwrap()
+            .set_content("workers-prefix-1234567890-TAIL80");
+        app.download
+            .set_focus(DownloadFocus::Model(ModelField::MaxWorkers));
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+
+        let rendered = terminal_text(&terminal);
+        for expected in [
+            "Settings",
+            "Config:",
+            "Snapshot:",
+            "Base:",
+            "Slow:",
+            "Workers:",
+            "Note:",
+            "Models",
+            "Repository",
+            "Model editor",
+            "force_download:",
+            "max_workers:",
+            "TAIL80",
+            "Download activity",
+            "compact-download-marker",
+        ] {
+            assert!(
+                rendered.contains(expected),
+                "missing compact rendered text: {expected}"
+            );
+        }
+
+        let cursor = terminal.get_cursor_position().unwrap();
+        assert!(cursor.x < 80 && cursor.y < 24, "cursor out of bounds");
+        let cursor_row = terminal_row(&terminal, cursor.y);
+        assert!(cursor_row.contains("max_workers:"));
+        assert!(cursor_row.contains("TAIL80"));
+    }
+
+    #[test]
+    fn compact_download_view_scrolls_focused_setting_at_100x30() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::Download;
+        let long_base = format!("/models/{}/TAIL100", "nested-directory/".repeat(10));
+        app.download
+            .base_models_dir_buffer_mut()
+            .set_content(long_base);
+        app.download.set_focus(DownloadFocus::BaseModelsDir);
+        app.push_download_log("compact-settings-marker");
+
+        let backend = TestBackend::new(100, 30);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+
+        let rendered = terminal_text(&terminal);
+        for expected in [
+            "Settings",
+            "Base:",
+            "TAIL100",
+            "Models",
+            "Repository",
+            "Model editor",
+            "max_workers:",
+            "Download activity",
+            "compact-settings-marker",
+        ] {
+            assert!(
+                rendered.contains(expected),
+                "missing compact rendered text: {expected}"
+            );
+        }
+
+        let cursor = terminal.get_cursor_position().unwrap();
+        assert!(cursor.x < 100 && cursor.y < 30, "cursor out of bounds");
+        let cursor_row = terminal_row(&terminal, cursor.y);
+        assert!(cursor_row.contains("Base:"));
+        assert!(cursor_row.contains("TAIL100"));
+    }
+
+    #[test]
+    fn compact_download_view_uses_focused_editor_when_too_narrow_for_both_panes() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::Download;
+        app.download
+            .draft_mut()
+            .buffer_mut(ModelField::MaxWorkers)
+            .unwrap()
+            .set_content("fallback-TAIL60");
+        app.download
+            .set_focus(DownloadFocus::Model(ModelField::MaxWorkers));
+
+        let backend = TestBackend::new(60, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+
+        let rendered = terminal_text(&terminal);
+        assert!(rendered.contains("Model editor"));
+        assert!(rendered.contains("max_workers:"));
+        assert!(rendered.contains("TAIL60"));
+        assert!(!rendered.contains("Repository"));
+        let cursor = terminal.get_cursor_position().unwrap();
+        assert!(terminal_row(&terminal, cursor.y).contains("max_workers:"));
     }
 
     #[test]

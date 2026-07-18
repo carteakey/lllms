@@ -5,6 +5,7 @@ pub mod cli;
 pub mod commands;
 pub mod config_store;
 pub mod download_editor;
+pub mod download_preflight;
 pub mod download_ui;
 pub mod downloader_command;
 pub mod gguf;
