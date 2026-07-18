@@ -8,10 +8,10 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 
 use crate::config_store::{
-    list_versions_in, load_config_strict, normalize_download_config, restore_version_in,
+    list_versions_in, load_config_strict, normalize_download_config, restore_version_and_load_in,
     save_config_in, validate_config, DownloadConfig, ModelConfig,
 };
 
@@ -214,12 +214,13 @@ impl DownloadEditor {
         list_versions_in(&self.config_path, &self.version_root)
     }
 
-    /// Restore a contained snapshot and strictly reload the resulting config.
+    /// Restore a contained, strictly valid snapshot and update from the exact
+    /// bytes atomically written by the config store.
+    ///
+    /// Invalid snapshot bytes leave both disk and this editor unchanged.
     pub fn restore(&mut self, version_name: &str) -> Result<()> {
-        restore_version_in(&self.config_path, version_name, &self.version_root)?;
-        let restored = load_config_strict(&self.config_path).with_context(|| {
-            format!("restored version {version_name}, but the restored config is invalid")
-        })?;
+        let restored =
+            restore_version_and_load_in(&self.config_path, version_name, &self.version_root)?;
         self.accept_persisted_config(restored);
         Ok(())
     }
@@ -441,6 +442,32 @@ mod tests {
         assert_eq!(editor.selected_index(), Some(1));
         assert_eq!(editor.selected_model().unwrap().repo_id, "org/two");
         assert_eq!(load_config_strict(&path).unwrap(), editor.config().clone());
+    }
+
+    #[test]
+    fn invalid_restore_keeps_disk_and_editor_on_the_same_config() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("configs/models.json");
+        let version_root = temp.path().join("versions");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "not json").unwrap();
+        let current = config(&["org/current", "org/two"]);
+        save_config_in(&path, &current, "replace-invalid", &version_root).unwrap();
+
+        let mut editor = DownloadEditor::open(&path, &version_root).unwrap();
+        editor.select(1);
+        let invalid_version = editor.versions().unwrap().remove(0);
+        let before_bytes = fs::read(&path).unwrap();
+        let before_config = editor.config().clone();
+
+        let error = editor.restore(&invalid_version).unwrap_err();
+
+        assert!(error.to_string().contains("failed to parse config"));
+        assert_eq!(fs::read(&path).unwrap(), before_bytes);
+        assert_eq!(editor.config(), &before_config);
+        assert_eq!(editor.selected_index(), Some(1));
+        assert!(!editor.is_dirty());
+        assert_eq!(load_config_strict(&path).unwrap(), before_config);
     }
 
     #[test]

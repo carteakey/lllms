@@ -144,13 +144,14 @@ pub enum CommandId {
     MaintenanceFocusEditor,
     MaintenanceSaveScript,
     MaintenanceReloadScript,
+    MaintenanceRestoreScript,
     MaintenanceClearLog,
 }
 
 impl CommandId {
     /// Every command identifier. Kept in declaration order for completeness
     /// checks and integrations which want to validate their dispatch table.
-    pub const ALL: [Self; 83] = [
+    pub const ALL: [Self; 84] = [
         Self::Quit,
         Self::ShowHelp,
         Self::ShowPalette,
@@ -233,6 +234,7 @@ impl CommandId {
         Self::MaintenanceFocusEditor,
         Self::MaintenanceSaveScript,
         Self::MaintenanceReloadScript,
+        Self::MaintenanceRestoreScript,
         Self::MaintenanceClearLog,
     ];
 
@@ -321,6 +323,7 @@ impl CommandId {
             Self::MaintenanceFocusEditor => "maintenance.focus-editor",
             Self::MaintenanceSaveScript => "maintenance.save-script",
             Self::MaintenanceReloadScript => "maintenance.reload-script",
+            Self::MaintenanceRestoreScript => "maintenance.restore-script",
             Self::MaintenanceClearLog => "maintenance.clear-log",
         }
     }
@@ -566,7 +569,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Ctrl+L",
         "Clear log",
         "Workbench: clear activity log",
-        false,
+        true,
         ["output"]
     ),
     command!(
@@ -647,7 +650,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Ctrl+U",
         "Script editor",
         "Model Ops: focus script editor",
-        false,
+        true,
         ["edit", "bench"]
     ),
     command!(
@@ -656,25 +659,25 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Alt+P",
         "Save script",
         "Model Ops: save edited script snapshot",
-        false,
+        true,
         ["version", "bench"]
     ),
     command!(
         ModelOpsReloadScript,
         ModelOps,
-        "—",
+        "Alt+O",
         "Reload script",
         "Model Ops: reload script from disk",
-        false,
+        true,
         ["discard", "bench"]
     ),
     command!(
         ModelOpsRestoreScript,
         ModelOps,
-        "—",
+        "Alt+V",
         "Restore script",
         "Model Ops: restore a script snapshot",
-        false,
+        true,
         ["version", "history", "bench"]
     ),
     command!(
@@ -683,7 +686,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Ctrl+L",
         "Clear log",
         "Model Ops: clear run log",
-        false,
+        true,
         ["output"]
     ),
     command!(
@@ -917,7 +920,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Alt+I",
         "Model editor",
         "Download: focus model editor",
-        false,
+        true,
         ["edit", "fields"]
     ),
     command!(
@@ -935,7 +938,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Alt+O",
         "Load config",
         "Download: reload config from disk",
-        false,
+        true,
         ["open", "refresh"]
     ),
     command!(
@@ -959,10 +962,10 @@ pub static COMMANDS: &[CommandSpec] = &[
     command!(
         DownloadRestoreConfig,
         Download,
-        "—",
+        "Alt+R",
         "Restore config",
         "Download: restore a config snapshot",
-        false,
+        true,
         ["version", "history"]
     ),
     command!(
@@ -971,7 +974,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Alt+N",
         "Add model",
         "Download: add a model entry",
-        false,
+        true,
         ["new", "create"]
     ),
     command!(
@@ -980,7 +983,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Alt+A",
         "Apply edit",
         "Download: apply editor fields to config",
-        false,
+        true,
         ["update", "model"]
     ),
     command!(
@@ -989,7 +992,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Alt+K",
         "Delete model",
         "Download: delete selected model entry",
-        false,
+        true,
         ["remove"]
     ),
     command!(
@@ -1016,7 +1019,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Alt+Y",
         "Clear log",
         "Download: clear download log",
-        false,
+        true,
         ["output"]
     ),
     command!(
@@ -1103,29 +1106,38 @@ pub static COMMANDS: &[CommandSpec] = &[
     command!(
         MaintenanceFocusEditor,
         Maintenance,
-        "—",
+        "Ctrl+U",
         "Script editor",
         "Maintenance: focus script editor",
-        false,
+        true,
         ["edit"]
     ),
     command!(
         MaintenanceSaveScript,
         Maintenance,
-        "—",
+        "Alt+P",
         "Save script",
         "Maintenance: save edited script snapshot",
-        false,
+        true,
         ["write", "version"]
     ),
     command!(
         MaintenanceReloadScript,
         Maintenance,
-        "—",
+        "Alt+O",
         "Reload script",
         "Maintenance: reload script from disk",
-        false,
+        true,
         ["refresh", "discard"]
+    ),
+    command!(
+        MaintenanceRestoreScript,
+        Maintenance,
+        "Alt+V",
+        "Restore script",
+        "Maintenance: restore a script snapshot",
+        true,
+        ["version", "history"]
     ),
     command!(
         MaintenanceClearLog,
@@ -1133,7 +1145,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Ctrl+L",
         "Clear log",
         "Maintenance: clear script log",
-        false,
+        true,
         ["output"]
     ),
 ];

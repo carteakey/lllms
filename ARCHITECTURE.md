@@ -31,6 +31,11 @@ module tree:
   validation, atomic writes, and configuration snapshots.
 - `src/download_editor.rs` owns download-editor selection, validation, dirty
   state, and snapshot save/reload/restore operations independently of the UI.
+- `src/download_ui.rs` owns Download-view focus, text drafts, runtime speed
+  controls, version selection, and derived dirty state without depending on
+  Ratatui.
+- `src/downloader_command.rs` owns portable, shell-free Python interpreter and
+  downloader-script argv construction.
 - `src/gguf.rs` owns bounded GGUF v2/v3 metadata parsing and safe directory
   inventory.
 - `src/job_history.rs` owns the persisted job lifecycle and safe reconstruction
@@ -45,6 +50,8 @@ module tree:
   file formats.
 - `src/telemetry.rs` owns process-tree CPU/RAM and optional NVIDIA memory
   sampling.
+- `src/text_buffer.rs` owns Unicode-safe editing and cursor movement shared by
+  the inline terminal editors.
 - `src/app.rs` owns the Ratatui event loop, shared model selection, background
   operations, supervised child processes, and the seven top-level views.
 
@@ -64,10 +71,16 @@ llama-swap remains the serving daemon. The Rust client reads:
 The client uses `/v1/models`, `/models/load`, and `/models/unload`. Non-success
 HTTP responses are errors; they are not recorded as successful model loads.
 
-The existing Python downloader remains a compatibility child process. L3MS
-executes `model_downloader/download_hf_model.py` directly so its pinned virtual
-environment shebang continues to apply. Downloader behavior is not being
-rewritten as part of the first Rust slice.
+The existing Python downloader remains a compatibility child process. Rust
+constructs argv without a shell and chooses its interpreter from a non-empty
+`L3MS_DOWNLOADER_PYTHON`, then the repository's `.venv/bin/python3` (or
+`.venv/Scripts/python.exe` on Windows) when it is a file, and finally `python3`
+from `PATH`. The next argv element is
+`model_downloader/download_hf_model.py`; the environment override is one
+executable path or command name, not a shell fragment with flags. The Python
+boundary still owns Hugging Face downloads while Rust supervises the child.
+Runtime worker precedence is global override, then per-model value, then the
+optional slow preset.
 
 ## Persistence and safety
 
@@ -79,8 +92,20 @@ alternate checkouts from writing snapshots into the build checkout.
 
 Writes use a temporary file plus rename, snapshot names are unique even during
 rapid saves, restore names cannot traverse out of their version directory, and
-script paths must resolve inside the selected repository. Existing Unix script
-permissions are preserved.
+script paths must resolve inside the selected repository. New Download history
+uses a sanitized config-path key plus a stable path hash so distinct config
+paths cannot collide; listing and restore also read the former sanitized-only
+namespace for compatibility.
+
+Download snapshots are strictly parsed before replacement. A valid restore of
+an existing config must first create an undo snapshot containing the exact
+displaced bytes; if that snapshot cannot be written, the live config remains
+untouched. The same parsed source bytes update the editor after the atomic
+restore, avoiding a fallible post-write reload. Reload and restore require a
+second activation before discarding dirty persisted or unapplied fields.
+Snapshot discovery is secondary: a listing failure is surfaced as a warning
+without reclassifying an otherwise successful load, save, or restore. Existing
+Unix script permissions are preserved.
 
 The Rust TUI uses bounded, atomic `jobs.json` persistence and compatible
 JSON/Markdown chat sessions under `L3MS_DATA_DIR` (defaulting to `~/.l3ms`).
@@ -99,14 +124,16 @@ legacy formats. The GGUF browser now uses the bounded metadata scanner and
 supports recursive inventory, filtering, deterministic sorting, file details,
 and per-file parse warnings.
 
-The Python TUI remains available during the parity period for its richer script
-and download editor surfaces, server detection, explicit model selection,
-response cancellation, and remaining browser/editor controls. Reusable Rust
-editor state now covers safe selection, validation, dirty tracking, and snapshot
-save/reload/restore, but those engines are not yet wired into the TUI. The
-Python TUI should only be retired after the corresponding Rust workflows have
-compatibility coverage and live llama-swap smoke verification.
+The Rust TUI now wires safe inline editors for bench and maintenance scripts and
+an expanding typed Download configuration surface, including model CRUD,
+strict load/save/restore, dirty guards, speed controls, disk feedback, and
+dedicated process output. The Python TUI remains available during the parity
+period for Chat endpoint editing, server detection/connect, explicit model
+selection, visible response cancellation, and any remaining live-only
+operational gaps. It should only be retired after compatibility coverage and
+live llama-swap smoke verification pass. `CAR-97` is still in progress; this is
+not a claim of full parity or a fully green verification matrix.
 
-Development is paused at this coherent checkpoint. Linear issue `CAR-97`
-contains the authoritative ordered resume checklist; this document records the
-implemented boundary rather than maintaining a second backlog.
+Linear issue `CAR-97` contains the authoritative ordered implementation
+checklist; this document records the implemented boundary rather than
+maintaining a second backlog.

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+The Rust port remains in progress under `CAR-97`; these entries describe
+implemented slices and do not assert full legacy parity or a fully green
+verification matrix.
+
 ### Added
 - Added the initial Rust `0.7.0` application: a Clap launcher, authenticated
   llama-swap client, typed configuration/script stores, and seven-view Ratatui
@@ -21,6 +25,15 @@
   legacy-compatible atomic job/chat-session persistence.
 - Added reusable bench, maintenance, and download editor state with validation,
   dirty tracking, safe selection, and snapshot save/reload/restore operations.
+- Added inline UTF-8 bench and maintenance script editors with persistent
+  viewports, dirty-change guards, snapshot browsing, and explicit save/reload
+  controls.
+- Added the current keyboard-driven Download editor surface: config-path and
+  runtime controls, model CRUD and all typed fields, validation, atomic save,
+  snapshot restore, dedicated logs, disk-space feedback, and supervised
+  selected/enabled launches.
+- Added a reusable Unicode-safe text buffer with character-boundary editing,
+  terminal-cell cursor positioning, and vertical/page navigation.
 - Added a pinned Rust toolchain, locked dependencies, unit coverage, strict
   Clippy checks, and GitHub Actions verification.
 - Added an on-demand `nomic-embed-text-v1.5` llama-swap profile with
@@ -37,12 +50,33 @@
 - Replaced the Rust GGUF view's filename-only inventory with bounded metadata
   scanning, recursive/top-level modes, filtering, deterministic sorting, file
   details, and per-file parse warnings.
+- Made explicit global download workers override per-model workers, with the
+  per-model value taking precedence over the slow preset when no global value
+  is supplied.
+- Made Rust downloader launches construct argv without a shell and select
+  Python from `L3MS_DOWNLOADER_PYTHON`, the platform repository venv, or
+  `python3`, in that order. The downloader script now has a portable
+  `#!/usr/bin/env python3` shebang for direct CLI use.
+- Isolated new Download histories with stable path-hashed snapshot namespaces
+  while retaining list and restore compatibility with legacy snapshot
+  directories.
+- Added repeat-action confirmation before dirty Download reload or restore, and
+  reported post-operation snapshot-list failures as secondary warnings rather
+  than failures of completed load, save, or restore operations.
 
 ### Fixed
 - Treat llama-swap load and unload HTTP failures as failed operations instead
   of successful jobs.
 - Correct selected-download handling for multiple allow/ignore patterns and
   `base_models_dir`.
+- Validate Download snapshots before mutation and save the exact displaced
+  config bytes as an undo snapshot before atomic restore, preventing invalid or
+  non-undoable replacements and the post-restore disk/memory split-brain window.
+- Prevent dirty-quit confirmation from being hidden behind the command palette
+  and prevent large-script cursor placement from disagreeing with Ratatui's
+  rendered scroll window.
+- Apply batch download slow/global worker controls when normalized model rows
+  contain `max_workers: null`.
 
 ## [0.6.0] - 2026-07-03
 

@@ -18,15 +18,18 @@ use crate::{
     chat::{stream_completion, ChatCompletion, ChatRequest},
     chat_history::ChatHistory,
     commands::{command, search_all_commands, visible_commands, CommandContext, CommandId},
-    config_store::{
-        load_config, load_config_strict, save_config_in, validate_config, DownloadConfig,
-    },
+    config_store::{load_config, DownloadConfig},
+    download_editor::DownloadEditor,
+    download_ui::{DownloadFocus, DownloadUiState, ModelField},
+    downloader_command::downloader_command_prefix,
     gguf::{self, GgufFile},
-    job_history::{persist_with_context, JobHistory},
+    job_history::JobHistory,
     llama_swap::{SwapClient, SwapModel},
+    script_editor::ScriptEditorState,
     script_store::{collect_scripts_in, command_for_script, ScriptMode},
-    state_store::{ChatSession, ChatSessionList, ChatSessionSummary, SavedChatSession},
+    state_store::{self, ChatSession, ChatSessionList, ChatSessionSummary, SavedChatSession},
     telemetry::{find_process_named, snapshot_descendants, snapshot_process_group},
+    text_buffer::TextBuffer,
 };
 use anyhow::{Context, Result};
 use crossterm::{
@@ -45,6 +48,7 @@ use ratatui::{
     },
     Frame, Terminal,
 };
+use unicode_width::UnicodeWidthStr;
 
 type Tui = Terminal<CrosstermBackend<Stdout>>;
 
@@ -104,6 +108,28 @@ impl Tab {
 enum OpsMode {
     Run,
     Bench,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScriptEditorTarget {
+    Bench,
+    Maintenance,
+}
+
+impl ScriptEditorTarget {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Bench => "Bench",
+            Self::Maintenance => "Maintenance",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct EditorViewport {
+    cursor_byte: usize,
+    scroll_y: usize,
+    scroll_x: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -183,9 +209,11 @@ enum BackgroundEvent {
 
 struct App {
     root: PathBuf,
+    data_root: PathBuf,
     tab: Tab,
     input_mode: InputMode,
     should_quit: bool,
+    show_quit_confirmation: bool,
     show_help: bool,
     show_palette: bool,
     palette_query: String,
@@ -205,6 +233,7 @@ struct App {
     ops_mode: OpsMode,
     bench_scripts: Vec<PathBuf>,
     bench_state: ListState,
+    bench_editor: ScriptEditorState,
 
     chat_input: String,
     chat_history: ChatHistory,
@@ -228,14 +257,24 @@ struct App {
     browser_state: TableState,
     browser_scanning: bool,
 
-    config_path: PathBuf,
-    config_error: Option<String>,
-    download_config: DownloadConfig,
+    download: DownloadUiState,
     download_state: TableState,
-    download_dirty: bool,
+    download_log: VecDeque<String>,
+    download_load_error: Option<String>,
+    download_disk_space: String,
+    download_reload_armed: bool,
+    download_restore_armed: bool,
 
     maintenance_scripts: Vec<PathBuf>,
     maintenance_state: ListState,
+    maintenance_editor: ScriptEditorState,
+    script_input_target: Option<ScriptEditorTarget>,
+    script_buffer: TextBuffer,
+    bench_editor_view: EditorViewport,
+    maintenance_editor_view: EditorViewport,
+    script_versions_target: Option<ScriptEditorTarget>,
+    script_version_state: ListState,
+    script_reload_armed: Option<ScriptEditorTarget>,
 
     job_history: JobHistory,
     jobs_state: TableState,
@@ -246,22 +285,38 @@ struct App {
 }
 
 impl App {
-    fn new(root: PathBuf) -> Self {
+    fn new(root: PathBuf) -> Result<Self> {
+        let data_root = state_store::data_root()?;
+        Self::new_in(root, data_root)
+    }
+
+    fn new_in(root: PathBuf, data_root: PathBuf) -> Result<Self> {
         let (sender, receiver) = mpsc::sync_channel(BACKGROUND_QUEUE_CAPACITY);
+        let bench_editor =
+            ScriptEditorState::for_repository(&root).context("initialize bench script editor")?;
+        let maintenance_editor = ScriptEditorState::for_repository(&root)
+            .context("initialize maintenance script editor")?;
         let config_path = root.join("model_downloader/models_config.json");
-        let (download_config, config_warning) = match load_config_strict(&config_path) {
-            Ok(config) => (config, None),
-            Err(error) => (
-                load_config(&config_path),
-                Some(format!("Download config warning: {error:#}")),
-            ),
+        let versions_root = root.join(".toolkit/download_config_versions");
+        let (download, config_warning) = match DownloadUiState::open(&config_path, &versions_root) {
+            Ok(download) => (download, None),
+            Err(error) => {
+                let warning =
+                    format!("Download config is blocked until a strict reload succeeds: {error:#}");
+                let fallback = DownloadEditor::from_config(
+                    &config_path,
+                    &versions_root,
+                    load_config(&config_path),
+                );
+                (DownloadUiState::new(fallback), Some(warning))
+            }
         };
-        let browser_path = if download_config.base_models_dir.trim().is_empty() {
+        let browser_path = if download.config().base_models_dir.trim().is_empty() {
             root.join("models").display().to_string()
         } else {
-            download_config.base_models_dir.clone()
+            download.config().base_models_dir.clone()
         };
-        let (job_history, job_warning) = match JobHistory::load(&root) {
+        let (job_history, job_warning) = match JobHistory::load_in(&data_root, &root) {
             Ok((history, notice)) => {
                 let warning =
                     (!notice.is_empty()).then(|| format!("Job history: {}", notice.summary()));
@@ -276,9 +331,11 @@ impl App {
         };
         let mut app = Self {
             root,
+            data_root,
             tab: Tab::Workbench,
             input_mode: InputMode::Normal,
             should_quit: false,
+            show_quit_confirmation: false,
             show_help: false,
             show_palette: false,
             palette_query: String::new(),
@@ -296,6 +353,7 @@ impl App {
             ops_mode: OpsMode::Run,
             bench_scripts: Vec::new(),
             bench_state: ListState::default().with_selected(Some(0)),
+            bench_editor,
             chat_input: String::new(),
             chat_history: ChatHistory::default(),
             chat_streaming: String::new(),
@@ -316,13 +374,23 @@ impl App {
             browser_files: Vec::new(),
             browser_state: TableState::default().with_selected(Some(0)),
             browser_scanning: false,
-            config_path,
-            config_error: config_warning.clone(),
-            download_config,
+            download,
             download_state: TableState::default().with_selected(Some(0)),
-            download_dirty: false,
+            download_log: VecDeque::new(),
+            download_load_error: config_warning.clone(),
+            download_disk_space: "Disk: —".into(),
+            download_reload_armed: false,
+            download_restore_armed: false,
             maintenance_scripts: Vec::new(),
             maintenance_state: ListState::default().with_selected(Some(0)),
+            maintenance_editor,
+            script_input_target: None,
+            script_buffer: TextBuffer::new(),
+            bench_editor_view: EditorViewport::default(),
+            maintenance_editor_view: EditorViewport::default(),
+            script_versions_target: None,
+            script_version_state: ListState::default().with_selected(Some(0)),
+            script_reload_armed: None,
             job_history,
             jobs_state: TableState::default().with_selected(Some(0)),
             running_process: None,
@@ -332,15 +400,21 @@ impl App {
         };
         if let Some(warning) = config_warning {
             app.status = "Download config needs attention".into();
-            app.push_log(warning);
+            app.record_download_message(warning);
+        }
+        if let Some(warning) = app.download.take_history_warning() {
+            app.status = "Download config loaded; snapshot history needs attention".into();
+            app.record_download_message(warning);
         }
         if let Some(warning) = job_warning {
             app.push_log(warning);
         }
         clamp_table_selection(&mut app.jobs_state, app.job_history.records().len());
+        app.sync_download_table_state();
+        app.refresh_download_disk_space();
         app.refresh_local_inventories();
         app.refresh_models();
-        app
+        Ok(app)
     }
 
     fn run(&mut self, terminal: &mut Tui) -> Result<()> {
@@ -367,6 +441,8 @@ impl App {
         self.maintenance_scripts = collect_shell_scripts(&self.root.join("maintenance"), "");
         clamp_list_selection(&mut self.bench_state, self.bench_scripts.len());
         clamp_list_selection(&mut self.maintenance_state, self.maintenance_scripts.len());
+        self.sync_script_editor_selection(ScriptEditorTarget::Bench);
+        self.sync_script_editor_selection(ScriptEditorTarget::Maintenance);
     }
 
     fn refresh_models(&mut self) {
@@ -562,17 +638,30 @@ impl App {
                     }
                 }
                 BackgroundEvent::ProcessLine { job_id, line } => {
-                    if self
+                    let is_download = self
                         .job_history
                         .records()
                         .iter()
-                        .any(|job| job.id == job_id)
-                    {
+                        .find(|job| job.id == job_id)
+                        .map(|job| job.kind == "download");
+                    if let Some(is_download) = is_download {
+                        if is_download {
+                            self.push_download_log(line.clone());
+                        }
                         self.push_log(line);
                     }
                 }
                 BackgroundEvent::ProcessFinished { job_id, exit_code } => {
+                    let is_download = self
+                        .job_history
+                        .records()
+                        .iter()
+                        .any(|job| job.id == job_id && job.kind == "download");
                     self.finish_job(job_id, exit_code);
+                    if is_download {
+                        self.push_download_log(format!("Download exited with code {exit_code}"));
+                        self.refresh_download_disk_space();
+                    }
                     if self
                         .running_process
                         .as_ref()
@@ -639,75 +728,176 @@ impl App {
     }
 
     fn handle_key(&mut self, key: KeyEvent) -> Result<()> {
+        if !self.is_script_reload_shortcut(key) {
+            self.script_reload_armed = None;
+        }
+        if !self.is_download_reload_trigger(key) {
+            self.download_reload_armed = false;
+        }
+        if !self.is_download_restore_trigger(key) {
+            self.download_restore_armed = false;
+        }
         if key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL) {
-            self.should_quit = true;
+            self.request_quit();
             return Ok(());
         }
         if self.show_palette {
             return self.handle_palette_key(key);
         }
+        if self.show_quit_confirmation {
+            self.handle_quit_confirmation_key(key);
+            return Ok(());
+        }
         if key.code == KeyCode::Char('p') && key.modifiers.contains(KeyModifiers::CONTROL) {
             self.open_palette();
             return Ok(());
         }
+        if self.handle_global_navigation_key(key) {
+            return Ok(());
+        }
+        if self.show_help {
+            self.show_help = false;
+            return Ok(());
+        }
         if self.show_chat_sessions {
+            if key.code == KeyCode::Char('s') && key.modifiers.contains(KeyModifiers::ALT) {
+                self.save_chat_session();
+                return Ok(());
+            }
             self.handle_chat_sessions_key(key);
+            return Ok(());
+        }
+        if self.script_versions_target.is_some() {
+            self.handle_script_versions_key(key);
+            return Ok(());
+        }
+        if self.script_input_target.is_some() {
+            if let Some(command_id) = self.modified_key_command(key) {
+                return self.execute_command(command_id);
+            }
+            self.handle_script_input_key(key);
             return Ok(());
         }
         if let Some(command_id) = self.modified_key_command(key) {
             return self.execute_command(command_id);
         }
-        if let KeyCode::F(number @ 1..=7) = key.code {
-            self.tab = Tab::from_index(number as usize - 1);
-            self.input_mode = InputMode::Normal;
-            self.show_help = false;
+        if self.tab == Tab::Download && self.download.focus() != DownloadFocus::Table {
+            self.handle_download_input_key(key);
             return Ok(());
         }
-        if key.modifiers.contains(KeyModifiers::ALT) {
-            let destination = match key.code {
-                KeyCode::Char('1') => Some(0),
-                KeyCode::Char('2') => Some(1),
-                KeyCode::Char('3') => Some(2),
-                KeyCode::Char('4') => Some(3),
-                KeyCode::Char('5') => Some(4),
-                KeyCode::Char('6') => Some(5),
-                KeyCode::Char('7') => Some(6),
-                _ => None,
-            };
-            if let Some(destination) = destination {
-                self.tab = Tab::from_index(destination);
-                self.input_mode = InputMode::Normal;
-                self.show_help = false;
-                return Ok(());
-            }
-            match key.code {
-                KeyCode::Left => {
-                    self.tab =
-                        Tab::from_index((self.tab.index() + TAB_NAMES.len() - 1) % TAB_NAMES.len());
-                    self.input_mode = InputMode::Normal;
-                    return Ok(());
-                }
-                KeyCode::Right => {
-                    self.tab = Tab::from_index(self.tab.index() + 1);
-                    self.input_mode = InputMode::Normal;
-                    return Ok(());
-                }
-                _ => {}
-            }
-        }
-        if self.show_help {
-            self.show_help = false;
+        if key.code == KeyCode::Char('?') && key.modifiers == KeyModifiers::NONE {
+            self.show_help = true;
             return Ok(());
         }
         if self.input_mode != InputMode::Normal {
             return self.handle_input_key(key);
         }
         match key.code {
-            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Char('q') => self.request_quit(),
             KeyCode::Char('?') => self.show_help = true,
             _ => self.handle_tab_key(key)?,
         }
         Ok(())
+    }
+
+    fn is_script_reload_shortcut(&self, key: KeyEvent) -> bool {
+        key.code == KeyCode::Char('o')
+            && key.modifiers.contains(KeyModifiers::ALT)
+            && matches!(self.tab, Tab::ModelOps | Tab::Maintenance)
+    }
+
+    fn is_download_reload_trigger(&self, key: KeyEvent) -> bool {
+        self.tab == Tab::Download
+            && ((key.code == KeyCode::Char('o') && key.modifiers.contains(KeyModifiers::ALT))
+                || (self.download.focus() == DownloadFocus::ConfigPath
+                    && key.code == KeyCode::Enter
+                    && key.modifiers == KeyModifiers::NONE))
+    }
+
+    fn is_download_restore_trigger(&self, key: KeyEvent) -> bool {
+        self.tab == Tab::Download
+            && ((key.code == KeyCode::Char('r') && key.modifiers.contains(KeyModifiers::ALT))
+                || (self.download.focus() == DownloadFocus::Versions
+                    && key.code == KeyCode::Enter
+                    && key.modifiers == KeyModifiers::NONE))
+    }
+
+    fn handle_global_navigation_key(&mut self, key: KeyEvent) -> bool {
+        let destination = match key.code {
+            KeyCode::F(number @ 1..=7) => Some(number as usize - 1),
+            KeyCode::Char('1') if key.modifiers.contains(KeyModifiers::ALT) => Some(0),
+            KeyCode::Char('2') if key.modifiers.contains(KeyModifiers::ALT) => Some(1),
+            KeyCode::Char('3') if key.modifiers.contains(KeyModifiers::ALT) => Some(2),
+            KeyCode::Char('4') if key.modifiers.contains(KeyModifiers::ALT) => Some(3),
+            KeyCode::Char('5') if key.modifiers.contains(KeyModifiers::ALT) => Some(4),
+            KeyCode::Char('6') if key.modifiers.contains(KeyModifiers::ALT) => Some(5),
+            KeyCode::Char('7') if key.modifiers.contains(KeyModifiers::ALT) => Some(6),
+            KeyCode::Left if key.modifiers.contains(KeyModifiers::ALT) => {
+                Some((self.tab.index() + TAB_NAMES.len() - 1) % TAB_NAMES.len())
+            }
+            KeyCode::Right if key.modifiers.contains(KeyModifiers::ALT) => {
+                Some(self.tab.index() + 1)
+            }
+            _ => None,
+        };
+        let Some(destination) = destination else {
+            return false;
+        };
+        self.store_active_script_view();
+        self.tab = Tab::from_index(destination);
+        self.input_mode = InputMode::Normal;
+        self.script_input_target = None;
+        self.script_versions_target = None;
+        self.show_chat_sessions = false;
+        self.show_help = false;
+        true
+    }
+
+    fn request_quit(&mut self) {
+        self.show_palette = false;
+        if self.bench_editor.is_dirty()
+            || self.maintenance_editor.is_dirty()
+            || self.download.is_dirty()
+        {
+            self.show_quit_confirmation = true;
+            self.status = "Unsaved edits: S save and quit · D discard and quit · Esc cancel".into();
+        } else {
+            self.should_quit = true;
+        }
+    }
+
+    fn handle_quit_confirmation_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.show_quit_confirmation = false;
+                self.status = "Quit cancelled; unsaved edits retained".into();
+            }
+            KeyCode::Char('s' | 'S') => {
+                if self.bench_editor.is_dirty() {
+                    self.save_script_editor(ScriptEditorTarget::Bench);
+                }
+                if self.maintenance_editor.is_dirty() {
+                    self.save_script_editor(ScriptEditorTarget::Maintenance);
+                }
+                if self.download.is_dirty() {
+                    self.save_download_config();
+                }
+                if !self.bench_editor.is_dirty()
+                    && !self.maintenance_editor.is_dirty()
+                    && !self.download.is_dirty()
+                {
+                    self.show_quit_confirmation = false;
+                    self.should_quit = true;
+                } else {
+                    self.status = "Could not save every dirty editor; quit cancelled".into();
+                }
+            }
+            KeyCode::Char('d' | 'D') => {
+                self.show_quit_confirmation = false;
+                self.should_quit = true;
+            }
+            _ => {}
+        }
     }
 
     fn modified_key_command(&self, key: KeyEvent) -> Option<CommandId> {
@@ -718,11 +908,17 @@ impl App {
             (Tab::Workbench, KeyCode::Char('s'), true, _) => Some(CommandId::WorkbenchUnloadModel),
             (Tab::Workbench, KeyCode::Char('f'), true, _) => Some(CommandId::WorkbenchFocusFilter),
             (Tab::Workbench, KeyCode::Char('j'), true, _) => Some(CommandId::WorkbenchFocusTable),
+            (Tab::Workbench, KeyCode::Char('l'), true, _) => Some(CommandId::WorkbenchClearLog),
             (Tab::ModelOps, KeyCode::Char('r'), true, _) => Some(CommandId::ModelOpsStart),
             (Tab::ModelOps, KeyCode::Char('s'), true, _) => Some(CommandId::ModelOpsStop),
             (Tab::ModelOps, KeyCode::Char('m'), true, _) => Some(CommandId::ModelOpsToggleMode),
             (Tab::ModelOps, KeyCode::Char('f'), true, _) => Some(CommandId::ModelOpsFocusFilter),
             (Tab::ModelOps, KeyCode::Char('j'), true, _) => Some(CommandId::ModelOpsFocusTable),
+            (Tab::ModelOps, KeyCode::Char('u'), true, _) => Some(CommandId::ModelOpsFocusEditor),
+            (Tab::ModelOps, KeyCode::Char('p'), _, true) => Some(CommandId::ModelOpsSaveScript),
+            (Tab::ModelOps, KeyCode::Char('o'), _, true) => Some(CommandId::ModelOpsReloadScript),
+            (Tab::ModelOps, KeyCode::Char('v'), _, true) => Some(CommandId::ModelOpsRestoreScript),
+            (Tab::ModelOps, KeyCode::Char('l'), true, _) => Some(CommandId::ModelOpsClearLog),
             (Tab::Chat, KeyCode::Char('x'), true, _) => Some(CommandId::ChatClear),
             (Tab::Chat, KeyCode::Char('s'), _, true) => Some(CommandId::ChatSave),
             (Tab::Browser, KeyCode::Char('r'), _, true) => Some(CommandId::BrowserScan),
@@ -733,8 +929,28 @@ impl App {
             (Tab::Download, KeyCode::Char('w'), _, true) => Some(CommandId::DownloadSaveConfig),
             (Tab::Download, KeyCode::Char('v'), _, true) => Some(CommandId::DownloadValidateConfig),
             (Tab::Download, KeyCode::Char('t'), _, true) => Some(CommandId::DownloadFocusTable),
+            (Tab::Download, KeyCode::Char('i'), _, true) => Some(CommandId::DownloadFocusEditor),
+            (Tab::Download, KeyCode::Char('o'), _, true) => Some(CommandId::DownloadLoadConfig),
+            (Tab::Download, KeyCode::Char('r'), _, true) => Some(CommandId::DownloadRestoreConfig),
+            (Tab::Download, KeyCode::Char('n'), _, true) => Some(CommandId::DownloadAddModel),
+            (Tab::Download, KeyCode::Char('a'), _, true) => Some(CommandId::DownloadApplyEdit),
+            (Tab::Download, KeyCode::Char('k'), _, true) => Some(CommandId::DownloadDeleteModel),
+            (Tab::Download, KeyCode::Char('y'), _, true) => Some(CommandId::DownloadClearLog),
             (Tab::Maintenance, KeyCode::Char('r'), true, _) => Some(CommandId::MaintenanceRun),
             (Tab::Maintenance, KeyCode::Char('s'), true, _) => Some(CommandId::MaintenanceStop),
+            (Tab::Maintenance, KeyCode::Char('u'), true, _) => {
+                Some(CommandId::MaintenanceFocusEditor)
+            }
+            (Tab::Maintenance, KeyCode::Char('p'), _, true) => {
+                Some(CommandId::MaintenanceSaveScript)
+            }
+            (Tab::Maintenance, KeyCode::Char('o'), _, true) => {
+                Some(CommandId::MaintenanceReloadScript)
+            }
+            (Tab::Maintenance, KeyCode::Char('v'), _, true) => {
+                Some(CommandId::MaintenanceRestoreScript)
+            }
+            (Tab::Maintenance, KeyCode::Char('l'), true, _) => Some(CommandId::MaintenanceClearLog),
             _ => None,
         }
     }
@@ -864,6 +1080,410 @@ impl App {
         Ok(())
     }
 
+    fn script_editor(&self, target: ScriptEditorTarget) -> &ScriptEditorState {
+        match target {
+            ScriptEditorTarget::Bench => &self.bench_editor,
+            ScriptEditorTarget::Maintenance => &self.maintenance_editor,
+        }
+    }
+
+    fn script_editor_mut(&mut self, target: ScriptEditorTarget) -> &mut ScriptEditorState {
+        match target {
+            ScriptEditorTarget::Bench => &mut self.bench_editor,
+            ScriptEditorTarget::Maintenance => &mut self.maintenance_editor,
+        }
+    }
+
+    fn script_editor_view(&self, target: ScriptEditorTarget) -> EditorViewport {
+        match target {
+            ScriptEditorTarget::Bench => self.bench_editor_view,
+            ScriptEditorTarget::Maintenance => self.maintenance_editor_view,
+        }
+    }
+
+    fn script_editor_view_mut(&mut self, target: ScriptEditorTarget) -> &mut EditorViewport {
+        match target {
+            ScriptEditorTarget::Bench => &mut self.bench_editor_view,
+            ScriptEditorTarget::Maintenance => &mut self.maintenance_editor_view,
+        }
+    }
+
+    fn store_active_script_view(&mut self) {
+        let Some(target) = self.script_input_target else {
+            return;
+        };
+        let cursor_byte = self.script_buffer.cursor_byte();
+        self.script_editor_view_mut(target).cursor_byte = cursor_byte;
+    }
+
+    fn selected_script_path(&self, target: ScriptEditorTarget) -> Option<PathBuf> {
+        match target {
+            ScriptEditorTarget::Bench => self
+                .bench_state
+                .selected()
+                .and_then(|index| self.bench_scripts.get(index))
+                .cloned(),
+            ScriptEditorTarget::Maintenance => self
+                .maintenance_state
+                .selected()
+                .and_then(|index| self.maintenance_scripts.get(index))
+                .cloned(),
+        }
+    }
+
+    fn sync_script_editor_selection(&mut self, target: ScriptEditorTarget) -> bool {
+        let Some(path) = self.selected_script_path(target) else {
+            if !self.script_editor(target).is_dirty() {
+                self.script_editor_mut(target).clear_selection();
+            }
+            return false;
+        };
+        if self.script_editor(target).selected_path() == Some(path.as_path()) {
+            return true;
+        }
+        if self.script_editor(target).is_dirty() {
+            self.status = format!(
+                "{} editor has unsaved changes; save or reload before changing scripts",
+                target.label()
+            );
+            return false;
+        }
+        match self.script_editor_mut(target).select(&path) {
+            Ok(()) => {
+                *self.script_editor_view_mut(target) = EditorViewport::default();
+                true
+            }
+            Err(error) => {
+                self.status = format!("Could not load {} script", target.label());
+                self.push_log(format!("{error:#}"));
+                false
+            }
+        }
+    }
+
+    fn move_script_selection(&mut self, target: ScriptEditorTarget, previous: bool) {
+        if self.script_editor(target).is_dirty() {
+            self.status = format!(
+                "{} editor has unsaved changes; save or reload before changing scripts",
+                target.label()
+            );
+            return;
+        }
+        let (current, scripts) = match target {
+            ScriptEditorTarget::Bench => (self.bench_state.selected(), &self.bench_scripts),
+            ScriptEditorTarget::Maintenance => {
+                (self.maintenance_state.selected(), &self.maintenance_scripts)
+            }
+        };
+        if scripts.is_empty() {
+            return;
+        }
+        let next = if previous {
+            match current {
+                Some(0) | None => scripts.len() - 1,
+                Some(index) => index - 1,
+            }
+        } else {
+            current.map_or(0, |index| (index + 1) % scripts.len())
+        };
+        let path = scripts[next].clone();
+        if let Err(error) = self.script_editor_mut(target).select(&path) {
+            self.status = format!("Could not load {} script", target.label());
+            self.push_log(format!("{error:#}"));
+            return;
+        }
+        match target {
+            ScriptEditorTarget::Bench => self.bench_state.select(Some(next)),
+            ScriptEditorTarget::Maintenance => self.maintenance_state.select(Some(next)),
+        }
+        *self.script_editor_view_mut(target) = EditorViewport::default();
+        self.script_reload_armed = None;
+    }
+
+    fn focus_script_editor(&mut self, target: ScriptEditorTarget) {
+        if target == ScriptEditorTarget::Bench && self.ops_mode != OpsMode::Bench {
+            self.status = "Run mode is read-only; switch to Bench to edit scripts".into();
+            return;
+        }
+        if !self.sync_script_editor_selection(target) {
+            self.status = format!("No {} script selected", target.label().to_ascii_lowercase());
+            return;
+        }
+        let content = self.script_editor(target).content().to_owned();
+        self.script_buffer.set_content(content);
+        let viewport = self.script_editor_view(target);
+        if !self.script_buffer.set_cursor_byte(viewport.cursor_byte) {
+            let end = self.script_buffer.content().len();
+            self.script_buffer.set_cursor_byte(end);
+        }
+        self.script_input_target = Some(target);
+        self.script_reload_armed = None;
+        self.input_mode = InputMode::Normal;
+        self.status = format!("Editing {} script", target.label().to_ascii_lowercase());
+    }
+
+    fn leave_script_editor(&mut self) {
+        let Some(target) = self.script_input_target else {
+            return;
+        };
+        self.sync_script_buffer(target);
+        self.store_active_script_view();
+        self.script_input_target = None;
+        self.script_reload_armed = None;
+        self.status = if self.script_editor(target).is_dirty() {
+            format!("{} editor retains unsaved changes", target.label())
+        } else {
+            format!(
+                "{} editor focus returned to the script list",
+                target.label()
+            )
+        };
+    }
+
+    fn sync_script_buffer(&mut self, target: ScriptEditorTarget) -> bool {
+        let content = self.script_buffer.content().to_owned();
+        match self.script_editor_mut(target).set_content(content) {
+            Ok(()) => true,
+            Err(error) => {
+                self.status = format!("Could not update {} editor", target.label());
+                self.push_log(format!("{error:#}"));
+                false
+            }
+        }
+    }
+
+    fn handle_script_input_key(&mut self, key: KeyEvent) {
+        let Some(target) = self.script_input_target else {
+            return;
+        };
+        let would_mutate = matches!(
+            key.code,
+            KeyCode::Enter | KeyCode::Tab | KeyCode::Backspace | KeyCode::Delete
+        ) || matches!(key.code, KeyCode::Char(_))
+            && !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        if would_mutate && !self.script_editor(target).content_synchronized() {
+            self.status = format!(
+                "{} editor is out of sync; press Alt+O to reload before editing",
+                target.label()
+            );
+            return;
+        }
+        let mut changed = false;
+        match key.code {
+            KeyCode::Esc => {
+                self.leave_script_editor();
+                return;
+            }
+            KeyCode::Enter => {
+                self.script_buffer.insert_newline();
+                changed = true;
+            }
+            KeyCode::Tab => {
+                for _ in 0..4 {
+                    self.script_buffer.insert_char(' ');
+                }
+                changed = true;
+            }
+            KeyCode::Backspace => changed = self.script_buffer.backspace(),
+            KeyCode::Delete => changed = self.script_buffer.delete_forward(),
+            KeyCode::Left => {
+                self.script_buffer.move_left();
+            }
+            KeyCode::Right => {
+                self.script_buffer.move_right();
+            }
+            KeyCode::Up => {
+                self.script_buffer.move_up();
+            }
+            KeyCode::Down => {
+                self.script_buffer.move_down();
+            }
+            KeyCode::Home => {
+                self.script_buffer.move_home();
+            }
+            KeyCode::End => {
+                self.script_buffer.move_end();
+            }
+            KeyCode::PageUp => {
+                self.script_buffer.move_page_up(10);
+            }
+            KeyCode::PageDown => {
+                self.script_buffer.move_page_down(10);
+            }
+            KeyCode::Char(character)
+                if !key
+                    .modifiers
+                    .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+            {
+                self.script_buffer.insert_char(character);
+                changed = true;
+            }
+            _ => {}
+        }
+        if changed {
+            self.script_reload_armed = None;
+            self.sync_script_buffer(target);
+        }
+        self.store_active_script_view();
+    }
+
+    fn save_script_editor(&mut self, target: ScriptEditorTarget) {
+        if !self.sync_script_editor_selection(target) {
+            return;
+        }
+        if self.script_input_target == Some(target) && !self.sync_script_buffer(target) {
+            return;
+        }
+        match self.script_editor_mut(target).save("manual-save") {
+            Ok(outcome) => {
+                self.script_reload_armed = None;
+                let versions = self.script_editor(target).versions().len();
+                if let Some(warning) = outcome.warning_message() {
+                    self.status = format!(
+                        "Saved {} script; snapshot refresh needs attention",
+                        target.label().to_ascii_lowercase()
+                    );
+                    self.push_log(warning.to_owned());
+                } else {
+                    self.status = format!(
+                        "Saved {} script with snapshot · {versions} version(s)",
+                        target.label().to_ascii_lowercase()
+                    );
+                }
+            }
+            Err(error) => {
+                self.status = format!("Could not save {} script", target.label());
+                self.push_log(format!("{error:#}"));
+            }
+        }
+    }
+
+    fn reload_script_editor(&mut self, target: ScriptEditorTarget) {
+        if !self.sync_script_editor_selection(target) {
+            return;
+        }
+        if self.script_editor(target).is_dirty()
+            && self.script_editor(target).content_synchronized()
+            && self.script_reload_armed != Some(target)
+        {
+            self.script_reload_armed = Some(target);
+            self.status = format!(
+                "{} editor has unsaved changes; press Alt+O again to discard and reload",
+                target.label()
+            );
+            return;
+        }
+        match self.script_editor_mut(target).reload() {
+            Ok(()) => {
+                self.script_reload_armed = None;
+                *self.script_editor_view_mut(target) = EditorViewport::default();
+                if self.script_input_target == Some(target) {
+                    let content = self.script_editor(target).content().to_owned();
+                    self.script_buffer.set_content(content);
+                }
+                self.status = format!(
+                    "Reloaded {} script from disk",
+                    target.label().to_ascii_lowercase()
+                );
+            }
+            Err(error) => {
+                self.status = format!("Could not reload {} script", target.label());
+                self.push_log(format!("{error:#}"));
+            }
+        }
+    }
+
+    fn open_script_versions(&mut self, target: ScriptEditorTarget) {
+        if !self.sync_script_editor_selection(target) {
+            return;
+        }
+        if self.script_editor(target).is_dirty() {
+            self.status = format!(
+                "Save {} changes or press Alt+O twice to discard before restoring a version",
+                target.label().to_ascii_lowercase()
+            );
+            return;
+        }
+        if let Err(error) = self.script_editor_mut(target).refresh_versions() {
+            self.status = format!("Could not list {} script versions", target.label());
+            self.push_log(format!("{error:#}"));
+            return;
+        }
+        let count = self.script_editor(target).versions().len();
+        if count == 0 {
+            self.status = format!(
+                "No snapshots exist for this {} script",
+                target.label().to_ascii_lowercase()
+            );
+            return;
+        }
+        self.script_versions_target = Some(target);
+        self.script_version_state.select(Some(0));
+        self.status = format!(
+            "Select one of {count} {} script snapshot(s)",
+            target.label().to_ascii_lowercase()
+        );
+    }
+
+    fn handle_script_versions_key(&mut self, key: KeyEvent) {
+        let Some(target) = self.script_versions_target else {
+            return;
+        };
+        let count = self.script_editor(target).versions().len();
+        match key.code {
+            KeyCode::Esc => self.script_versions_target = None,
+            KeyCode::Up | KeyCode::Char('k') => {
+                select_previous_list(&mut self.script_version_state, count)
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                select_next_list(&mut self.script_version_state, count)
+            }
+            KeyCode::Enter => self.restore_selected_script_version(target),
+            KeyCode::Char('v') if key.modifiers.contains(KeyModifiers::ALT) => {
+                self.script_versions_target = None
+            }
+            _ => {}
+        }
+    }
+
+    fn restore_selected_script_version(&mut self, target: ScriptEditorTarget) {
+        let Some(index) = self.script_version_state.selected() else {
+            return;
+        };
+        let Some(version) = self.script_editor(target).versions().get(index).cloned() else {
+            return;
+        };
+        match self.script_editor_mut(target).restore(&version) {
+            Ok(outcome) => {
+                *self.script_editor_view_mut(target) = EditorViewport::default();
+                if outcome.content_synchronized() && self.script_input_target == Some(target) {
+                    let content = self.script_editor(target).content().to_owned();
+                    self.script_buffer.set_content(content);
+                }
+                self.script_versions_target = None;
+                self.script_reload_armed = None;
+                if let Some(warning) = outcome.warning_message() {
+                    self.status = format!(
+                        "Restored {} script from {version}; refresh needs attention",
+                        target.label().to_ascii_lowercase()
+                    );
+                    self.push_log(warning.to_owned());
+                } else {
+                    self.status = format!(
+                        "Restored {} script from {version}",
+                        target.label().to_ascii_lowercase()
+                    );
+                }
+            }
+            Err(error) => {
+                self.status = format!("Could not restore {} script", target.label());
+                self.push_log(format!("{error:#}"));
+            }
+        }
+    }
+
     fn handle_tab_key(&mut self, key: KeyEvent) -> Result<()> {
         match self.tab {
             Tab::Workbench => self.handle_workbench_key(key),
@@ -892,8 +1512,23 @@ impl App {
     fn execute_command(&mut self, command_id: CommandId) -> Result<()> {
         use CommandId::*;
 
+        if let Some(spec) = command(command_id) {
+            let context = self.command_context();
+            if !spec.is_available_in(context) {
+                self.status = format!(
+                    "{} is only available in its {} context",
+                    spec.palette_label,
+                    spec.contexts
+                        .first()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| "declared".into())
+                );
+                return Ok(());
+            }
+        }
+
         match command_id {
-            Quit => self.should_quit = true,
+            Quit => self.request_quit(),
             ShowHelp => self.show_help = true,
             ShowPalette => self.open_palette(),
             OpenWorkbench => self.tab = Tab::Workbench,
@@ -921,7 +1556,11 @@ impl App {
             WorkbenchRefreshModels => self.refresh_models(),
             WorkbenchLoadModel => self.model_action(true),
             WorkbenchUnloadModel => self.model_action(false),
+            WorkbenchClearLog => self.clear_activity_log("Workbench"),
             ModelOpsToggleMode => {
+                if self.script_input_target == Some(ScriptEditorTarget::Bench) {
+                    self.leave_script_editor();
+                }
                 self.ops_mode = match self.ops_mode {
                     OpsMode::Run => OpsMode::Bench,
                     OpsMode::Bench => OpsMode::Run,
@@ -932,16 +1571,14 @@ impl App {
                     let count = self.visible_model_count();
                     select_previous_table(&mut self.model_state, count);
                 }
-                OpsMode::Bench => {
-                    select_previous_list(&mut self.bench_state, self.bench_scripts.len())
-                }
+                OpsMode::Bench => self.move_script_selection(ScriptEditorTarget::Bench, true),
             },
             ModelOpsSelectNext => match self.ops_mode {
                 OpsMode::Run => {
                     let count = self.visible_model_count();
                     select_next_table(&mut self.model_state, count);
                 }
-                OpsMode::Bench => select_next_list(&mut self.bench_state, self.bench_scripts.len()),
+                OpsMode::Bench => self.move_script_selection(ScriptEditorTarget::Bench, false),
             },
             ModelOpsStart => match self.ops_mode {
                 OpsMode::Run => self.model_action(true),
@@ -959,7 +1596,23 @@ impl App {
                     self.status = "Bench script filtering is not implemented yet".into();
                 }
             }
-            ModelOpsFocusTable => self.input_mode = InputMode::Normal,
+            ModelOpsFocusTable => {
+                if self.script_input_target == Some(ScriptEditorTarget::Bench) {
+                    self.leave_script_editor();
+                }
+                self.input_mode = InputMode::Normal;
+            }
+            ModelOpsFocusEditor => {
+                if self.script_input_target == Some(ScriptEditorTarget::Bench) {
+                    self.leave_script_editor();
+                } else {
+                    self.focus_script_editor(ScriptEditorTarget::Bench);
+                }
+            }
+            ModelOpsSaveScript => self.save_script_editor(ScriptEditorTarget::Bench),
+            ModelOpsReloadScript => self.reload_script_editor(ScriptEditorTarget::Bench),
+            ModelOpsRestoreScript => self.open_script_versions(ScriptEditorTarget::Bench),
+            ModelOpsClearLog => self.clear_activity_log("Model Ops"),
             ChatCompose => self.input_mode = InputMode::ChatMessage,
             ChatSend => {
                 if self.chat_input.trim().is_empty() {
@@ -1015,24 +1668,21 @@ impl App {
                     }
                 );
             }
-            DownloadSelectPrevious => {
-                select_previous_table(&mut self.download_state, self.download_config.models.len())
-            }
-            DownloadSelectNext => {
-                select_next_table(&mut self.download_state, self.download_config.models.len())
-            }
-            DownloadFocusTable => self.input_mode = InputMode::Normal,
-            DownloadToggleEnabled => {
-                self.handle_download_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::NONE))?
-            }
-            DownloadSaveConfig => {
-                self.handle_download_key(KeyEvent::new(KeyCode::Char('w'), KeyModifiers::NONE))?
-            }
-            DownloadValidateConfig => {
-                self.handle_download_key(KeyEvent::new(KeyCode::Char('v'), KeyModifiers::NONE))?
-            }
+            DownloadSelectPrevious => self.select_download_previous(),
+            DownloadSelectNext => self.select_download_next(),
+            DownloadFocusTable => self.focus_download_table(),
+            DownloadFocusEditor => self.focus_download_editor(),
+            DownloadToggleEnabled => self.toggle_download_enabled(),
+            DownloadLoadConfig => self.reload_download_config(),
+            DownloadSaveConfig => self.save_download_config(),
+            DownloadValidateConfig => self.validate_download_config(),
+            DownloadRestoreConfig => self.restore_download_config(),
+            DownloadAddModel => self.add_download_model(),
+            DownloadApplyEdit => self.apply_download_edit(),
+            DownloadDeleteModel => self.delete_download_model(),
             DownloadSelected => self.download_selected(),
             DownloadEnabled => self.download_enabled(),
+            DownloadClearLog => self.clear_download_log(),
             JobsSelectPrevious => {
                 select_previous_table(&mut self.jobs_state, self.job_history.records().len())
             }
@@ -1049,13 +1699,24 @@ impl App {
                 }
             }
             MaintenanceSelectPrevious => {
-                select_previous_list(&mut self.maintenance_state, self.maintenance_scripts.len())
+                self.move_script_selection(ScriptEditorTarget::Maintenance, true)
             }
             MaintenanceSelectNext => {
-                select_next_list(&mut self.maintenance_state, self.maintenance_scripts.len())
+                self.move_script_selection(ScriptEditorTarget::Maintenance, false)
             }
             MaintenanceRun => self.run_selected_maintenance(),
             MaintenanceStop => self.stop_running_process(),
+            MaintenanceFocusEditor => {
+                if self.script_input_target == Some(ScriptEditorTarget::Maintenance) {
+                    self.leave_script_editor();
+                } else {
+                    self.focus_script_editor(ScriptEditorTarget::Maintenance)
+                }
+            }
+            MaintenanceSaveScript => self.save_script_editor(ScriptEditorTarget::Maintenance),
+            MaintenanceReloadScript => self.reload_script_editor(ScriptEditorTarget::Maintenance),
+            MaintenanceRestoreScript => self.open_script_versions(ScriptEditorTarget::Maintenance),
+            MaintenanceClearLog => self.clear_activity_log("Maintenance"),
             _ => {
                 let label = command(command_id)
                     .map(|spec| spec.palette_label)
@@ -1075,7 +1736,10 @@ impl App {
                 | PreviousTab
                 | NextTab
         ) {
+            self.store_active_script_view();
             self.input_mode = InputMode::Normal;
+            self.script_input_target = None;
+            self.script_versions_target = None;
             self.show_help = false;
         }
         Ok(())
@@ -1110,10 +1774,10 @@ impl App {
             OpsMode::Run => self.handle_workbench_key(key),
             OpsMode::Bench => match key.code {
                 KeyCode::Up | KeyCode::Char('k') => {
-                    select_previous_list(&mut self.bench_state, self.bench_scripts.len())
+                    self.move_script_selection(ScriptEditorTarget::Bench, true)
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
-                    select_next_list(&mut self.bench_state, self.bench_scripts.len())
+                    self.move_script_selection(ScriptEditorTarget::Bench, false)
                 }
                 KeyCode::Enter | KeyCode::Char('r') => self.run_selected_bench(),
                 KeyCode::Char('s') => self.stop_running_process(),
@@ -1192,70 +1856,397 @@ impl App {
     }
 
     fn handle_download_key(&mut self, key: KeyEvent) -> Result<()> {
-        let count = self.download_config.models.len();
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => {
-                select_previous_table(&mut self.download_state, count)
+            KeyCode::Up | KeyCode::Char('k') => self.select_download_previous(),
+            KeyCode::Down | KeyCode::Char('j') => self.select_download_next(),
+            KeyCode::Tab => {
+                self.download.focus_next();
+                self.describe_download_focus();
             }
-            KeyCode::Down | KeyCode::Char('j') => {
-                select_next_table(&mut self.download_state, count)
+            KeyCode::BackTab => {
+                self.download.focus_previous();
+                self.describe_download_focus();
             }
-            KeyCode::Char(' ') => {
-                if !self.download_config_is_usable() {
-                    return Ok(());
-                }
-                if let Some(index) = self.download_state.selected() {
-                    if let Some(model) = self.download_config.models.get_mut(index) {
-                        model.enabled = !model.enabled;
-                        self.download_dirty = true;
-                        self.status = format!(
-                            "{} {}",
-                            if model.enabled { "Enabled" } else { "Disabled" },
-                            model.repo_id
-                        );
-                    }
-                }
-            }
-            KeyCode::Char('v') => {
-                if !self.download_config_is_usable() {
-                    return Ok(());
-                }
-                let errors = validate_config(&self.download_config);
-                if errors.is_empty() {
-                    self.status = "Download config is valid".into();
-                } else {
-                    self.status = format!("{} validation error(s)", errors.len());
-                    for error in errors {
-                        self.push_log(error);
-                    }
-                }
-            }
-            KeyCode::Char('w') => {
-                if !self.download_config_is_usable() {
-                    return Ok(());
-                }
-                let versions_root = self.root.join(".toolkit/download_config_versions");
-                match save_config_in(
-                    &self.config_path,
-                    &self.download_config,
-                    "rust-tui",
-                    &versions_root,
-                ) {
-                    Ok(()) => {
-                        self.download_dirty = false;
-                        self.status = "Saved config with snapshot".into();
-                    }
-                    Err(error) => {
-                        self.status = "Could not save download config".into();
-                        self.push_log(format!("{error:#}"));
-                    }
-                }
-            }
+            KeyCode::Enter => self.focus_download_editor(),
+            KeyCode::Char(' ') => self.toggle_download_enabled(),
+            KeyCode::Char('v') => self.validate_download_config(),
+            KeyCode::Char('w') => self.save_download_config(),
             KeyCode::Char('d') => self.download_selected(),
             KeyCode::Char('e') => self.download_enabled(),
             _ => {}
         }
         Ok(())
+    }
+
+    fn handle_download_input_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc => {
+                self.focus_download_table();
+                return;
+            }
+            KeyCode::Tab => {
+                self.download.focus_next();
+                self.describe_download_focus();
+                return;
+            }
+            KeyCode::BackTab => {
+                self.download.focus_previous();
+                self.describe_download_focus();
+                return;
+            }
+            _ => {}
+        }
+
+        match self.download.focus() {
+            DownloadFocus::Table => {}
+            DownloadFocus::ConfigPath => {
+                if key.code == KeyCode::Enter {
+                    self.reload_download_config();
+                } else if let Some(buffer) = self.download.focused_buffer_mut() {
+                    edit_single_line_buffer(buffer, key);
+                }
+            }
+            DownloadFocus::Versions => match key.code {
+                KeyCode::Up | KeyCode::Left | KeyCode::Char('k') => {
+                    self.download.select_previous_version();
+                    self.describe_download_focus();
+                }
+                KeyCode::Down | KeyCode::Right | KeyCode::Char('j') => {
+                    self.download.select_next_version();
+                    self.describe_download_focus();
+                }
+                KeyCode::Enter => self.restore_download_config(),
+                _ => {}
+            },
+            DownloadFocus::SlowPreset => match key.code {
+                KeyCode::Char(' ') | KeyCode::Enter => {
+                    let enabled = self.download.toggle_slow();
+                    self.status = format!(
+                        "Slow download preset {}",
+                        if enabled { "enabled" } else { "disabled" }
+                    );
+                }
+                _ => {}
+            },
+            DownloadFocus::Model(field) if field.is_boolean() => match key.code {
+                KeyCode::Char(' ') | KeyCode::Enter => {
+                    if !self.download_config_is_usable() {
+                        return;
+                    }
+                    match self.download.draft_mut().toggle_boolean(field) {
+                        Ok(value) => {
+                            self.status = format!(
+                                "{} {} in the model draft",
+                                field.label(),
+                                if value { "enabled" } else { "disabled" }
+                            )
+                        }
+                        Err(error) => self.record_download_message(format!("{error:#}")),
+                    }
+                }
+                _ => {}
+            },
+            DownloadFocus::BaseModelsDir | DownloadFocus::Model(_) => {
+                if !self.download_config_is_usable() {
+                    return;
+                }
+                if key.code == KeyCode::Enter {
+                    self.download.focus_next();
+                    self.describe_download_focus();
+                } else if let Some(buffer) = self.download.focused_buffer_mut() {
+                    edit_single_line_buffer(buffer, key);
+                }
+            }
+            DownloadFocus::GlobalWorkers | DownloadFocus::SaveNote => {
+                if key.code == KeyCode::Enter {
+                    self.download.focus_next();
+                    self.describe_download_focus();
+                } else if let Some(buffer) = self.download.focused_buffer_mut() {
+                    edit_single_line_buffer(buffer, key);
+                }
+            }
+        }
+    }
+
+    fn sync_download_table_state(&mut self) {
+        self.download_state.select(self.download.selected_index());
+    }
+
+    fn select_download_previous(&mut self) {
+        self.download.select_previous();
+        self.sync_download_table_state();
+        self.describe_download_selection();
+    }
+
+    fn select_download_next(&mut self) {
+        self.download.select_next();
+        self.sync_download_table_state();
+        self.describe_download_selection();
+    }
+
+    fn describe_download_selection(&mut self) {
+        self.status = self.download.selected_model().map_or_else(
+            || "No download model selected".into(),
+            |model| format!("Selected download model {}", value_or_dash(&model.repo_id)),
+        );
+    }
+
+    fn focus_download_table(&mut self) {
+        self.download.set_focus(DownloadFocus::Table);
+        self.sync_download_table_state();
+        self.status = "Download model table focused".into();
+    }
+
+    fn focus_download_editor(&mut self) {
+        if !self.download_config_is_usable() {
+            return;
+        }
+        if self.download.selected_model().is_none() {
+            self.status = "No download model selected".into();
+            return;
+        }
+        self.download
+            .set_focus(DownloadFocus::Model(ModelField::RepoId));
+        self.status = "Download model editor focused · Tab moves through fields".into();
+    }
+
+    fn describe_download_focus(&mut self) {
+        let label = match self.download.focus() {
+            DownloadFocus::Table => "model table".to_owned(),
+            DownloadFocus::ConfigPath => "config path".to_owned(),
+            DownloadFocus::Versions => "config snapshots".to_owned(),
+            DownloadFocus::BaseModelsDir => "base models directory".to_owned(),
+            DownloadFocus::SlowPreset => "slow preset".to_owned(),
+            DownloadFocus::GlobalWorkers => "global worker override".to_owned(),
+            DownloadFocus::SaveNote => "save note".to_owned(),
+            DownloadFocus::Model(field) => format!("model {}", field.label()),
+        };
+        self.status = format!("Download focus: {label} · Tab/Shift+Tab move · Esc table");
+    }
+
+    fn add_download_model(&mut self) {
+        if !self.download_config_is_usable() {
+            return;
+        }
+        let index = self.download.add_model();
+        self.sync_download_table_state();
+        self.status = format!("Added download model row {} · enter repo_id", index + 1);
+    }
+
+    fn apply_download_edit(&mut self) {
+        if !self.download_config_is_usable() {
+            return;
+        }
+        match self.download.apply_selected() {
+            Ok(index) => {
+                self.sync_download_table_state();
+                self.status = format!("Applied editor changes to model row {}", index + 1);
+            }
+            Err(error) => {
+                self.status = "Could not apply download model edit".into();
+                self.record_download_message(format!("Apply failed: {error:#}"));
+            }
+        }
+    }
+
+    fn delete_download_model(&mut self) {
+        if !self.download_config_is_usable() {
+            return;
+        }
+        match self.download.delete_selected() {
+            Some(model) => {
+                self.sync_download_table_state();
+                self.status = format!("Deleted download model {}", value_or_dash(&model.repo_id));
+            }
+            None => self.status = "No download model selected".into(),
+        }
+    }
+
+    fn toggle_download_enabled(&mut self) {
+        if !self.download_config_is_usable() {
+            return;
+        }
+        match self.download.toggle_selected_enabled() {
+            Ok(enabled) => {
+                let repo_id = self
+                    .download
+                    .selected_model()
+                    .map(|model| value_or_dash(&model.repo_id).to_owned())
+                    .unwrap_or_else(|| "model".into());
+                self.status = format!("{} {repo_id}", if enabled { "Enabled" } else { "Disabled" });
+            }
+            Err(error) => {
+                self.status = "Could not toggle download model".into();
+                self.record_download_message(format!("{error:#}"));
+            }
+        }
+    }
+
+    fn validate_download_config(&mut self) {
+        if !self.download_config_is_usable() {
+            return;
+        }
+        match self.download.validate() {
+            Ok(errors) if errors.is_empty() => {
+                self.sync_download_table_state();
+                self.refresh_download_disk_space();
+                self.status = "Download config validation passed".into();
+            }
+            Ok(errors) => {
+                self.sync_download_table_state();
+                self.status = format!("Download config has {} validation error(s)", errors.len());
+                for error in errors {
+                    self.record_download_message(format!("Validation: {error}"));
+                }
+            }
+            Err(error) => {
+                self.status = "Download config validation failed".into();
+                self.record_download_message(format!("Validation: {error:#}"));
+            }
+        }
+    }
+
+    fn save_download_config(&mut self) {
+        if !self.download_config_is_usable() {
+            return;
+        }
+        match self.download.save() {
+            Ok(()) => {
+                self.download_reload_armed = false;
+                self.download_restore_armed = false;
+                self.sync_download_table_state();
+                self.refresh_download_disk_space();
+                self.status = format!(
+                    "Saved download config with snapshot: {}",
+                    self.download.editor().config_path().display()
+                );
+                if let Some(warning) = self.download.take_history_warning() {
+                    self.status = "Saved download config; snapshot history is unavailable".into();
+                    self.record_download_message(warning);
+                }
+            }
+            Err(error) => {
+                self.status = "Could not save download config".into();
+                self.record_download_message(format!("Save failed: {error:#}"));
+            }
+        }
+    }
+
+    fn reload_download_config(&mut self) {
+        if self.download.is_dirty() && !self.download_reload_armed {
+            self.download_reload_armed = true;
+            self.download_restore_armed = false;
+            self.status =
+                "Unsaved Download edits: trigger reload again to discard them, or press any other key"
+                    .into();
+            return;
+        }
+        self.download_reload_armed = false;
+        self.download_restore_armed = false;
+        let was_blocked = self.download_load_error.is_some();
+        match self.download.reload_path_in(&self.root) {
+            Ok(()) => {
+                self.download_load_error = None;
+                self.sync_download_table_state();
+                self.refresh_download_disk_space();
+                self.status = format!(
+                    "Loaded download config: {}",
+                    self.download.editor().config_path().display()
+                );
+                if let Some(warning) = self.download.take_history_warning() {
+                    self.status = "Loaded download config; snapshot history is unavailable".into();
+                    self.record_download_message(warning);
+                }
+            }
+            Err(error) => {
+                let message = format!("Load failed: {error:#}");
+                if was_blocked {
+                    self.download_load_error = Some(message.clone());
+                }
+                self.status = "Could not load download config; current state retained".into();
+                self.record_download_message(message);
+            }
+        }
+    }
+
+    fn restore_download_config(&mut self) {
+        if self.download.versions().is_empty() {
+            if let Err(error) = self.download.refresh_versions() {
+                self.status = "Could not list download config snapshots".into();
+                self.record_download_message(format!("Snapshot list failed: {error:#}"));
+                return;
+            }
+        }
+        if self.download.versions().is_empty() {
+            self.status = "No download config snapshots available".into();
+            return;
+        }
+        if self.download.selected_version().is_none() {
+            self.download.select_version(0);
+            self.download.set_focus(DownloadFocus::Versions);
+            self.download_restore_armed = false;
+            self.status = "Choose a download config snapshot and press Enter to restore".into();
+            return;
+        }
+        if self.download.is_dirty() && !self.download_restore_armed {
+            self.download_restore_armed = true;
+            self.download_reload_armed = false;
+            self.status =
+                "Unsaved Download edits: trigger restore again to discard them, or press any other key"
+                    .into();
+            return;
+        }
+        self.download_restore_armed = false;
+        self.download_reload_armed = false;
+        match self.download.restore_selected_version() {
+            Ok(version) => {
+                self.download_load_error = None;
+                self.sync_download_table_state();
+                self.refresh_download_disk_space();
+                self.status = format!("Restored download config snapshot {version}");
+                if let Some(warning) = self.download.take_history_warning() {
+                    self.status =
+                        format!("Restored snapshot {version}; snapshot history is unavailable");
+                    self.record_download_message(warning);
+                }
+            }
+            Err(error) => {
+                self.status = "Could not restore download config snapshot".into();
+                self.record_download_message(format!("Restore failed: {error:#}"));
+            }
+        }
+    }
+
+    fn download_config_is_usable(&mut self) -> bool {
+        let Some(error) = self.download_load_error.as_deref() else {
+            return true;
+        };
+        self.status =
+            "Download config is blocked; edit its path and use Alt+O, or restore a snapshot".into();
+        if self.download_log.back().map(String::as_str) != Some(error) {
+            self.push_download_log(error.to_owned());
+        }
+        false
+    }
+
+    fn clear_download_log(&mut self) {
+        self.download_log.clear();
+        self.status = "Download activity log cleared".into();
+    }
+
+    fn refresh_download_disk_space(&mut self) {
+        let raw = self.download.base_models_dir_buffer().content().trim();
+        if raw.is_empty() {
+            self.download_disk_space = "Disk: —".into();
+            return;
+        }
+        let path = PathBuf::from(raw);
+        let path = if path.is_absolute() {
+            path
+        } else {
+            self.root.join(path)
+        };
+        self.download_disk_space = disk_space_summary(&path);
     }
 
     fn handle_jobs_key(&mut self, key: KeyEvent) {
@@ -1282,10 +2273,10 @@ impl App {
     fn handle_maintenance_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => {
-                select_previous_list(&mut self.maintenance_state, self.maintenance_scripts.len())
+                self.move_script_selection(ScriptEditorTarget::Maintenance, true)
             }
             KeyCode::Down | KeyCode::Char('j') => {
-                select_next_list(&mut self.maintenance_state, self.maintenance_scripts.len())
+                self.move_script_selection(ScriptEditorTarget::Maintenance, false)
             }
             KeyCode::Enter | KeyCode::Char('r') => self.run_selected_maintenance(),
             KeyCode::Char('s') => self.stop_running_process(),
@@ -1512,9 +2503,12 @@ impl App {
         self.chat_session_pending = true;
         self.status = "Saving chat session…".into();
         let history = self.chat_history.clone();
+        let data_root = self.data_root.clone();
         let sender = self.sender.clone();
         thread::spawn(move || {
-            let result = history.save().map_err(|error| format!("{error:#}"));
+            let result = history
+                .save_in(&data_root)
+                .map_err(|error| format!("{error:#}"));
             let _ = sender.send(BackgroundEvent::ChatSessionSaved(result));
         });
     }
@@ -1530,9 +2524,11 @@ impl App {
         }
         self.chat_session_pending = true;
         self.status = "Loading chat sessions…".into();
+        let data_root = self.data_root.clone();
         let sender = self.sender.clone();
         thread::spawn(move || {
-            let result = ChatHistory::list_sessions().map_err(|error| format!("{error:#}"));
+            let result =
+                ChatHistory::list_sessions_in(&data_root).map_err(|error| format!("{error:#}"));
             let _ = sender.send(BackgroundEvent::ChatSessionsListed(result));
         });
     }
@@ -1553,9 +2549,11 @@ impl App {
         };
         self.chat_session_pending = true;
         self.status = format!("Loading chat session {file_name}…");
+        let data_root = self.data_root.clone();
         let sender = self.sender.clone();
         thread::spawn(move || {
-            let result = ChatHistory::load_session(file_name).map_err(|error| format!("{error:#}"));
+            let result = ChatHistory::load_session_in(&data_root, file_name)
+                .map_err(|error| format!("{error:#}"));
             let _ = sender.send(BackgroundEvent::ChatSessionLoaded(result));
         });
     }
@@ -1567,6 +2565,11 @@ impl App {
         let Some(path) = self.bench_scripts.get(index).cloned() else {
             return;
         };
+        if self.bench_editor.selected_path() == Some(path.as_path()) && self.bench_editor.is_dirty()
+        {
+            self.status = "Save or reload the edited bench script before running it".into();
+            return;
+        }
         let command = command_for_script(&path, &[]);
         self.start_process_from_parts(
             display_name(&path),
@@ -1582,6 +2585,12 @@ impl App {
         let Some(path) = self.maintenance_scripts.get(index).cloned() else {
             return;
         };
+        if self.maintenance_editor.selected_path() == Some(path.as_path())
+            && self.maintenance_editor.is_dirty()
+        {
+            self.status = "Save or reload the edited maintenance script before running it".into();
+            return;
+        }
         let command = command_for_script(&path, &[]);
         self.start_process_from_parts(
             display_name(&path),
@@ -1594,14 +2603,47 @@ impl App {
         if !self.download_config_is_usable() {
             return;
         }
-        let Some(index) = self.download_state.selected() else {
+        let validation_errors = match self.download.validate() {
+            Ok(errors) => errors,
+            Err(error) => {
+                self.status = "Could not prepare selected download".into();
+                self.record_download_message(format!("Download validation: {error:#}"));
+                return;
+            }
+        };
+        self.sync_download_table_state();
+        if !validation_errors.is_empty() {
+            self.status = format!(
+                "Selected download blocked by {} validation error(s)",
+                validation_errors.len()
+            );
+            for error in validation_errors {
+                self.record_download_message(format!("Validation: {error}"));
+            }
+            return;
+        }
+        let Some(index) = self.download.selected_index() else {
+            self.status = "No download model selected".into();
             return;
         };
-        match build_selected_download_command(&self.root, &self.download_config, index) {
+        let speed_args = match self.selected_download_speed_args(index) {
+            Ok(args) => args,
+            Err(error) => {
+                self.status = "Invalid download speed settings".into();
+                self.record_download_message(format!("{error:#}"));
+                return;
+            }
+        };
+        match build_selected_download_command(
+            &self.root,
+            self.download.config(),
+            index,
+            &speed_args,
+        ) {
             Ok((name, parts)) => self.start_process_from_parts(name, "download", parts),
             Err(error) => {
                 self.status = "Could not build download command".into();
-                self.push_log(format!("{error:#}"));
+                self.record_download_message(format!("{error:#}"));
             }
         }
     }
@@ -1610,27 +2652,42 @@ impl App {
         if !self.download_config_is_usable() {
             return;
         }
-        if self.download_dirty {
+        if self.download.is_dirty() {
             self.status = "Save the edited config before downloading enabled models".into();
             return;
         }
-        let parts = vec![
-            self.root
-                .join("model_downloader/download_hf_model.py")
-                .into_os_string(),
-            "--config".into(),
-            self.config_path.clone().into_os_string(),
-        ];
+        let speed_args = match self.download.speed_args() {
+            Ok(args) => args,
+            Err(error) => {
+                self.status = "Invalid download speed settings".into();
+                self.record_download_message(format!("{error:#}"));
+                return;
+            }
+        };
+        let mut parts = downloader_command_prefix(&self.root);
+        parts.push("--config".into());
+        parts.push(self.download.editor().config_path().as_os_str().to_owned());
+        parts.extend(speed_args.into_iter().map(OsString::from));
         self.start_process_from_parts("enabled downloads".into(), "download", parts);
     }
 
-    fn download_config_is_usable(&mut self) -> bool {
-        let Some(error) = self.config_error.clone() else {
-            return true;
-        };
-        self.status = "Download config is blocked until its load error is fixed".into();
-        self.push_log(error);
-        false
+    fn selected_download_speed_args(&self, index: usize) -> Result<Vec<String>> {
+        if let Some(workers) = self.download.global_max_workers()? {
+            return Ok(vec!["--max-workers".into(), workers.to_string()]);
+        }
+        if let Some(workers) = self
+            .download
+            .models()
+            .get(index)
+            .and_then(|model| model.max_workers)
+        {
+            return Ok(vec!["--max-workers".into(), workers.to_string()]);
+        }
+        if self.download.slow() {
+            Ok(vec!["--slow".into()])
+        } else {
+            Ok(Vec::new())
+        }
     }
 
     fn start_process_from_parts(&mut self, name: String, kind: &str, parts: Vec<OsString>) {
@@ -1659,7 +2716,11 @@ impl App {
             Ok(child) => child,
             Err(error) => {
                 self.status = format!("Could not start {name}");
-                self.push_log(format!("{error:#}"));
+                if kind == "download" {
+                    self.record_download_message(format!("{error:#}"));
+                } else {
+                    self.push_log(format!("{error:#}"));
+                }
                 return;
             }
         };
@@ -1688,7 +2749,12 @@ impl App {
         self.jobs_state.select(Some(0));
         self.persist_jobs("process start");
         self.status = format!("Running {name}");
-        self.push_log(format!("$ {}", command_text.join(" ")));
+        let command_line = format!("$ {}", command_text.join(" "));
+        if kind == "download" {
+            self.record_download_message(command_line);
+        } else {
+            self.push_log(command_line);
+        }
 
         if let Some(stdout) = stdout {
             stream_reader(stdout, job_id, self.sender.clone());
@@ -1857,8 +2923,8 @@ impl App {
     }
 
     fn persist_jobs(&mut self, context: &str) {
-        if let Err(error) = persist_with_context(&self.job_history, context) {
-            self.push_log(format!("Job history save failed: {error:#}"));
+        if let Err(error) = self.job_history.persist_in(&self.data_root) {
+            self.push_log(format!("Job history {context} save failed: {error:#}"));
         }
     }
 
@@ -1867,6 +2933,24 @@ impl App {
         while self.log.len() > 300 {
             self.log.pop_front();
         }
+    }
+
+    fn push_download_log(&mut self, message: impl Into<String>) {
+        self.download_log.push_back(message.into());
+        while self.download_log.len() > 200 {
+            self.download_log.pop_front();
+        }
+    }
+
+    fn record_download_message(&mut self, message: impl Into<String>) {
+        let message = message.into();
+        self.push_download_log(message.clone());
+        self.push_log(message);
+    }
+
+    fn clear_activity_log(&mut self, context: &str) {
+        self.log.clear();
+        self.status = format!("{context} activity log cleared");
     }
 
     fn finish_job(&mut self, job_id: u64, exit_code: i32) {
@@ -1910,10 +2994,14 @@ impl App {
         self.draw_footer(frame, areas[4]);
         if self.show_palette {
             self.draw_palette(frame);
+        } else if self.show_quit_confirmation {
+            self.draw_quit_confirmation(frame);
         } else if self.show_help {
             self.draw_help(frame);
         } else if self.show_chat_sessions {
             self.draw_chat_sessions(frame);
+        } else if self.script_versions_target.is_some() {
+            self.draw_script_versions(frame);
         }
     }
 
@@ -2000,6 +3088,10 @@ impl App {
         match self.ops_mode {
             OpsMode::Run => self.draw_models_table(frame, chunks[1], "Servable models"),
             OpsMode::Bench => {
+                let panes = Layout::default()
+                    .direction(Direction::Horizontal)
+                    .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+                    .split(chunks[1]);
                 let items = self
                     .bench_scripts
                     .iter()
@@ -2008,12 +3100,115 @@ impl App {
                 let list = List::new(items)
                     .block(
                         Block::default()
-                            .title("Bench scripts")
+                            .title("Bench scripts · ↑/↓ select · Ctrl+U editor")
                             .borders(Borders::ALL),
                     )
                     .highlight_symbol("▶ ")
                     .highlight_style(Style::default().fg(Color::Cyan).bold());
-                frame.render_stateful_widget(list, chunks[1], &mut self.bench_state);
+                frame.render_stateful_widget(list, panes[0], &mut self.bench_state);
+                self.draw_script_editor(frame, panes[1], ScriptEditorTarget::Bench);
+            }
+        }
+    }
+
+    fn draw_script_editor(&mut self, frame: &mut Frame, area: Rect, target: ScriptEditorTarget) {
+        let editor = self.script_editor(target);
+        let path = editor
+            .selected_relative_path()
+            .map(|path| path.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_else(|| "No script selected".into());
+        let persisted_content = editor.content().to_owned();
+        let dirty = editor.is_dirty();
+        let synchronized = editor.content_synchronized();
+        let versions = editor.versions().len();
+        let focused = self.script_input_target == Some(target);
+        let content = if focused {
+            self.script_buffer.content().to_owned()
+        } else {
+            persisted_content
+        };
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Min(3), Constraint::Length(1)])
+            .split(area);
+        let content_area = chunks[0];
+        let mut viewport = self.script_editor_view(target);
+
+        if focused {
+            let cursor = self.script_buffer.cursor_position();
+            let cursor_display_column = text_buffer_cursor_display_width(&self.script_buffer);
+            let visible_height = content_area.height.saturating_sub(2) as usize;
+            let visible_width = content_area.width.saturating_sub(2) as usize;
+            if visible_height > 0 {
+                if cursor.line < viewport.scroll_y {
+                    viewport.scroll_y = cursor.line;
+                } else if cursor.line >= viewport.scroll_y + visible_height {
+                    viewport.scroll_y = cursor.line + 1 - visible_height;
+                }
+            }
+            if visible_width > 0 {
+                if cursor_display_column < viewport.scroll_x {
+                    viewport.scroll_x = cursor_display_column;
+                } else if cursor_display_column >= viewport.scroll_x + visible_width {
+                    viewport.scroll_x = cursor_display_column + 1 - visible_width;
+                }
+            }
+            *self.script_editor_view_mut(target) = viewport;
+        }
+
+        let state = if !synchronized {
+            " · OUT OF SYNC"
+        } else if dirty {
+            " · UNSAVED"
+        } else {
+            ""
+        };
+        let border = if focused {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default()
+        };
+        let scroll = if focused {
+            (
+                viewport.scroll_y.min(u16::MAX as usize) as u16,
+                viewport.scroll_x.min(u16::MAX as usize) as u16,
+            )
+        } else {
+            (0, 0)
+        };
+        frame.render_widget(
+            Paragraph::new(content)
+                .block(
+                    Block::default()
+                        .title(format!(
+                            "{} script · {path}{state} · {versions} snapshot(s)",
+                            target.label()
+                        ))
+                        .borders(Borders::ALL)
+                        .border_style(border),
+                )
+                .scroll(scroll),
+            content_area,
+        );
+        frame.render_widget(
+            Paragraph::new("Ctrl+U edit/Esc list · Alt+P save · Alt+O reload · Alt+V versions")
+                .style(Style::default().fg(Color::DarkGray)),
+            chunks[1],
+        );
+
+        if focused && content_area.width > 2 && content_area.height > 2 {
+            let cursor = self.script_buffer.cursor_position();
+            let cursor_display_column = text_buffer_cursor_display_width(&self.script_buffer);
+            let visible_width = content_area.width.saturating_sub(2);
+            let visible_height = content_area.height.saturating_sub(2);
+            if let (Some(x_offset), Some(y_offset)) = (
+                visible_cursor_offset(cursor_display_column, scroll.1, visible_width),
+                visible_cursor_offset(cursor.line, scroll.0, visible_height),
+            ) {
+                frame.set_cursor_position((
+                    content_area.x + 1 + x_offset,
+                    content_area.y + 1 + y_offset,
+                ));
             }
         }
     }
@@ -2258,41 +3453,233 @@ impl App {
     }
 
     fn draw_download(&mut self, frame: &mut Frame, area: Rect) {
-        let rows = self.download_config.models.iter().map(|model| {
-            Row::new(vec![
-                Cell::from(if model.enabled { "yes" } else { "no" }),
-                Cell::from(model.repo_id.clone()),
-                Cell::from(model.description.clone()),
+        let sections = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Length(6),
+                Constraint::Min(6),
+                Constraint::Length(4),
             ])
-        });
-        let dirty = if self.download_dirty {
-            " · unsaved"
+            .split(area);
+        let setting_rows = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Length(3), Constraint::Length(3)])
+            .split(sections[0]);
+        let top = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(62), Constraint::Percentage(38)])
+            .split(setting_rows[0]);
+        let bottom = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(36),
+                Constraint::Percentage(16),
+                Constraint::Percentage(22),
+                Constraint::Percentage(26),
+            ])
+            .split(setting_rows[1]);
+
+        render_download_text_field(
+            frame,
+            top[0],
+            "Config path · Alt+O load",
+            self.download.config_path_buffer(),
+            self.download.focus() == DownloadFocus::ConfigPath,
+        );
+        let version = self.download.selected_version().unwrap_or("—");
+        render_download_value_field(
+            frame,
+            top[1],
+            "Snapshot · Alt+R restore",
+            version,
+            self.download.focus() == DownloadFocus::Versions,
+        );
+        render_download_text_field(
+            frame,
+            bottom[0],
+            "Base models dir",
+            self.download.base_models_dir_buffer(),
+            self.download.focus() == DownloadFocus::BaseModelsDir,
+        );
+        render_download_value_field(
+            frame,
+            bottom[1],
+            "Speed preset",
+            if self.download.slow() {
+                "[x] slow"
+            } else {
+                "[ ] slow"
+            },
+            self.download.focus() == DownloadFocus::SlowPreset,
+        );
+        render_download_text_field(
+            frame,
+            bottom[2],
+            "Global workers",
+            self.download.global_workers_buffer(),
+            self.download.focus() == DownloadFocus::GlobalWorkers,
+        );
+        render_download_text_field(
+            frame,
+            bottom[3],
+            "Save note",
+            self.download.save_note_buffer(),
+            self.download.focus() == DownloadFocus::SaveNote,
+        );
+
+        let panes = Layout::default()
+            .direction(if sections[1].width >= 88 {
+                Direction::Horizontal
+            } else {
+                Direction::Vertical
+            })
+            .constraints([Constraint::Percentage(54), Constraint::Percentage(46)])
+            .split(sections[1]);
+
+        let rows = self
+            .download
+            .models()
+            .iter()
+            .enumerate()
+            .map(|(index, model)| {
+                let pattern = model
+                    .allow_patterns
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "*".into());
+                Row::new(vec![
+                    Cell::from((index + 1).to_string()),
+                    Cell::from(if model.enabled { "yes" } else { "no" }),
+                    Cell::from(model.repo_id.clone()),
+                    Cell::from(pattern),
+                    Cell::from(model.local_dir.clone()),
+                ])
+            })
+            .collect::<Vec<_>>();
+        let state = if self.download_load_error.is_some() {
+            " · BLOCKED"
+        } else if self.download.is_dirty() {
+            " · UNSAVED"
         } else {
             ""
+        };
+        let table_border = if self.download.focus() == DownloadFocus::Table {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default()
         };
         let table = Table::new(
             rows,
             [
+                Constraint::Length(4),
                 Constraint::Length(8),
-                Constraint::Percentage(45),
-                Constraint::Percentage(55),
+                Constraint::Percentage(35),
+                Constraint::Percentage(28),
+                Constraint::Percentage(37),
             ],
         )
         .header(
-            Row::new(["Enabled", "Repository", "Description"])
+            Row::new(["#", "Enabled", "Repository", "Pattern", "Local dir"])
                 .yellow()
                 .bold(),
         )
         .block(
             Block::default()
                 .title(format!(
-                    "Download config{dirty} · Space toggle · w save · v validate · d/e download"
+                    "Models{state} · Space toggle · Alt+N/A/K CRUD · Alt+D/E download"
                 ))
-                .borders(Borders::ALL),
+                .borders(Borders::ALL)
+                .border_style(table_border),
         )
-        .row_highlight_style(Style::default().bg(Color::DarkGray))
+        .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
         .highlight_symbol("▶ ");
-        frame.render_stateful_widget(table, area, &mut self.download_state);
+        frame.render_stateful_widget(table, panes[0], &mut self.download_state);
+
+        let editor_lines = ModelField::ALL
+            .iter()
+            .map(|field| {
+                let value = match field {
+                    ModelField::Enabled | ModelField::ForceDownload => self
+                        .download
+                        .draft()
+                        .boolean(*field)
+                        .map(|value| if value { "[x]" } else { "[ ]" })
+                        .unwrap_or("[ ]")
+                        .to_owned(),
+                    _ => self
+                        .download
+                        .draft()
+                        .buffer(*field)
+                        .map(|buffer| buffer.content().to_owned())
+                        .unwrap_or_default(),
+                };
+                let line = format!("{}: {value}", field.label());
+                if self.download.focus() == DownloadFocus::Model(*field) {
+                    Line::styled(
+                        line,
+                        Style::default().fg(Color::Black).bg(Color::Cyan).bold(),
+                    )
+                } else {
+                    Line::from(line)
+                }
+            })
+            .collect::<Vec<_>>();
+        let editor_border = if matches!(self.download.focus(), DownloadFocus::Model(_)) {
+            Style::default().fg(Color::Cyan)
+        } else {
+            Style::default()
+        };
+        frame.render_widget(
+            Paragraph::new(editor_lines)
+                .block(
+                    Block::default()
+                        .title("Model editor · Alt+I focus · Tab/Shift+Tab fields")
+                        .borders(Borders::ALL)
+                        .border_style(editor_border),
+                )
+                .wrap(Wrap { trim: false }),
+            panes[1],
+        );
+
+        let log_lines = self
+            .download_log
+            .iter()
+            .rev()
+            .take(sections[2].height.saturating_sub(2) as usize)
+            .rev()
+            .map(|line| Line::from(line.as_str()))
+            .collect::<Vec<_>>();
+        frame.render_widget(
+            Paragraph::new(log_lines)
+                .block(
+                    Block::default()
+                        .title(format!(
+                            "Download activity · Alt+Y clear · {}",
+                            self.download_disk_space
+                        ))
+                        .borders(Borders::ALL),
+                )
+                .wrap(Wrap { trim: false }),
+            sections[2],
+        );
+
+        if let DownloadFocus::Model(field) = self.download.focus() {
+            if let Some(buffer) = self.download.draft().buffer(field) {
+                let line = ModelField::ALL
+                    .iter()
+                    .position(|candidate| *candidate == field)
+                    .unwrap_or_default();
+                let inner_height = panes[1].height.saturating_sub(2) as usize;
+                let inner_width = panes[1].width.saturating_sub(2) as usize;
+                if line < inner_height && inner_width > 0 {
+                    let prefix = UnicodeWidthStr::width(format!("{}: ", field.label()).as_str());
+                    let column = prefix + text_buffer_cursor_display_width(buffer);
+                    let x = panes[1].x + 1 + column.min(inner_width.saturating_sub(1)) as u16;
+                    let y = panes[1].y + 1 + line as u16;
+                    frame.set_cursor_position((x, y));
+                }
+            }
+        }
     }
 
     fn draw_jobs(&mut self, frame: &mut Frame, area: Rect) {
@@ -2335,6 +3722,10 @@ impl App {
     }
 
     fn draw_maintenance(&mut self, frame: &mut Frame, area: Rect) {
+        let panes = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
+            .split(area);
         let items = self
             .maintenance_scripts
             .iter()
@@ -2343,12 +3734,13 @@ impl App {
         let list = List::new(items)
             .block(
                 Block::default()
-                    .title("Maintenance scripts · r/Enter run · s stop")
+                    .title("Maintenance · r/Enter run · s stop · Ctrl+U editor")
                     .borders(Borders::ALL),
             )
             .highlight_symbol("▶ ")
             .highlight_style(Style::default().fg(Color::Cyan).bold());
-        frame.render_stateful_widget(list, area, &mut self.maintenance_state);
+        frame.render_stateful_widget(list, panes[0], &mut self.maintenance_state);
+        self.draw_script_editor(frame, panes[1], ScriptEditorTarget::Maintenance);
     }
 
     fn draw_log(&self, frame: &mut Frame, area: Rect) {
@@ -2369,18 +3761,31 @@ impl App {
     }
 
     fn draw_footer(&self, frame: &mut Frame, area: Rect) {
-        let input = match self.input_mode {
-            InputMode::Normal => "",
-            InputMode::ModelFilter => "  FILTER",
-            InputMode::BrowserPath => "  PATH INPUT",
-            InputMode::BrowserFilter => "  GGUF FILTER",
-            InputMode::ChatMessage => "  CHAT INPUT",
-            InputMode::ChatSystemPrompt => "  SYSTEM PROMPT INPUT",
+        let input = if let Some(target) = self.script_input_target {
+            match target {
+                ScriptEditorTarget::Bench => "  BENCH SCRIPT INPUT",
+                ScriptEditorTarget::Maintenance => "  MAINTENANCE SCRIPT INPUT",
+            }
+        } else if self.tab == Tab::Download && self.download.focus() != DownloadFocus::Table {
+            "  DOWNLOAD INPUT"
+        } else {
+            match self.input_mode {
+                InputMode::Normal => "",
+                InputMode::ModelFilter => "  FILTER",
+                InputMode::BrowserPath => "  PATH INPUT",
+                InputMode::BrowserFilter => "  GGUF FILTER",
+                InputMode::ChatMessage => "  CHAT INPUT",
+                InputMode::ChatSystemPrompt => "  SYSTEM PROMPT INPUT",
+            }
         };
-        let footer = format!(
-            " {}{}  │ F1–F7 tabs │ Alt+←/→ cycle │ Ctrl+P palette │ ? help │ q quit ",
-            self.status, input
-        );
+        let controls = if self.script_input_target.is_some() {
+            "Esc list │ F1–F7 tabs │ Ctrl+P palette │ Ctrl+C quit"
+        } else if self.tab == Tab::Download && self.download.focus() != DownloadFocus::Table {
+            "Tab/Shift+Tab fields │ Esc table │ Ctrl+P palette │ Ctrl+C quit"
+        } else {
+            "F1–F7 tabs │ Alt+←/→ cycle │ Ctrl+P palette │ ? help │ q quit"
+        };
+        let footer = format!(" {}{}  │ {controls} ", self.status, input);
         frame.render_widget(
             Paragraph::new(footer)
                 .style(Style::default().fg(Color::Black).bg(Color::Cyan))
@@ -2491,6 +3896,60 @@ impl App {
         .highlight_symbol("▶ ");
         frame.render_stateful_widget(table, area, &mut self.chat_sessions_state);
     }
+
+    fn draw_script_versions(&mut self, frame: &mut Frame) {
+        let Some(target) = self.script_versions_target else {
+            return;
+        };
+        let area = centered_rect(72, 70, frame.area());
+        frame.render_widget(Clear, area);
+        let items = self
+            .script_editor(target)
+            .versions()
+            .iter()
+            .cloned()
+            .map(ListItem::new)
+            .collect::<Vec<_>>();
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .title(format!(
+                        " {} snapshots · Enter restore · Esc/Alt+V close ",
+                        target.label()
+                    ))
+                    .borders(Borders::ALL),
+            )
+            .highlight_symbol("▶ ")
+            .highlight_style(Style::default().fg(Color::Cyan).bold());
+        frame.render_stateful_widget(list, area, &mut self.script_version_state);
+    }
+
+    fn draw_quit_confirmation(&self, frame: &mut Frame) {
+        let area = centered_rect(66, 24, frame.area());
+        frame.render_widget(Clear, area);
+        let dirty = [
+            self.bench_editor.is_dirty().then_some("Bench"),
+            self.maintenance_editor.is_dirty().then_some("Maintenance"),
+            self.download.is_dirty().then_some("Download"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" and ");
+        frame.render_widget(
+            Paragraph::new(format!(
+                "{dirty} edits are not saved.\n\nS  save snapshots, then quit\nD  discard edits and quit\nEsc  return to L3MS"
+            ))
+            .block(
+                Block::default()
+                    .title(" Unsaved changes ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Yellow)),
+            )
+            .wrap(Wrap { trim: false }),
+            area,
+        );
+    }
 }
 
 impl Drop for App {
@@ -2504,7 +3963,7 @@ impl Drop for App {
 pub fn run_tui() -> Result<()> {
     let root = repository_root()?;
     let mut session = TerminalSession::new()?;
-    App::new(root).run(session.terminal_mut())
+    App::new(root)?.run(session.terminal_mut())
 }
 
 struct TerminalSession {
@@ -2700,6 +4159,7 @@ fn build_selected_download_command(
     root: &Path,
     config: &DownloadConfig,
     index: usize,
+    speed_args: &[String],
 ) -> Result<(String, Vec<OsString>)> {
     let model = config
         .models
@@ -2710,12 +4170,9 @@ fn build_selected_download_command(
         "selected model has no repo_id"
     );
 
-    let mut parts = vec![
-        root.join("model_downloader/download_hf_model.py")
-            .into_os_string(),
-        "--repo-id".into(),
-        model.repo_id.clone().into(),
-    ];
+    let mut parts = downloader_command_prefix(root);
+    parts.push("--repo-id".into());
+    parts.push(model.repo_id.clone().into());
     if !model.allow_patterns.is_empty() {
         parts.push("--allow-patterns".into());
         parts.extend(model.allow_patterns.iter().map(OsString::from));
@@ -2738,10 +4195,7 @@ fn build_selected_download_command(
     if model.force_download {
         parts.push("--force-download".into());
     }
-    if let Some(workers) = model.max_workers {
-        parts.push("--max-workers".into());
-        parts.push(workers.to_string().into());
-    }
+    parts.extend(speed_args.iter().map(OsString::from));
     Ok((model.repo_id.clone(), parts))
 }
 
@@ -2767,6 +4221,121 @@ fn value_or_dash(value: &str) -> &str {
     }
 }
 
+fn text_buffer_cursor_display_width(buffer: &TextBuffer) -> usize {
+    let before_cursor = &buffer.content()[..buffer.cursor_byte()];
+    let current_line = before_cursor
+        .rsplit_once('\n')
+        .map_or(before_cursor, |(_, line)| line);
+    UnicodeWidthStr::width(current_line)
+}
+
+fn visible_cursor_offset(cursor: usize, rendered_scroll: u16, visible_extent: u16) -> Option<u16> {
+    let offset = cursor.checked_sub(rendered_scroll as usize)?;
+    (offset < visible_extent as usize).then_some(offset as u16)
+}
+
+fn render_download_value_field(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    value: &str,
+    focused: bool,
+) {
+    let border = if focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+    frame.render_widget(
+        Paragraph::new(value)
+            .block(
+                Block::default()
+                    .title(title)
+                    .borders(Borders::ALL)
+                    .border_style(border),
+            )
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+fn render_download_text_field(
+    frame: &mut Frame,
+    area: Rect,
+    title: &str,
+    buffer: &TextBuffer,
+    focused: bool,
+) {
+    let border = if focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+    let inner_width = area.width.saturating_sub(2) as usize;
+    let cursor_column = text_buffer_cursor_display_width(buffer);
+    let logical_scroll = if focused && inner_width > 0 {
+        cursor_column.saturating_sub(inner_width.saturating_sub(1))
+    } else {
+        0
+    };
+    let rendered_scroll = logical_scroll.min(u16::MAX as usize) as u16;
+    frame.render_widget(
+        Paragraph::new(buffer.content())
+            .block(
+                Block::default()
+                    .title(title)
+                    .borders(Borders::ALL)
+                    .border_style(border),
+            )
+            .scroll((0, rendered_scroll)),
+        area,
+    );
+    if focused && area.height > 2 && inner_width > 0 {
+        let visible_column = cursor_column
+            .saturating_sub(rendered_scroll as usize)
+            .min(inner_width.saturating_sub(1));
+        frame.set_cursor_position((area.x + 1 + visible_column as u16, area.y + 1));
+    }
+}
+
+fn edit_single_line_buffer(buffer: &mut TextBuffer, key: KeyEvent) -> bool {
+    match key.code {
+        KeyCode::Char(character)
+            if !key
+                .modifiers
+                .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT) =>
+        {
+            buffer.insert_char(character);
+            true
+        }
+        KeyCode::Backspace => {
+            buffer.backspace();
+            true
+        }
+        KeyCode::Delete => {
+            buffer.delete_forward();
+            true
+        }
+        KeyCode::Left => {
+            buffer.move_left();
+            true
+        }
+        KeyCode::Right => {
+            buffer.move_right();
+            true
+        }
+        KeyCode::Home => {
+            buffer.move_home();
+            true
+        }
+        KeyCode::End => {
+            buffer.move_end();
+            true
+        }
+        _ => false,
+    }
+}
+
 fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
@@ -2780,6 +4349,52 @@ fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{value:.1} {}", UNITS[unit])
     }
+}
+
+fn disk_space_summary(target: &Path) -> String {
+    let mut check = target.to_path_buf();
+    while !check.exists() {
+        if !check.pop() {
+            return format!("Disk: unavailable [{}]", target.display());
+        }
+    }
+
+    #[cfg(unix)]
+    {
+        let output = Command::new("df").args(["-Pk"]).arg(&check).output();
+        let Ok(output) = output else {
+            return format!("Disk: unavailable [{}]", target.display());
+        };
+        if !output.status.success() {
+            return format!("Disk: unavailable [{}]", target.display());
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let Some(line) = text.lines().rfind(|line| !line.trim().is_empty()) else {
+            return format!("Disk: unavailable [{}]", target.display());
+        };
+        let columns = line.split_whitespace().collect::<Vec<_>>();
+        if columns.len() < 4 {
+            return format!("Disk: unavailable [{}]", target.display());
+        }
+        let total = columns[1]
+            .parse::<u64>()
+            .ok()
+            .and_then(|value| value.checked_mul(1024));
+        let available = columns[3]
+            .parse::<u64>()
+            .ok()
+            .and_then(|value| value.checked_mul(1024));
+        if let (Some(total), Some(available)) = (total, available) {
+            return format!(
+                "Disk: {} / {} free [{}]",
+                format_bytes(available),
+                format_bytes(total),
+                check.display()
+            );
+        }
+    }
+
+    format!("Disk: unavailable [{}]", target.display())
 }
 
 fn format_parameter_count(parameters: Option<u64>) -> String {
@@ -2980,7 +4595,82 @@ fn centered_rect(percent_x: u16, percent_y: u16, area: Rect) -> Rect {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config_store::ModelConfig;
+    use crate::config_store::{load_config_strict, ModelConfig};
+    use ratatui::backend::TestBackend;
+    use tempfile::TempDir;
+
+    struct AppFixture {
+        _repository: TempDir,
+        data: TempDir,
+        root: PathBuf,
+        bench_first: PathBuf,
+        bench_second: PathBuf,
+    }
+
+    impl AppFixture {
+        fn new() -> Self {
+            let repository = TempDir::new().unwrap();
+            let data = TempDir::new().unwrap();
+            let root = repository.path().join("repo");
+            let bench = root.join("bench-models");
+            let maintenance = root.join("maintenance");
+            let downloader = root.join("model_downloader");
+            fs::create_dir_all(&bench).unwrap();
+            fs::create_dir_all(&maintenance).unwrap();
+            fs::create_dir_all(&downloader).unwrap();
+            fs::write(root.join("llama-swap.yaml"), "models: {}\n").unwrap();
+            let bench_first = bench.join("bench-a.sh");
+            let bench_second = bench.join("bench-b.sh");
+            fs::write(&bench_first, "#!/bin/sh\necho a\n").unwrap();
+            fs::write(&bench_second, "#!/bin/sh\necho b\n").unwrap();
+            fs::write(maintenance.join("cleanup.sh"), "#!/bin/sh\necho cleanup\n").unwrap();
+            fs::write(
+                downloader.join("models_config.json"),
+                concat!(
+                    "{\"base_models_dir\":\"/models\",\"models\":[",
+                    "{\"enabled\":true,\"repo_id\":\"org/one\",\"description\":\"first\"},",
+                    "{\"enabled\":true,\"repo_id\":\"org/two\",\"description\":\"second\"}",
+                    "]}\n"
+                ),
+            )
+            .unwrap();
+            let downloader_script = downloader.join("download_hf_model.py");
+            fs::write(
+                &downloader_script,
+                "#!/usr/bin/env python3\nimport sys\nfor argument in sys.argv[1:]:\n    print(argument)\n",
+            )
+            .unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mut permissions = fs::metadata(&downloader_script).unwrap().permissions();
+                permissions.set_mode(0o755);
+                fs::set_permissions(&downloader_script, permissions).unwrap();
+            }
+            let root = fs::canonicalize(root).unwrap();
+            Self {
+                _repository: repository,
+                data,
+                bench_first: root.join("bench-models/bench-a.sh"),
+                bench_second: root.join("bench-models/bench-b.sh"),
+                root,
+            }
+        }
+
+        fn app(&self) -> App {
+            App::new_in(self.root.clone(), self.data.path().to_path_buf()).unwrap()
+        }
+    }
+
+    fn wait_for_process(app: &mut App) {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.running_process.is_some() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+            app.drain_background_events();
+        }
+        app.drain_background_events();
+        assert!(app.running_process.is_none(), "test process did not finish");
+    }
 
     #[test]
     fn byte_formatter_is_readable() {
@@ -2992,6 +4682,22 @@ mod tests {
             format_system_time(Some(SystemTime::UNIX_EPOCH)),
             "1970-01-01 00:00Z"
         );
+    }
+
+    #[test]
+    fn editor_cursor_width_uses_terminal_cells_not_utf8_bytes() {
+        let mut buffer = TextBuffer::from_content("a界🙂e\u{301}");
+        buffer.set_cursor_byte(buffer.content().len());
+        assert_eq!(buffer.cursor_position().column, 5);
+        assert_eq!(text_buffer_cursor_display_width(&buffer), 6);
+    }
+
+    #[test]
+    fn cursor_visibility_uses_the_rendered_scroll_window() {
+        assert_eq!(visible_cursor_offset(5, 2, 4), Some(3));
+        assert_eq!(visible_cursor_offset(1, 2, 4), None);
+        assert_eq!(visible_cursor_offset(6, 2, 4), None);
+        assert_eq!(visible_cursor_offset(70_000, u16::MAX, 80), None);
     }
 
     #[test]
@@ -3017,15 +4723,18 @@ mod tests {
                 ..ModelConfig::default()
             }],
         };
-        let (_, command) = build_selected_download_command(Path::new("/repo"), &config, 0)
-            .expect("download command");
+        let speed_args = vec!["--max-workers".to_owned(), "7".to_owned()];
+        let (_, command) =
+            build_selected_download_command(Path::new("/repo"), &config, 0, &speed_args)
+                .expect("download command");
         let command = command
             .iter()
             .map(|part| part.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
+        assert!(!command[0].is_empty());
         assert_eq!(
-            command,
-            vec![
+            &command[1..],
+            [
                 "/repo/model_downloader/download_hf_model.py",
                 "--repo-id",
                 "org/model",
@@ -3038,9 +4747,353 @@ mod tests {
                 "--base-models-dir",
                 "/models",
                 "--max-workers",
-                "3",
+                "7",
             ]
         );
+    }
+
+    #[test]
+    fn download_keyboard_editor_crud_and_snapshot_actions_stay_synchronized() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::Download;
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('i'), KeyModifiers::ALT))
+            .unwrap();
+        assert_eq!(
+            app.download.focus(),
+            DownloadFocus::Model(ModelField::RepoId)
+        );
+        app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(!app.should_quit);
+        assert_eq!(
+            app.download
+                .draft()
+                .buffer(ModelField::RepoId)
+                .unwrap()
+                .content(),
+            "org/oneq"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(
+            app.download.focus(),
+            DownloadFocus::Model(ModelField::Description)
+        );
+        app.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(!app.show_help);
+        app.execute_command(CommandId::DownloadApplyEdit).unwrap();
+        assert_eq!(app.download.selected_model().unwrap().repo_id, "org/oneq");
+        assert_eq!(app.download_state.selected(), Some(0));
+
+        app.execute_command(CommandId::DownloadSaveConfig).unwrap();
+        assert!(!app.download.is_dirty());
+        assert_eq!(app.download.versions().len(), 1);
+        assert_eq!(
+            load_config_strict(app.download.editor().config_path())
+                .unwrap()
+                .models[0]
+                .repo_id,
+            "org/oneq"
+        );
+
+        app.execute_command(CommandId::DownloadAddModel).unwrap();
+        assert_eq!(app.download.selected_index(), Some(2));
+        assert_eq!(app.download_state.selected(), Some(2));
+        app.download
+            .draft_mut()
+            .buffer_mut(ModelField::RepoId)
+            .unwrap()
+            .set_content("org/three");
+        app.execute_command(CommandId::DownloadApplyEdit).unwrap();
+        assert_eq!(app.download.selected_model().unwrap().repo_id, "org/three");
+        app.execute_command(CommandId::DownloadDeleteModel).unwrap();
+        assert_eq!(app.download.models().len(), 2);
+        assert_eq!(app.download.selected_index(), Some(1));
+        assert_eq!(app.download_state.selected(), Some(1));
+    }
+
+    #[test]
+    fn failed_runtime_download_reload_retains_valid_dirty_state_and_allows_recovery() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::Download;
+        app.download
+            .draft_mut()
+            .buffer_mut(ModelField::Description)
+            .unwrap()
+            .set_content("changed");
+        app.save_download_config();
+        assert_eq!(app.download.versions().len(), 1);
+        let original_version = app.download.versions()[0].clone();
+
+        app.download
+            .draft_mut()
+            .buffer_mut(ModelField::Description)
+            .unwrap()
+            .set_content("unsaved recovery");
+        assert!(app.download.is_dirty());
+
+        let config_path = app.download.editor().config_path().to_path_buf();
+        fs::write(&config_path, "{not json").unwrap();
+        let before = app.download.config().clone();
+        app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::ALT))
+            .unwrap();
+        assert!(app.download_reload_armed);
+        assert!(app.download.is_dirty());
+        app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::ALT))
+            .unwrap();
+        assert!(!app.download_reload_armed);
+        assert!(app.download_load_error.is_none());
+        assert_eq!(app.download.config(), &before);
+        assert_eq!(
+            app.download
+                .draft()
+                .buffer(ModelField::Description)
+                .unwrap()
+                .content(),
+            "unsaved recovery"
+        );
+        assert!(app.download.is_dirty());
+
+        app.save_download_config();
+        assert!(!app.download.is_dirty());
+        assert_eq!(
+            load_config_strict(&config_path).unwrap().models[0].description,
+            "unsaved recovery"
+        );
+
+        let original_index = app
+            .download
+            .versions()
+            .iter()
+            .position(|version| version == &original_version)
+            .unwrap();
+        app.download.select_version(original_index);
+        app.restore_download_config();
+        assert!(app.download_load_error.is_none());
+        assert_eq!(
+            load_config_strict(&config_path).unwrap().models[0].description,
+            "first"
+        );
+        assert_eq!(app.download.config().models[0].description, "first");
+        assert_eq!(
+            app.download.config_path_buffer().content(),
+            config_path.display().to_string()
+        );
+    }
+
+    #[test]
+    fn dirty_download_restore_requires_two_consecutive_triggers() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::Download;
+        app.download
+            .draft_mut()
+            .buffer_mut(ModelField::Description)
+            .unwrap()
+            .set_content("saved state");
+        app.save_download_config();
+        let original_version = app.download.versions()[0].clone();
+        let original_index = app
+            .download
+            .versions()
+            .iter()
+            .position(|version| version == &original_version)
+            .unwrap();
+        app.download.select_version(original_index);
+        app.download.set_focus(DownloadFocus::Versions);
+        app.download
+            .draft_mut()
+            .buffer_mut(ModelField::Description)
+            .unwrap()
+            .set_content("dirty state");
+
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.download_restore_armed);
+        assert!(app.download.is_dirty());
+        assert_eq!(
+            load_config_strict(app.download.editor().config_path())
+                .unwrap()
+                .models[0]
+                .description,
+            "saved state"
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(!app.download_restore_armed);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.download_restore_armed);
+        app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE))
+            .unwrap();
+        assert!(!app.download_restore_armed);
+        assert!(!app.download.is_dirty());
+        assert_eq!(app.download.config().models[0].description, "first");
+    }
+
+    #[test]
+    fn snapshot_history_failure_never_becomes_false_save_success() {
+        let fixture = AppFixture::new();
+        let history_root = fixture.root.join(".toolkit/download_config_versions");
+        fs::create_dir_all(history_root.parent().unwrap()).unwrap();
+        fs::write(&history_root, "not a directory").unwrap();
+        let config_path = fixture.root.join("model_downloader/models_config.json");
+        let before = fs::read(&config_path).unwrap();
+
+        let mut app = fixture.app();
+        assert!(app.download_load_error.is_none());
+        assert!(app
+            .download_log
+            .iter()
+            .any(|line| line.contains("snapshots could not be listed")));
+        app.download
+            .draft_mut()
+            .buffer_mut(ModelField::Description)
+            .unwrap()
+            .set_content("must not be reported saved");
+        app.save_download_config();
+
+        assert_eq!(app.status, "Could not save download config");
+        assert!(app.download.is_dirty());
+        assert_eq!(fs::read(&config_path).unwrap(), before);
+    }
+
+    #[test]
+    fn download_speed_precedence_is_global_then_model_then_slow() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.download
+            .draft_mut()
+            .buffer_mut(ModelField::MaxWorkers)
+            .unwrap()
+            .set_content("3");
+        app.download.apply_selected().unwrap();
+        assert_eq!(
+            app.selected_download_speed_args(0).unwrap(),
+            ["--max-workers", "3"]
+        );
+        app.download.global_workers_buffer_mut().set_content("7");
+        assert_eq!(
+            app.selected_download_speed_args(0).unwrap(),
+            ["--max-workers", "7"]
+        );
+        app.download.global_workers_buffer_mut().set_content("");
+        app.download
+            .draft_mut()
+            .buffer_mut(ModelField::MaxWorkers)
+            .unwrap()
+            .set_content("");
+        app.download.apply_selected().unwrap();
+        assert_eq!(app.selected_download_speed_args(0).unwrap(), ["--slow"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn selected_and_enabled_downloads_use_supervision_speed_args_and_dedicated_logs() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::Download;
+        app.download.global_workers_buffer_mut().set_content("7");
+
+        app.download_selected();
+        assert!(app.running_process.is_some());
+        wait_for_process(&mut app);
+        let selected = &app.job_history.records()[0];
+        assert_eq!(selected.kind, "download");
+        assert!(selected
+            .command
+            .windows(2)
+            .any(|parts| parts == ["--repo-id", "org/one"]));
+        assert!(selected
+            .command
+            .windows(2)
+            .any(|parts| parts == ["--max-workers", "7"]));
+        assert!(!selected.command.iter().any(|part| part == "--slow"));
+
+        let job_id = selected.id;
+        app.sender
+            .send(BackgroundEvent::ProcessLine {
+                job_id,
+                line: "download-log-marker".into(),
+            })
+            .unwrap();
+        app.drain_background_events();
+        assert!(app
+            .download_log
+            .iter()
+            .any(|line| line == "download-log-marker"));
+
+        app.download.global_workers_buffer_mut().set_content("");
+        app.download_enabled();
+        assert!(app.running_process.is_some());
+        wait_for_process(&mut app);
+        let enabled = &app.job_history.records()[0];
+        assert_eq!(enabled.kind, "download");
+        assert!(enabled.command.iter().any(|part| part == "--config"));
+        assert!(enabled.command.iter().any(|part| part == "--slow"));
+    }
+
+    #[test]
+    fn dirty_download_quit_confirmation_closes_palette_and_consumes_choice() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::Download;
+        app.focus_download_editor();
+        app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.download.is_dirty());
+        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::CONTROL))
+            .unwrap();
+        assert!(app.show_palette);
+        app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL))
+            .unwrap();
+        assert!(!app.show_palette);
+        assert!(app.show_quit_confirmation);
+        assert!(!app.should_quit);
+        app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn download_view_renders_controls_editor_table_and_dedicated_log() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::Download;
+        app.push_download_log("download-only-marker");
+        let backend = TestBackend::new(150, 48);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+
+        let rendered = terminal
+            .backend()
+            .buffer()
+            .content()
+            .iter()
+            .map(|cell| cell.symbol())
+            .collect::<String>();
+        for expected in [
+            "Config path",
+            "Base models dir",
+            "Global workers",
+            "Model editor",
+            "force_download",
+            "max_workers",
+            "Pattern",
+            "Download activity",
+            "download-only-marker",
+        ] {
+            assert!(
+                rendered.contains(expected),
+                "missing rendered text: {expected}"
+            );
+        }
     }
 
     #[test]
@@ -3067,6 +5120,145 @@ mod tests {
         assert_eq!(preview, "clair");
         append_bounded_text(&mut preview, "ignored", 0);
         assert!(preview.is_empty());
+    }
+
+    #[test]
+    fn script_editor_input_navigation_and_snapshot_save_are_consistent() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::ModelOps;
+        app.ops_mode = OpsMode::Bench;
+        app.execute_command(CommandId::ModelOpsFocusEditor).unwrap();
+
+        let before = app.bench_editor.content().to_owned();
+        app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(!app.should_quit);
+        assert_ne!(app.bench_editor.content(), before);
+        let edited = app.bench_editor.content().to_owned();
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('?'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(!app.show_help);
+        assert_ne!(app.bench_editor.content(), edited);
+        let saved = app.bench_editor.content().to_owned();
+
+        app.handle_key(KeyEvent::new(KeyCode::F(7), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.tab, Tab::Maintenance);
+        assert!(app.bench_editor.is_dirty());
+        app.handle_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::NONE))
+            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL))
+            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::ALT))
+            .unwrap();
+
+        assert!(!app.bench_editor.is_dirty());
+        assert_eq!(fs::read_to_string(&fixture.bench_first).unwrap(), saved);
+        assert!(!app.bench_editor.versions().is_empty());
+    }
+
+    #[test]
+    fn dirty_script_blocks_selection_until_explicit_reload() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::ModelOps;
+        app.ops_mode = OpsMode::Bench;
+        app.focus_script_editor(ScriptEditorTarget::Bench);
+        app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE))
+            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .unwrap();
+
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.bench_state.selected(), Some(0));
+        assert_eq!(
+            app.bench_editor.selected_path(),
+            Some(fixture.bench_first.as_path())
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::ALT))
+            .unwrap();
+        assert!(app.bench_editor.is_dirty());
+        app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::ALT))
+            .unwrap();
+        assert!(!app.bench_editor.is_dirty());
+        app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.bench_state.selected(), Some(1));
+        assert_eq!(
+            app.bench_editor.selected_path(),
+            Some(fixture.bench_second.as_path())
+        );
+    }
+
+    #[test]
+    fn dirty_quit_requires_an_explicit_choice() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::ModelOps;
+        app.ops_mode = OpsMode::Bench;
+        app.focus_script_editor(ScriptEditorTarget::Bench);
+        app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE))
+            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.show_quit_confirmation);
+        assert!(!app.should_quit);
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .unwrap();
+        assert!(!app.show_quit_confirmation);
+        app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::NONE))
+            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.should_quit);
+    }
+
+    #[test]
+    fn contextual_palette_actions_cannot_create_hidden_editors() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        assert_eq!(app.tab, Tab::Workbench);
+        app.execute_command(CommandId::MaintenanceFocusEditor)
+            .unwrap();
+        assert_eq!(app.script_input_target, None);
+        assert!(app.status.contains("maintenance context"));
+    }
+
+    #[test]
+    fn jobs_and_chat_persist_to_the_explicit_app_data_root() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.job_history.begin(
+            "test".into(),
+            "maintenance".into(),
+            vec!["bash".into(), "maintenance/cleanup.sh".into()],
+            "maintenance".into(),
+            "maintenance/cleanup.sh".into(),
+        );
+        app.persist_jobs("test");
+        assert!(fixture.data.path().join("jobs.json").is_file());
+
+        app.chat_history.push("user", "alternate root");
+        app.save_chat_session();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while app.chat_session_pending && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+            app.drain_background_events();
+        }
+        assert!(!app.chat_session_pending);
+        assert!(fixture.data.path().join("chats").is_dir());
+        assert!(
+            fs::read_dir(fixture.data.path().join("chats"))
+                .unwrap()
+                .count()
+                >= 2
+        );
     }
 
     #[cfg(unix)]

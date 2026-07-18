@@ -10,6 +10,40 @@ use crate::script_store::{
 
 const DEFAULT_VERSIONS_DIRECTORY: &str = ".toolkit/script_versions";
 
+/// Result of a script write which has already committed to disk.
+///
+/// Secondary refreshes can fail after an atomic save or restore succeeds. The
+/// caller must not report those cases as a failed write.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScriptWriteOutcome {
+    warning: Option<String>,
+    content_synchronized: bool,
+}
+
+impl ScriptWriteOutcome {
+    fn complete() -> Self {
+        Self {
+            warning: None,
+            content_synchronized: true,
+        }
+    }
+
+    fn warning(message: String, content_synchronized: bool) -> Self {
+        Self {
+            warning: Some(message),
+            content_synchronized,
+        }
+    }
+
+    pub fn warning_message(&self) -> Option<&str> {
+        self.warning.as_deref()
+    }
+
+    pub fn content_synchronized(&self) -> bool {
+        self.content_synchronized
+    }
+}
+
 /// Editable state for one repository-contained script.
 ///
 /// This type deliberately knows nothing about whether the caller presents a
@@ -22,6 +56,7 @@ pub struct ScriptEditorState {
     selected_path: Option<PathBuf>,
     content: String,
     persisted_content: String,
+    content_synchronized: bool,
     versions: Vec<String>,
 }
 
@@ -59,6 +94,7 @@ impl ScriptEditorState {
             selected_path: None,
             content: String::new(),
             persisted_content: String::new(),
+            content_synchronized: true,
             versions: Vec::new(),
         })
     }
@@ -102,7 +138,14 @@ impl ScriptEditorState {
     /// Whether the edit buffer differs from the last selected, reloaded,
     /// saved, or restored file content.
     pub fn is_dirty(&self) -> bool {
-        self.content != self.persisted_content
+        !self.content_synchronized || self.content != self.persisted_content
+    }
+
+    /// Whether the in-memory buffer is known to represent the current disk
+    /// content. A post-restore reload failure makes this false and blocks saves
+    /// until an explicit reload succeeds.
+    pub fn content_synchronized(&self) -> bool {
+        self.content_synchronized
     }
 
     /// Select and load a script. Failed selections leave the prior state
@@ -121,6 +164,7 @@ impl ScriptEditorState {
         self.selected_path = None;
         self.content.clear();
         self.persisted_content.clear();
+        self.content_synchronized = true;
         self.versions.clear();
     }
 
@@ -150,7 +194,12 @@ impl ScriptEditorState {
     }
 
     /// Save the edit buffer atomically after snapshotting the displaced file.
-    pub fn save(&mut self, note: &str) -> Result<()> {
+    pub fn save(&mut self, note: &str) -> Result<ScriptWriteOutcome> {
+        if !self.content_synchronized {
+            return Err(anyhow!(
+                "editor content is out of sync with disk; reload before saving"
+            ));
+        }
         let path = self.require_selection()?.to_path_buf();
         save_script_with_version_in(
             &path,
@@ -163,14 +212,21 @@ impl ScriptEditorState {
         // The write is already committed at this point, so reflect that even
         // if refreshing the optional version list encounters an I/O error.
         self.persisted_content.clone_from(&self.content);
-        self.versions = list_script_versions_in(&path, &self.repository_root, &self.versions_root)
-            .context("script saved, but its version list could not be refreshed")?;
-        Ok(())
+        match list_script_versions_in(&path, &self.repository_root, &self.versions_root) {
+            Ok(versions) => {
+                self.versions = versions;
+                Ok(ScriptWriteOutcome::complete())
+            }
+            Err(error) => Ok(ScriptWriteOutcome::warning(
+                format!("script saved, but its version list could not be refreshed: {error:#}"),
+                true,
+            )),
+        }
     }
 
     /// Restore a named snapshot. The store first snapshots the displaced file,
     /// and a successful restore intentionally replaces any dirty edit buffer.
-    pub fn restore(&mut self, version_name: &str) -> Result<()> {
+    pub fn restore(&mut self, version_name: &str) -> Result<ScriptWriteOutcome> {
         let path = self.require_selection()?.to_path_buf();
         restore_script_version_in(
             &path,
@@ -181,13 +237,29 @@ impl ScriptEditorState {
 
         // Restore has already committed. Keep the buffer consistent with disk
         // before refreshing the secondary snapshot listing.
-        let content = load_script_in(&path, &self.repository_root)
-            .context("script restored, but its content could not be reloaded")?;
+        let content = match load_script_in(&path, &self.repository_root) {
+            Ok(content) => content,
+            Err(error) => {
+                self.content_synchronized = false;
+                return Ok(ScriptWriteOutcome::warning(
+                    format!("script restored, but its content could not be reloaded: {error:#}"),
+                    false,
+                ));
+            }
+        };
         self.content = content.clone();
         self.persisted_content = content;
-        self.versions = list_script_versions_in(&path, &self.repository_root, &self.versions_root)
-            .context("script restored, but its version list could not be refreshed")?;
-        Ok(())
+        self.content_synchronized = true;
+        match list_script_versions_in(&path, &self.repository_root, &self.versions_root) {
+            Ok(versions) => {
+                self.versions = versions;
+                Ok(ScriptWriteOutcome::complete())
+            }
+            Err(error) => Ok(ScriptWriteOutcome::warning(
+                format!("script restored, but its version list could not be refreshed: {error:#}"),
+                true,
+            )),
+        }
     }
 
     fn require_selection(&self) -> Result<&Path> {
@@ -200,6 +272,7 @@ impl ScriptEditorState {
         self.selected_path = Some(path);
         self.content = content.clone();
         self.persisted_content = content;
+        self.content_synchronized = true;
         self.versions = versions;
     }
 }

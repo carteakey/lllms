@@ -80,22 +80,28 @@ and a keyboard-first seven-view Ratatui workbench with a searchable command
 palette. Jobs and chat sessions now persist through the compatible legacy
 formats. The GGUF view uses bounded metadata parsing with recursive inventory,
 filtering, deterministic sorting, detailed metadata, and per-file warnings.
-Reusable script/download editor engines implement validation, dirty tracking,
-and snapshot save/reload/restore; wiring their editing surfaces into the TUI is
-the next migration pass. The Python downloader remains the download
-implementation and is launched directly by the Rust TUI.
+Bench and maintenance now have inline UTF-8 script editors with dirty guards
+and snapshot save/reload/restore. The Download view exposes the legacy JSON
+fields, runtime speed controls, model CRUD, strict validation, atomic snapshots,
+dedicated output, and supervised selected/enabled launches. The Python
+downloader remains the download implementation behind a portable, shell-free
+Rust command boundary.
 
-The richer Python TUI remains available during the parity period:
+`CAR-97` remains a work in progress. These implemented slices do not yet imply
+full legacy parity, complete live smoke coverage, or a fully green verification
+matrix.
+
+The Python TUI remains available during the parity period:
 
 ```bash
 python3 -m pip install -r requirements-tui.txt
 python3 l3ms.py
 ```
 
-The detailed TUI feature and key list below describes that full legacy surface.
-In the Rust binary, `?` opens contextual help and `Ctrl+P` opens the executable
-command palette. See [ARCHITECTURE.md](ARCHITECTURE.md) for the compatibility
-boundary and Linear issue `CAR-97` for the authoritative resume checklist.
+The TUI feature and key list below describes the shared target surface. In the
+Rust binary, `?` opens contextual help and `Ctrl+P` opens the executable command
+palette. See [ARCHITECTURE.md](ARCHITECTURE.md) for the compatibility boundary
+and Linear issue `CAR-97` for the authoritative remaining-work checklist.
 
 ## TUI Scope
 
@@ -111,7 +117,13 @@ boundary and Linear issue `CAR-97` for the authoritative resume checklist.
   - config load/save/validate/restore
   - model row add/apply/delete
   - download selected or enabled models
-  - config snapshots in `.toolkit/download_config_versions/`
+  - repeat-action confirmation before dirty reload or restore
+  - restore validates the snapshot and saves displaced config bytes for undo
+    before atomic replacement
+  - per-config snapshot namespaces in `.toolkit/download_config_versions/`,
+    with existing legacy history still visible and restorable
+  - snapshot-list failures surface as warnings without converting a completed
+    load, save, or restore into a failure
 - `Model Ops` tab:
   - llama-swap run mode and bench script mode
   - live run logs + start/stop
@@ -156,6 +168,7 @@ Download (active only on Download tab):
 - `Alt+O`: load config
 - `Alt+W`: save config
 - `Alt+V`: validate config
+- `Alt+R`: choose or restore a config snapshot
 - `Alt+N`: add model
 - `Alt+A`: apply model edit
 - `Alt+K`: delete selected model
@@ -172,7 +185,19 @@ Model Ops (active only on Model Ops tab):
 - `Ctrl+R`: load selected llama-swap model or run selected bench script
 - `Ctrl+S`: unload selected llama-swap model or stop running bench
 - `Alt+P`: save edited bench script snapshot
+- `Alt+O`: reload the selected bench script (`Alt+O` twice discards dirty edits)
+- `Alt+V`: choose or restore a bench script snapshot
 - `Ctrl+L`: clear run log
+
+Maintenance (active only on Maintenance tab):
+
+- `Ctrl+U`: focus or leave the script editor
+- `Ctrl+R` / `Enter`: run selected maintenance script
+- `Ctrl+S`: stop the active script
+- `Alt+P`: save edited script with a snapshot
+- `Alt+O`: reload selected script (`Alt+O` twice discards dirty edits)
+- `Alt+V`: choose or restore a script snapshot
+- `Ctrl+L`: clear activity output
 
 Model Browser (active only on Model Browser tab):
 
@@ -248,7 +273,22 @@ Throttle concurrency (useful on metered connections):
 | `--max-workers` | | Explicit worker count |
 | `--base-models-dir` | | Override base directory for auto-organized downloads |
 
-> **Note**: Run the script directly (`./model_downloader/download_hf_model.py`) rather than via `python3` to ensure the correct venv Python is used.
+When the Rust TUI starts the downloader, it constructs argv directly without a
+shell and selects the interpreter in this order:
+
+1. Non-empty `L3MS_DOWNLOADER_PYTHON`.
+2. The repository virtual environment (`.venv/bin/python3`, or
+   `.venv/Scripts/python.exe` on Windows) when that path is a file.
+3. `python3` from `PATH`.
+
+The interpreter is followed by
+`model_downloader/download_hf_model.py` and its arguments.
+`L3MS_DOWNLOADER_PYTHON` must therefore be one executable path or command name;
+it is not parsed as a shell fragment and cannot contain additional flags.
+
+For direct CLI use, the script's portable `#!/usr/bin/env python3` shebang uses
+the first `python3` on `PATH`. Activate the intended virtual environment first,
+or invoke its Python executable explicitly.
 
 ## Dashboard Development
 
@@ -276,6 +316,6 @@ This project uses semantic versioning. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Roadmap Note
 
-The Rust port is active under `CAR-97`. Python remains only where it provides a
-deliberate compatibility path, most notably the Hugging Face downloader and
-legacy TUI workflows that have not yet reached parity.
+The Rust port is active under `CAR-97`. Python remains where it provides a
+deliberate compatibility path: the Hugging Face downloader and the legacy Chat
+connection/detection controls that have not yet reached Rust parity.

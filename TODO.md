@@ -1,12 +1,5 @@
 # TODO
 
-## 🔴 Critical
-
-- **Fix hardcoded shebang**: `model_downloader/download_hf_model.py` uses a
-  local venv path — shipping should use `#!/usr/bin/env python3` with a proper
-  install step (`pip install -e .`) so the right interpreter is always on `$PATH`
-  *(note: intentionally kept for now to pin the correct HF-aware venv)*
-
 ## 🟡 High Priority
 
 - **Bench-vs-serve flag drift**: bench scripts carry their own copies of

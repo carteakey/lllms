@@ -1,4 +1,4 @@
-#!/home/kchauhan/repos/l3ms/.venv/bin/python3
+#!/usr/bin/env python3
 """
 HuggingFace Model Downloader
 
@@ -130,6 +130,19 @@ def resolve_local_dir(repo_id: str, base_models_dir: str, local_dir: str = None)
     return os.path.join(base_models_dir, repo_id.replace("/", "_"))
 
 
+def resolve_max_workers(
+    model_max_workers: Optional[int],
+    cli_max_workers: Optional[int],
+    slow: bool,
+) -> Optional[int]:
+    """Resolve concurrency with explicit runtime controls taking precedence."""
+    if cli_max_workers is not None:
+        return cli_max_workers
+    if model_max_workers is not None:
+        return model_max_workers
+    return 4 if slow else None
+
+
 def main():
     _report_download_backend()
     parser = argparse.ArgumentParser(
@@ -173,9 +186,7 @@ Examples:
     parser.add_argument("--base-models-dir", help="Base directory for all models")
 
     args = parser.parse_args()
-    effective_max_workers = (
-        args.max_workers if args.max_workers is not None else (4 if args.slow else None)
-    )
+    effective_max_workers = resolve_max_workers(None, args.max_workers, args.slow)
     base_models_dir = args.base_models_dir or os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "models"
     )
@@ -218,7 +229,9 @@ Examples:
                     ignore_patterns=m.get("ignore_patterns"),
                     revision=m.get("revision"),
                     force_download=m.get("force_download", False),
-                    max_workers=m.get("max_workers", effective_max_workers),
+                    max_workers=resolve_max_workers(
+                        m.get("max_workers"), args.max_workers, args.slow
+                    ),
                     update_only=args.update,
                 )
             except Exception as e:

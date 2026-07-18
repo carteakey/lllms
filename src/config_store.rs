@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{ErrorKind, Write};
@@ -262,15 +263,9 @@ pub fn load_config(path: impl AsRef<Path>) -> DownloadConfig {
 /// visible instead of presenting an apparently empty configuration.
 pub fn load_config_strict(path: impl AsRef<Path>) -> Result<DownloadConfig> {
     let path = path.as_ref();
-    let contents = fs::read_to_string(path)
-        .with_context(|| format!("failed to read config {}", path.display()))?;
-    let raw: Value = serde_json::from_str(&contents)
-        .with_context(|| format!("failed to parse config {}", path.display()))?;
-    let errors = validate_json_config(&raw);
-    if !errors.is_empty() {
-        return Err(anyhow!("invalid config: {}", errors.join("; ")));
-    }
-    Ok(normalize_config(&raw))
+    let contents =
+        fs::read(path).with_context(|| format!("failed to read config {}", path.display()))?;
+    parse_config_strict_bytes(&contents, path)
 }
 
 /// Save a normalized config and snapshot the previous bytes when the target
@@ -284,10 +279,20 @@ pub fn list_versions(path: impl AsRef<Path>) -> Result<Vec<String>> {
     list_versions_in(path.as_ref(), &versions_root())
 }
 
-/// Restore a config snapshot verbatim. Snapshot names must be a single path
-/// component so callers cannot escape the version directory.
+/// Restore a valid config snapshot verbatim. Snapshot names must be a single
+/// path component so callers cannot escape the version directory. Invalid
+/// snapshot bytes are rejected before the target is changed.
 pub fn restore_version(path: impl AsRef<Path>, version_name: &str) -> Result<()> {
     restore_version_in(path.as_ref(), version_name, &versions_root())
+}
+
+/// Restore a valid snapshot and return the normalized config parsed from the
+/// exact bytes written to disk.
+pub fn restore_version_and_load(
+    path: impl AsRef<Path>,
+    version_name: &str,
+) -> Result<DownloadConfig> {
+    restore_version_and_load_in(path.as_ref(), version_name, &versions_root())
 }
 
 pub fn csv_to_list(raw: &str) -> Vec<String> {
@@ -356,27 +361,38 @@ pub fn save_config_in(
 }
 
 /// List versions using an explicit snapshot root.
+///
+/// New snapshots live in a path-hashed namespace. Names from the former
+/// sanitized-path-only namespace remain visible so existing installations can
+/// restore their history without a migration.
 pub fn list_versions_in(path: &Path, version_root: &Path) -> Result<Vec<String>> {
     let version_dir = version_dir_for_config_in(path, version_root)?;
-    let entries = match fs::read_dir(&version_dir) {
+    let legacy_version_dir = legacy_version_dir_for_config_in(path, version_root)?;
+    let mut versions = BTreeSet::new();
+    collect_version_names(&version_dir, &mut versions)?;
+    collect_version_names(&legacy_version_dir, &mut versions)?;
+    Ok(versions.into_iter().rev().collect())
+}
+
+fn collect_version_names(directory: &Path, versions: &mut BTreeSet<String>) -> Result<()> {
+    let entries = match fs::read_dir(directory) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
         Err(error) => {
             return Err(error).with_context(|| {
                 format!(
                     "failed to read config version directory {}",
-                    version_dir.display()
+                    directory.display()
                 )
             })
         }
     };
 
-    let mut versions = Vec::new();
     for entry in entries {
         let entry = entry.with_context(|| {
             format!(
                 "failed to inspect config version directory {}",
-                version_dir.display()
+                directory.display()
             )
         })?;
         let path = entry.path();
@@ -385,24 +401,42 @@ pub fn list_versions_in(path: &Path, version_root: &Path) -> Result<Vec<String>>
                 .extension()
                 .is_some_and(|extension| extension == "json")
         {
-            versions.push(entry.file_name().to_string_lossy().into_owned());
+            versions.insert(entry.file_name().to_string_lossy().into_owned());
         }
     }
-    versions.sort_unstable_by(|left, right| right.cmp(left));
-    Ok(versions)
+    Ok(())
 }
 
-/// Restore a version from an explicit snapshot root.
+/// Restore a valid version from an explicit snapshot root.
+///
+/// This compatibility wrapper discards the parsed config. Interactive callers
+/// should prefer [`restore_version_and_load_in`] so their in-memory state can
+/// advance from the same bytes without a fallible post-restore reload.
 pub fn restore_version_in(path: &Path, version_name: &str, version_root: &Path) -> Result<()> {
+    restore_version_and_load_in(path, version_name, version_root)?;
+    Ok(())
+}
+
+/// Validate a contained snapshot, snapshot any displaced target bytes, then
+/// atomically restore the exact snapshot bytes and return their normalized
+/// typed representation.
+///
+/// The snapshot is read once and parsed before the target is mutated. An I/O,
+/// JSON, or schema error therefore leaves the target untouched and creates no
+/// undo snapshot. A valid restore cannot replace an existing target unless its
+/// exact displaced bytes were first durably snapshotted. After the atomic
+/// replacement succeeds there are no further fallible operations, so a caller
+/// can update in-memory state from the returned value without creating a
+/// disk/memory split-brain window.
+pub fn restore_version_and_load_in(
+    path: &Path,
+    version_name: &str,
+    version_root: &Path,
+) -> Result<DownloadConfig> {
     ensure_single_component(version_name)?;
     let target = resolve_allow_missing(path)
         .with_context(|| format!("failed to resolve config path {}", path.display()))?;
-    let version_dir = version_dir_for_config_in(&target, version_root)?;
-    let source = version_dir.join(version_name);
-    if !source.is_file() {
-        return Err(anyhow!("version not found"));
-    }
-
+    let (version_dir, source) = version_source_for_config_in(&target, version_name, version_root)?;
     let resolved_dir = resolve_allow_missing(&version_dir)?;
     let resolved_source = resolve_allow_missing(&source)?;
     if !resolved_source.starts_with(&resolved_dir) {
@@ -411,22 +445,67 @@ pub fn restore_version_in(path: &Path, version_name: &str, version_root: &Path) 
 
     let content = fs::read(&resolved_source)
         .with_context(|| format!("failed to read config version {}", source.display()))?;
+    let restored = parse_config_strict_bytes(&content, &resolved_source)?;
+
+    let displaced = match fs::read(&target) {
+        Ok(content) => Some(content),
+        Err(error) if error.kind() == ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to read existing config {}", target.display()))
+        }
+    };
+
+    #[cfg(unix)]
+    let mode = if displaced.is_some() {
+        use std::os::unix::fs::PermissionsExt;
+        Some(
+            fs::metadata(&target)
+                .with_context(|| format!("failed to inspect config {}", target.display()))?
+                .permissions()
+                .mode(),
+        )
+    } else {
+        None
+    };
+    #[cfg(not(unix))]
+    let mode = None;
+
+    if let Some(displaced) = displaced {
+        let undo_dir = version_dir_for_config_in(&target, version_root)?;
+        fs::create_dir_all(&undo_dir).with_context(|| {
+            format!(
+                "failed to create config version directory {}",
+                undo_dir.display()
+            )
+        })?;
+        let undo_note = sanitize_note(&format!("restore-{version_name}"), "restore", Some(96));
+        write_unique_snapshot(&undo_dir, &safe_stamp(), &undo_note, ".json", &displaced)?;
+    }
+
     let parent = target
         .parent()
         .ok_or_else(|| anyhow!("config path has no parent: {}", target.display()))?;
     fs::create_dir_all(parent)
         .with_context(|| format!("failed to create config directory {}", parent.display()))?;
 
-    #[cfg(unix)]
-    let mode = fs::metadata(&target).ok().map(|metadata| {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode()
-    });
-    #[cfg(not(unix))]
-    let mode = None;
-
     atomic_write(&target, &content, mode)
-        .with_context(|| format!("failed to restore config {}", target.display()))
+        .with_context(|| format!("failed to restore config {}", target.display()))?;
+    Ok(restored)
+}
+
+fn parse_config_strict_bytes(contents: &[u8], path: &Path) -> Result<DownloadConfig> {
+    let raw: Value = serde_json::from_slice(contents)
+        .with_context(|| format!("failed to parse config {}", path.display()))?;
+    let errors = validate_json_config(&raw);
+    if !errors.is_empty() {
+        return Err(anyhow!(
+            "invalid config {}: {}",
+            path.display(),
+            errors.join("; ")
+        ));
+    }
+    Ok(normalize_config(&raw))
 }
 
 fn version_dir_for_config_in(path: &Path, version_root: &Path) -> Result<PathBuf> {
@@ -435,7 +514,41 @@ fn version_dir_for_config_in(path: &Path, version_root: &Path) -> Result<PathBuf
     Ok(version_root.join(config_path_key(&resolved)))
 }
 
+fn legacy_version_dir_for_config_in(path: &Path, version_root: &Path) -> Result<PathBuf> {
+    let resolved = resolve_allow_missing(path)
+        .with_context(|| format!("failed to resolve config path {}", path.display()))?;
+    Ok(version_root.join(legacy_config_path_key(&resolved)))
+}
+
+fn version_source_for_config_in(
+    path: &Path,
+    version_name: &str,
+    version_root: &Path,
+) -> Result<(PathBuf, PathBuf)> {
+    let version_dir = version_dir_for_config_in(path, version_root)?;
+    let source = version_dir.join(version_name);
+    if source.is_file() {
+        return Ok((version_dir, source));
+    }
+
+    let legacy_version_dir = legacy_version_dir_for_config_in(path, version_root)?;
+    let legacy_source = legacy_version_dir.join(version_name);
+    if legacy_source.is_file() {
+        Ok((legacy_version_dir, legacy_source))
+    } else {
+        Err(anyhow!("version not found"))
+    }
+}
+
 fn config_path_key(path: &Path) -> String {
+    format!(
+        "{}__{:016x}",
+        legacy_config_path_key(path),
+        config_path_hash(path)
+    )
+}
+
+fn legacy_config_path_key(path: &Path) -> String {
     let raw = path.to_string_lossy();
     let mut sanitized = String::with_capacity(raw.len());
     let mut in_replacement = false;
@@ -456,6 +569,44 @@ fn config_path_key(path: &Path) -> String {
     } else {
         key
     }
+}
+
+#[cfg(unix)]
+fn config_path_hash(path: &Path) -> u64 {
+    use std::os::unix::ffi::OsStrExt;
+
+    fnv1a64(path.as_os_str().as_bytes())
+}
+
+#[cfg(windows)]
+fn config_path_hash(path: &Path) -> u64 {
+    use std::os::windows::ffi::OsStrExt;
+
+    let mut bytes = Vec::new();
+    for unit in path.as_os_str().encode_wide() {
+        bytes.extend_from_slice(&unit.to_le_bytes());
+    }
+    fnv1a64(&bytes)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn config_path_hash(path: &Path) -> u64 {
+    fnv1a64(path.to_string_lossy().as_bytes())
+}
+
+const FNV1A64_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
+const FNV1A64_PRIME: u64 = 0x00000100000001b3;
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    fnv1a64_continue(FNV1A64_OFFSET_BASIS, bytes)
+}
+
+fn fnv1a64_continue(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV1A64_PRIME);
+    }
+    hash
 }
 
 fn normalize_patterns(value: Option<&Value>) -> Vec<String> {
@@ -881,7 +1032,8 @@ mod tests {
         let path = temp.path().join("configs/models.json");
         let version_root = temp.path().join("versions");
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        let original = b"{\"legacy\":true}\n";
+        let original =
+            b"{\"base_models_dir\":\"/legacy\",\"models\":[{\"repo_id\":\"legacy/model\"}]}\n";
         fs::write(&path, original).unwrap();
 
         let config = DownloadConfig {
@@ -896,6 +1048,7 @@ mod tests {
         save_config_in(&path, &config, " first save! ", &version_root).unwrap();
 
         let saved = fs::read_to_string(&path).unwrap();
+        let saved_bytes = saved.as_bytes().to_vec();
         assert!(saved.ends_with('\n'));
         let parsed: Value = serde_json::from_str(&saved).unwrap();
         assert_eq!(parsed["base_models_dir"], "/models");
@@ -905,16 +1058,197 @@ mod tests {
         let versions = list_versions_in(&path, &version_root).unwrap();
         assert_eq!(versions.len(), 1);
         assert!(versions[0].ends_with("__first-save.json"));
+        let restored_version = versions[0].clone();
         let version_dir = version_dir_for_config_in(&path, &version_root).unwrap();
-        assert_eq!(fs::read(version_dir.join(&versions[0])).unwrap(), original);
+        assert_eq!(
+            fs::read(version_dir.join(&restored_version)).unwrap(),
+            original
+        );
 
-        restore_version_in(&path, &versions[0], &version_root).unwrap();
+        let restored =
+            restore_version_and_load_in(&path, &restored_version, &version_root).unwrap();
         assert_eq!(fs::read(&path).unwrap(), original);
+        assert_eq!(restored.base_models_dir, "/legacy");
+        assert_eq!(restored.models[0].repo_id, "legacy/model");
+        let versions_after_restore = list_versions_in(&path, &version_root).unwrap();
+        assert_eq!(versions_after_restore.len(), 2);
+        let undo_version = versions_after_restore
+            .iter()
+            .find(|version| *version != &restored_version)
+            .unwrap();
+        assert!(undo_version.contains("__restore-"));
+        assert_eq!(
+            fs::read(version_dir.join(undo_version)).unwrap(),
+            saved_bytes
+        );
 
         let outside = temp.path().join("outside.json");
         fs::write(&outside, "outside").unwrap();
         let error = restore_version_in(&path, "../outside.json", &version_root).unwrap_err();
         assert!(error.to_string().contains("invalid version path"));
+    }
+
+    #[test]
+    fn invalid_snapshot_is_rejected_before_target_replacement() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("configs/models.json");
+        let version_root = temp.path().join("versions");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(&path, "not json").unwrap();
+
+        let current = DownloadConfig {
+            base_models_dir: "/models".to_owned(),
+            models: vec![ModelConfig {
+                repo_id: "org/current".to_owned(),
+                ..ModelConfig::default()
+            }],
+        };
+        save_config_in(&path, &current, "replace-invalid", &version_root).unwrap();
+        let current_bytes = fs::read(&path).unwrap();
+        let versions_before = list_versions_in(&path, &version_root).unwrap();
+        let invalid_version = versions_before[0].clone();
+
+        #[cfg(unix)]
+        let mode_before = {
+            use std::os::unix::fs::PermissionsExt;
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777
+        };
+
+        let error =
+            restore_version_and_load_in(&path, &invalid_version, &version_root).unwrap_err();
+
+        assert!(error.to_string().contains("failed to parse config"));
+        assert_eq!(fs::read(&path).unwrap(), current_bytes);
+        assert_eq!(load_config_strict(&path).unwrap(), current);
+        assert_eq!(
+            list_versions_in(&path, &version_root).unwrap(),
+            versions_before,
+            "an invalid source must not create an undo snapshot"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                mode_before
+            );
+        }
+    }
+
+    #[test]
+    fn fnv1a64_matches_the_published_test_vector() {
+        assert_eq!(fnv1a64(b"hello"), 0xa430_d846_80aa_bd0b);
+    }
+
+    #[test]
+    fn hashed_snapshot_namespaces_separate_legacy_key_collisions() {
+        let temp = TempDir::new().unwrap();
+        let first = temp.path().join("collision/a/models.json");
+        let second = temp.path().join("collision/a__models.json");
+        let version_root = temp.path().join("versions");
+        fs::create_dir_all(first.parent().unwrap()).unwrap();
+        let first_bytes =
+            b"{\"base_models_dir\":\"/first\",\"models\":[{\"repo_id\":\"org/first\"}]}\n";
+        let second_bytes =
+            b"{\"base_models_dir\":\"/second\",\"models\":[{\"repo_id\":\"org/second\"}]}\n";
+        fs::write(&first, first_bytes).unwrap();
+        fs::write(&second, second_bytes).unwrap();
+
+        let first_legacy = legacy_version_dir_for_config_in(&first, &version_root).unwrap();
+        let second_legacy = legacy_version_dir_for_config_in(&second, &version_root).unwrap();
+        assert_eq!(first_legacy, second_legacy, "the legacy keys must collide");
+
+        let first_version_dir = version_dir_for_config_in(&first, &version_root).unwrap();
+        let second_version_dir = version_dir_for_config_in(&second, &version_root).unwrap();
+        assert_ne!(first_version_dir, second_version_dir);
+
+        let replacement = DownloadConfig {
+            models: vec![ModelConfig {
+                repo_id: "org/replacement".to_owned(),
+                ..ModelConfig::default()
+            }],
+            ..DownloadConfig::default()
+        };
+        save_config_in(&first, &replacement, "collision", &version_root).unwrap();
+        save_config_in(&second, &replacement, "collision", &version_root).unwrap();
+
+        let first_versions = list_versions_in(&first, &version_root).unwrap();
+        let second_versions = list_versions_in(&second, &version_root).unwrap();
+        assert_eq!(first_versions.len(), 1);
+        assert_eq!(second_versions.len(), 1);
+        assert_eq!(
+            fs::read(first_version_dir.join(&first_versions[0])).unwrap(),
+            first_bytes
+        );
+        assert_eq!(
+            fs::read(second_version_dir.join(&second_versions[0])).unwrap(),
+            second_bytes
+        );
+    }
+
+    #[test]
+    fn legacy_snapshot_directory_remains_listable_and_restorable() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("configs/models.json");
+        let version_root = temp.path().join("versions");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let current =
+            b"{\"base_models_dir\":\"/current\",\"models\":[{\"repo_id\":\"org/current\"}]}\n";
+        let legacy =
+            b"{\"base_models_dir\":\"/legacy\",\"models\":[{\"repo_id\":\"org/legacy\"}]}\n";
+        fs::write(&path, current).unwrap();
+
+        let legacy_dir = legacy_version_dir_for_config_in(&path, &version_root).unwrap();
+        fs::create_dir_all(&legacy_dir).unwrap();
+        let legacy_version = "20240101T000000Z__legacy.json";
+        fs::write(legacy_dir.join(legacy_version), legacy).unwrap();
+
+        assert_eq!(
+            list_versions_in(&path, &version_root).unwrap(),
+            [legacy_version]
+        );
+        let restored = restore_version_and_load_in(&path, legacy_version, &version_root).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), legacy);
+        assert_eq!(restored.base_models_dir, "/legacy");
+        assert_eq!(restored.models[0].repo_id, "org/legacy");
+
+        let hashed_dir = version_dir_for_config_in(&path, &version_root).unwrap();
+        let hashed_versions = fs::read_dir(&hashed_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        assert_eq!(hashed_versions.len(), 1);
+        assert_eq!(fs::read(&hashed_versions[0]).unwrap(), current);
+        assert_eq!(list_versions_in(&path, &version_root).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn restore_leaves_target_untouched_when_undo_snapshot_cannot_be_written() {
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("configs/models.json");
+        let version_root = temp.path().join("versions");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let current =
+            b"{\"base_models_dir\":\"/current\",\"models\":[{\"repo_id\":\"org/current\"}]}\n";
+        let previous =
+            b"{\"base_models_dir\":\"/previous\",\"models\":[{\"repo_id\":\"org/previous\"}]}\n";
+        fs::write(&path, current).unwrap();
+
+        let legacy_dir = legacy_version_dir_for_config_in(&path, &version_root).unwrap();
+        fs::create_dir_all(&legacy_dir).unwrap();
+        let version = "20240101T000000Z__previous.json";
+        fs::write(legacy_dir.join(version), previous).unwrap();
+
+        let hashed_dir = version_dir_for_config_in(&path, &version_root).unwrap();
+        fs::write(&hashed_dir, "blocks undo directory creation").unwrap();
+
+        let error = restore_version_and_load_in(&path, version, &version_root).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("failed to create config version directory"));
+        assert_eq!(fs::read(&path).unwrap(), current);
+        assert_eq!(fs::read(legacy_dir.join(version)).unwrap(), previous);
     }
 
     #[test]
@@ -989,6 +1323,41 @@ mod tests {
             fs::metadata(&path).unwrap().permissions().mode() & 0o777,
             0o640
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_restore_preserves_existing_unix_mode() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let path = temp.path().join("models.json");
+        let version_root = temp.path().join("versions");
+        let current =
+            b"{\"base_models_dir\":\"/current\",\"models\":[{\"repo_id\":\"org/current\"}]}\n";
+        let previous =
+            b"{\"base_models_dir\":\"/previous\",\"models\":[{\"repo_id\":\"org/previous\"}]}\n";
+        fs::write(&path, current).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+
+        let version_dir = version_dir_for_config_in(&path, &version_root).unwrap();
+        fs::create_dir_all(&version_dir).unwrap();
+        let version = "20240101T000000Z__previous.json";
+        fs::write(version_dir.join(version), previous).unwrap();
+
+        restore_version_and_load_in(&path, version, &version_root).unwrap();
+
+        assert_eq!(fs::read(&path).unwrap(), previous);
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        let undo = list_versions_in(&path, &version_root)
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate != version)
+            .unwrap();
+        assert_eq!(fs::read(version_dir.join(undo)).unwrap(), current);
     }
 
     #[test]
