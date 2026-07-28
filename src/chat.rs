@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use crate::llama_swap::{auth_headers, normalize_base_url, parse_models, SwapModel};
 
 const MAX_SSE_LINE_BYTES: usize = 1024 * 1024;
+const MAX_MODEL_BODY_BYTES: usize = 1024 * 1024;
 const MAX_ERROR_BODY_BYTES: u64 = 16 * 1024;
 const CHAT_CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const CHAT_REQUEST_TIMEOUT: Duration = Duration::from_secs(600);
@@ -153,9 +154,16 @@ impl ChatClient {
         if !status.is_success() {
             return Err(response_error(status, response));
         }
-        let body = response
-            .text()
+        let mut body = Vec::new();
+        response
+            .take((MAX_MODEL_BODY_BYTES + 1) as u64)
+            .read_to_end(&mut body)
             .context("failed to read chat model response")?;
+        anyhow::ensure!(
+            body.len() <= MAX_MODEL_BODY_BYTES,
+            "chat model response exceeds {MAX_MODEL_BODY_BYTES} bytes"
+        );
+        let body = String::from_utf8(body).context("chat model response is not UTF-8")?;
         parse_models(&body).context("failed to parse chat model response")
     }
 
@@ -651,6 +659,23 @@ mod tests {
         server.join().unwrap();
         assert_eq!(models[0].id, "model-a");
         assert_eq!(models[0].state, "loaded");
+    }
+
+    #[test]
+    fn connected_client_bounds_model_response_size() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let _request = read_http_request(&mut stream);
+            let body = "x".repeat(MAX_MODEL_BODY_BYTES + 1);
+            write_http_response(&mut stream, "application/json", &body);
+        });
+
+        let client = ChatClient::new(format!("http://{address}"), None).unwrap();
+        let error = client.list_models().unwrap_err();
+        server.join().unwrap();
+        assert!(error.to_string().contains("exceeds"));
     }
 
     #[test]
