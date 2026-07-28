@@ -44,6 +44,8 @@ verification matrix.
 - Added an on-demand `nomic-embed-text-v1.5` llama-swap profile with
   authenticated `/v1/embeddings` routing and a five-minute idle unload TTL.
 - Added a disabled targeted downloader profile and embedding deployment checks.
+- Added Rust Chat endpoint editing, authenticated Connect/Detect, independent
+  model selection, request-ID guarded streaming, and responsive cancellation.
 
 ### Changed
 - Made the Rust launcher use llama-swap for `--run` and `--list run`, while

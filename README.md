@@ -160,7 +160,11 @@ and Linear issue `CAR-97` for the authoritative remaining-work checklist.
   - scan any local directory for `.gguf` files
   - inspect size, quantization, params, architecture, and modified timestamp in a table
   - filter/sort results and inspect per-file metadata details
-- Additional tabs: `Chat`, `Maintenance`, `Jobs`
+- `Chat` tab:
+  - edit and connect an authenticated OpenAI-compatible endpoint
+  - detect local llama-server ports and choose a Chat model independently
+  - stream, stop, clear, save, and restore conversations with stale-result guards
+- Additional tabs: `Maintenance`, `Jobs`
 
 ## Keyboard-first Controls
 
@@ -216,6 +220,19 @@ Model Ops (active only on Model Ops tab):
 - `Alt+O`: reload the selected bench script (`Alt+O` twice discards dirty edits)
 - `Alt+V`: choose or restore a bench script snapshot
 - `Ctrl+L`: clear run log
+
+Chat (active only on Chat tab):
+
+- `e`: edit the endpoint draft
+- `Ctrl+G`: connect to the draft endpoint and refresh its model list
+- `Ctrl+B`: detect a local llama-server and connect to it
+- `r`: refresh models on the committed Chat endpoint
+- `↑` / `↓` or `k` / `j`: choose the Chat model independently of Workbench
+- `i` / `Enter`: focus the message composer
+- `Esc`: stop an active response, or leave the current Chat editor
+- `Ctrl+X` / `x`: clear the transcript and stop an active response
+- `Alt+S`: save the current session
+- `o`: browse saved sessions
 
 Maintenance (active only on Maintenance tab):
 
@@ -345,6 +362,7 @@ This project uses semantic versioning. See [CHANGELOG.md](CHANGELOG.md).
 
 ## Roadmap Note
 
-The Rust port is active under `CAR-97`. Python remains where it provides a
-deliberate compatibility path: the Hugging Face downloader and the legacy Chat
-connection/detection controls that have not yet reached Rust parity.
+The Rust port is active under `CAR-97`. Python remains as the deliberate
+Hugging Face downloader compatibility boundary, while the Textual TUI remains
+available as a fallback until live Rust Chat smoke verification and release
+closure are complete.

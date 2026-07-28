@@ -18,7 +18,7 @@ use std::{
 use std::os::unix::process::CommandExt;
 
 use crate::{
-    chat::{stream_completion, ChatCompletion, ChatRequest},
+    chat::{detect_chat_server, ChatClient, ChatCompletion, ChatRequest},
     chat_history::ChatHistory,
     commands::{command, search_all_commands, visible_commands, CommandContext, CommandId},
     config_store::{load_config, DownloadConfig},
@@ -30,7 +30,7 @@ use crate::{
     downloader_command::downloader_command_prefix,
     gguf::{self, GgufFile},
     job_history::JobHistory,
-    llama_swap::{SwapClient, SwapModel},
+    llama_swap::{SwapClient, SwapModel, DEFAULT_BASE_URL},
     script_editor::ScriptEditorState,
     script_store::{collect_scripts_in, command_for_script, ScriptMode},
     state_store::{self, ChatSession, ChatSessionList, ChatSessionSummary, SavedChatSession},
@@ -147,6 +147,7 @@ enum InputMode {
     BrowserPath,
     BrowserFilter,
     ChatMessage,
+    ChatEndpoint,
     ChatSystemPrompt,
 }
 
@@ -208,8 +209,25 @@ enum BackgroundEvent {
         result: Result<String, String>,
     },
     BrowserScan(Result<Vec<GgufFile>, String>),
-    ChatDelta(String),
-    ChatFinished(Result<ChatCompletion, String>),
+    ChatConnected {
+        request_id: u64,
+        endpoint: String,
+        client: ChatClient,
+        models: Vec<SwapModel>,
+    },
+    ChatConnectionFailed {
+        request_id: u64,
+        operation: String,
+        error: String,
+    },
+    ChatDelta {
+        request_id: u64,
+        delta: String,
+    },
+    ChatFinished {
+        request_id: u64,
+        result: Result<ChatCompletion, String>,
+    },
     ChatSessionsListed(Result<ChatSessionList, String>),
     ChatSessionLoaded(Result<ChatSession, String>),
     ChatSessionSaved(Result<SavedChatSession, String>),
@@ -265,6 +283,15 @@ struct App {
     chat_history: ChatHistory,
     chat_streaming: String,
     chat_pending: bool,
+    chat_endpoint_draft: String,
+    chat_endpoint_committed: Option<String>,
+    chat_client: Option<ChatClient>,
+    chat_models: Vec<SwapModel>,
+    chat_model_state: TableState,
+    chat_connection_pending: bool,
+    chat_connection_request_id: u64,
+    chat_stream_request_id: u64,
+    chat_stream_cancellation: Option<Arc<AtomicBool>>,
     chat_system_prompt: String,
     chat_temperature: f64,
     chat_max_tokens: u32,
@@ -387,6 +414,16 @@ impl App {
             chat_history: ChatHistory::default(),
             chat_streaming: String::new(),
             chat_pending: false,
+            chat_endpoint_draft: env::var("LLAMA_SWAP_URL")
+                .unwrap_or_else(|_| DEFAULT_BASE_URL.into()),
+            chat_endpoint_committed: None,
+            chat_client: None,
+            chat_models: Vec::new(),
+            chat_model_state: TableState::default().with_selected(Some(0)),
+            chat_connection_pending: false,
+            chat_connection_request_id: 0,
+            chat_stream_request_id: 0,
+            chat_stream_cancellation: None,
             chat_system_prompt: String::new(),
             chat_temperature: 0.8,
             chat_max_tokens: 2048,
@@ -492,6 +529,121 @@ impl App {
         });
     }
 
+    fn start_chat_connect(&mut self) {
+        if self.chat_connection_pending {
+            self.status = "A Chat connection probe is already running".into();
+            return;
+        }
+        let endpoint = self.chat_endpoint_draft.trim().to_owned();
+        if endpoint.is_empty() {
+            self.status = "Enter a Chat endpoint before connecting".into();
+            self.input_mode = InputMode::ChatEndpoint;
+            return;
+        }
+        self.chat_connection_request_id = self.chat_connection_request_id.wrapping_add(1);
+        let request_id = self.chat_connection_request_id;
+        self.chat_connection_pending = true;
+        self.status = format!("Connecting to {endpoint}…");
+        let api_key = env::var("LLAMA_SWAP_API_KEY").ok();
+        let sender = self.sender.clone();
+        thread::spawn(move || {
+            let result = ChatClient::new(&endpoint, api_key.as_deref()).and_then(|client| {
+                client
+                    .list_models()
+                    .map(|models| (client.base_url().to_owned(), client, models))
+            });
+            match result {
+                Ok((endpoint, client, models)) => {
+                    let _ = sender.send(BackgroundEvent::ChatConnected {
+                        request_id,
+                        endpoint,
+                        client,
+                        models,
+                    });
+                }
+                Err(error) => {
+                    let _ = sender.send(BackgroundEvent::ChatConnectionFailed {
+                        request_id,
+                        operation: "connect".into(),
+                        error: format!("{error:#}"),
+                    });
+                }
+            }
+        });
+    }
+
+    fn start_chat_detect(&mut self) {
+        if self.chat_connection_pending {
+            self.status = "A Chat connection probe is already running".into();
+            return;
+        }
+        self.chat_connection_request_id = self.chat_connection_request_id.wrapping_add(1);
+        let request_id = self.chat_connection_request_id;
+        self.chat_connection_pending = true;
+        self.status = "Detecting a local Chat server…".into();
+        let api_key = env::var("LLAMA_SWAP_API_KEY").ok();
+        let sender = self.sender.clone();
+        thread::spawn(move || match detect_chat_server(api_key.as_deref()) {
+            Ok((client, models)) => {
+                let _ = sender.send(BackgroundEvent::ChatConnected {
+                    request_id,
+                    endpoint: client.base_url().to_owned(),
+                    client,
+                    models,
+                });
+            }
+            Err(error) => {
+                let _ = sender.send(BackgroundEvent::ChatConnectionFailed {
+                    request_id,
+                    operation: "detect".into(),
+                    error: format!("{error:#}"),
+                });
+            }
+        });
+    }
+
+    fn refresh_chat_models(&mut self) {
+        let Some(client) = self.chat_client.clone() else {
+            self.start_chat_connect();
+            return;
+        };
+        if self.chat_connection_pending {
+            self.status = "A Chat connection probe is already running".into();
+            return;
+        }
+        self.chat_connection_request_id = self.chat_connection_request_id.wrapping_add(1);
+        let request_id = self.chat_connection_request_id;
+        self.chat_connection_pending = true;
+        self.status = format!("Refreshing Chat models from {}…", client.base_url());
+        let sender = self.sender.clone();
+        thread::spawn(move || match client.list_models() {
+            Ok(models) => {
+                let _ = sender.send(BackgroundEvent::ChatConnected {
+                    request_id,
+                    endpoint: client.base_url().to_owned(),
+                    client,
+                    models,
+                });
+            }
+            Err(error) => {
+                let _ = sender.send(BackgroundEvent::ChatConnectionFailed {
+                    request_id,
+                    operation: "refresh".into(),
+                    error: format!("{error:#}"),
+                });
+            }
+        });
+    }
+
+    fn initialize_chat_model_selection(&mut self) {
+        let selected = self
+            .chat_models
+            .iter()
+            .position(|model| model.state == "loaded")
+            .or_else(|| (!self.chat_models.is_empty()).then_some(0));
+        self.chat_model_state.select(selected);
+    }
+
     fn drain_background_events(&mut self) {
         for _ in 0..EVENTS_PER_TICK {
             let Ok(event) = self.receiver.try_recv() else {
@@ -512,10 +664,14 @@ impl App {
                             }
                             let visible_count = self.visible_model_count();
                             clamp_table_selection(&mut self.model_state, visible_count);
-                            self.status = format!("llama-swap: {} model(s)", self.models.len());
+                            if matches!(self.tab, Tab::Workbench | Tab::ModelOps) {
+                                self.status = format!("llama-swap: {} model(s)", self.models.len());
+                            }
                         }
                         Err(error) => {
-                            self.status = "llama-swap unavailable".into();
+                            if matches!(self.tab, Tab::Workbench | Tab::ModelOps) {
+                                self.status = "llama-swap unavailable".into();
+                            }
                             self.push_log(format!("Model refresh failed: {error}"));
                         }
                     }
@@ -576,11 +732,50 @@ impl App {
                         }
                     }
                 }
-                BackgroundEvent::ChatDelta(delta) => {
+                BackgroundEvent::ChatConnected {
+                    request_id,
+                    endpoint,
+                    client,
+                    models,
+                } => {
+                    if request_id != self.chat_connection_request_id {
+                        continue;
+                    }
+                    self.chat_connection_pending = false;
+                    self.chat_endpoint_draft = endpoint.clone();
+                    self.chat_endpoint_committed = Some(endpoint.clone());
+                    self.chat_client = Some(client);
+                    self.chat_models = models;
+                    self.initialize_chat_model_selection();
+                    self.status = format!(
+                        "Connected to {endpoint} · {} model(s)",
+                        self.chat_models.len()
+                    );
+                }
+                BackgroundEvent::ChatConnectionFailed {
+                    request_id,
+                    operation,
+                    error,
+                } => {
+                    if request_id != self.chat_connection_request_id {
+                        continue;
+                    }
+                    self.chat_connection_pending = false;
+                    self.status = format!("Chat {operation} failed");
+                    self.push_log(error);
+                }
+                BackgroundEvent::ChatDelta { request_id, delta } => {
+                    if self.chat_stream_request_id != request_id {
+                        continue;
+                    }
                     append_bounded_text(&mut self.chat_streaming, &delta, MAX_CHAT_PREVIEW_BYTES);
                 }
-                BackgroundEvent::ChatFinished(result) => {
+                BackgroundEvent::ChatFinished { request_id, result } => {
+                    if self.chat_stream_request_id != request_id {
+                        continue;
+                    }
                     self.chat_pending = false;
+                    self.chat_stream_cancellation = None;
                     match result {
                         Ok(completion) => {
                             let status = match (
@@ -947,6 +1142,12 @@ impl App {
         self.script_versions_target = None;
         self.show_chat_sessions = false;
         self.show_help = false;
+        if self.tab == Tab::Chat {
+            self.input_mode = InputMode::ChatMessage;
+            if self.chat_client.is_none() && !self.chat_connection_pending {
+                self.start_chat_connect();
+            }
+        }
         true
     }
 
@@ -1016,6 +1217,8 @@ impl App {
             (Tab::ModelOps, KeyCode::Char('o'), _, true) => Some(CommandId::ModelOpsReloadScript),
             (Tab::ModelOps, KeyCode::Char('v'), _, true) => Some(CommandId::ModelOpsRestoreScript),
             (Tab::ModelOps, KeyCode::Char('l'), true, _) => Some(CommandId::ModelOpsClearLog),
+            (Tab::Chat, KeyCode::Char('g'), true, _) => Some(CommandId::ChatConnect),
+            (Tab::Chat, KeyCode::Char('b'), true, _) => Some(CommandId::ChatDetect),
             (Tab::Chat, KeyCode::Char('x'), true, _) => Some(CommandId::ChatClear),
             (Tab::Chat, KeyCode::Char('s'), _, true) => Some(CommandId::ChatSave),
             (Tab::Browser, KeyCode::Char('r'), _, true) => Some(CommandId::BrowserScan),
@@ -1123,9 +1326,15 @@ impl App {
 
     fn handle_input_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
-            KeyCode::Esc => self.input_mode = InputMode::Normal,
+            KeyCode::Esc => {
+                if self.tab == Tab::Chat && self.cancel_chat_request() {
+                    return Ok(());
+                }
+                self.input_mode = InputMode::Normal;
+            }
             KeyCode::Enter => match self.input_mode {
                 InputMode::ChatMessage => self.send_chat_message(),
+                InputMode::ChatEndpoint => self.start_chat_connect(),
                 InputMode::BrowserPath => {
                     self.input_mode = InputMode::Normal;
                     self.scan_browser();
@@ -1153,6 +1362,9 @@ impl App {
                 InputMode::ChatSystemPrompt => {
                     self.chat_system_prompt.pop();
                 }
+                InputMode::ChatEndpoint => {
+                    self.chat_endpoint_draft.pop();
+                }
                 InputMode::Normal => {}
             },
             KeyCode::Char(character) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -1169,6 +1381,7 @@ impl App {
                     }
                     InputMode::ChatMessage => self.chat_input.push(character),
                     InputMode::ChatSystemPrompt => self.chat_system_prompt.push(character),
+                    InputMode::ChatEndpoint => self.chat_endpoint_draft.push(character),
                     InputMode::Normal => {}
                 }
             }
@@ -1718,8 +1931,11 @@ impl App {
                     self.send_chat_message();
                 }
             }
-            ChatRefreshModels => self.refresh_models(),
+            ChatRefreshModels => self.refresh_chat_models(),
+            ChatConnect => self.start_chat_connect(),
+            ChatDetect => self.start_chat_detect(),
             ChatClear => {
+                self.cancel_chat_request();
                 self.chat_history.clear();
                 self.chat_streaming.clear();
                 self.status = "Chat cleared".into();
@@ -1814,12 +2030,6 @@ impl App {
             MaintenanceReloadScript => self.reload_script_editor(ScriptEditorTarget::Maintenance),
             MaintenanceRestoreScript => self.open_script_versions(ScriptEditorTarget::Maintenance),
             MaintenanceClearLog => self.clear_activity_log("Maintenance"),
-            _ => {
-                let label = command(command_id)
-                    .map(|spec| spec.palette_label)
-                    .unwrap_or("Unknown command");
-                self.status = format!("{label} is not implemented yet");
-            }
         }
         if matches!(
             command_id,
@@ -1886,12 +2096,21 @@ impl App {
     fn handle_chat_key(&mut self, key: KeyEvent) {
         match key.code {
             KeyCode::Char('i') | KeyCode::Enter => self.input_mode = InputMode::ChatMessage,
+            KeyCode::Esc => {
+                if !self.cancel_chat_request() {
+                    self.input_mode = InputMode::Normal;
+                }
+            }
             KeyCode::Char('x') => {
+                self.cancel_chat_request();
                 self.chat_history.clear();
                 self.chat_streaming.clear();
                 self.status = "Chat cleared".into();
             }
-            KeyCode::Char('r') => self.refresh_models(),
+            KeyCode::Char('r') => self.refresh_chat_models(),
+            KeyCode::Char('e') => self.input_mode = InputMode::ChatEndpoint,
+            KeyCode::Up | KeyCode::Char('k') => self.select_previous_chat_model(),
+            KeyCode::Down | KeyCode::Char('j') => self.select_next_chat_model(),
             KeyCode::Char('o') => self.open_chat_sessions(),
             KeyCode::Char('p') => self.input_mode = InputMode::ChatSystemPrompt,
             KeyCode::Char('t') => {
@@ -2505,6 +2724,27 @@ impl App {
             .map(|model| (*model).clone())
     }
 
+    fn selected_chat_model(&self) -> Option<SwapModel> {
+        self.chat_model_state
+            .selected()
+            .and_then(|index| self.chat_models.get(index))
+            .cloned()
+    }
+
+    fn select_previous_chat_model(&mut self) {
+        select_previous_table(&mut self.chat_model_state, self.chat_models.len());
+        if let Some(model) = self.selected_chat_model() {
+            self.status = format!("Chat model: {}", model.id);
+        }
+    }
+
+    fn select_next_chat_model(&mut self) {
+        select_next_table(&mut self.chat_model_state, self.chat_models.len());
+        if let Some(model) = self.selected_chat_model() {
+            self.status = format!("Chat model: {}", model.id);
+        }
+    }
+
     fn visible_browser_files(&self) -> Vec<GgufFile> {
         let filter = self.browser_filter.trim().to_ascii_lowercase();
         let mut files = self
@@ -2650,26 +2890,42 @@ impl App {
         });
     }
 
+    fn cancel_chat_request(&mut self) -> bool {
+        if !self.chat_pending {
+            return false;
+        }
+        if let Some(cancellation) = self.chat_stream_cancellation.take() {
+            cancellation.store(true, Ordering::Release);
+        }
+        self.chat_stream_request_id = self.chat_stream_request_id.wrapping_add(1);
+        self.chat_pending = false;
+        self.chat_streaming.clear();
+        self.status = "Chat response stopped".into();
+        true
+    }
+
     fn send_chat_message(&mut self) {
         self.input_mode = InputMode::Normal;
         let prompt = self.chat_input.trim().to_owned();
         if prompt.is_empty() || self.chat_pending {
             return;
         }
-        let Some(model) = self
-            .loaded_model_id
-            .as_deref()
-            .and_then(|loaded| self.models.iter().find(|model| model.id == loaded).cloned())
-            .or_else(|| self.selected_model())
-            .or_else(|| self.models.first().cloned())
-        else {
-            self.status = "Refresh models before chatting".into();
+        let Some(client) = self.chat_client.clone() else {
+            self.status = "Connect to a Chat endpoint before chatting".into();
+            return;
+        };
+        let Some(model) = self.selected_chat_model() else {
+            self.status = "Connect a Chat endpoint with at least one model".into();
             return;
         };
         self.chat_input.clear();
         self.chat_history.push("user", prompt);
         self.chat_streaming.clear();
         self.chat_pending = true;
+        self.chat_stream_request_id = self.chat_stream_request_id.wrapping_add(1);
+        let request_id = self.chat_stream_request_id;
+        let cancellation = Arc::new(AtomicBool::new(false));
+        self.chat_stream_cancellation = Some(Arc::clone(&cancellation));
         self.status = format!("Waiting for {}…", model.id);
         let history = self.chat_history.request_messages();
         let system_prompt = self.chat_system_prompt.clone();
@@ -2683,17 +2939,25 @@ impl App {
             request.temperature = temperature;
             request.max_tokens = max_tokens;
             request.thinking = thinking;
-            let result = stream_completion(&request, |delta| {
-                sender
-                    .send(BackgroundEvent::ChatDelta(delta.to_owned()))
-                    .is_ok()
-            })
-            .map_err(|error| format!("{error:#}"));
-            let _ = sender.send(BackgroundEvent::ChatFinished(result));
+            let result = client
+                .stream_completion_cancellable(&request, &cancellation, |delta| {
+                    sender
+                        .send(BackgroundEvent::ChatDelta {
+                            request_id,
+                            delta: delta.to_owned(),
+                        })
+                        .is_ok()
+                })
+                .map_err(|error| format!("{error:#}"));
+            let _ = sender.send(BackgroundEvent::ChatFinished { request_id, result });
         });
     }
 
     fn save_chat_session(&mut self) {
+        if self.chat_pending {
+            self.status = "Stop the active Chat response before saving".into();
+            return;
+        }
         if self.chat_history.is_empty() {
             self.status = "Nothing to save; chat is empty".into();
             return;
@@ -2716,6 +2980,10 @@ impl App {
     }
 
     fn open_chat_sessions(&mut self) {
+        if self.chat_pending {
+            self.status = "Stop the active Chat response before loading a session".into();
+            return;
+        }
         self.show_chat_sessions = true;
         self.refresh_chat_sessions();
     }
@@ -2736,6 +3004,10 @@ impl App {
     }
 
     fn load_selected_chat_session(&mut self) {
+        if self.chat_pending {
+            self.status = "Stop the active Chat response before loading a session".into();
+            return;
+        }
         if self.chat_session_pending {
             return;
         }
@@ -3475,14 +3747,26 @@ impl App {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3),
+                Constraint::Length(5),
                 Constraint::Min(4),
                 Constraint::Length(3),
             ])
             .split(area);
+        let connection = if self.chat_connection_pending {
+            "connecting…".to_owned()
+        } else if self.chat_client.is_some() {
+            format!("connected · {} model(s)", self.chat_models.len())
+        } else {
+            "disconnected".into()
+        };
+        let selected_model = self
+            .selected_chat_model()
+            .map(|model| model.id)
+            .unwrap_or_else(|| "—".into());
         frame.render_widget(
             Paragraph::new(format!(
-                "system: {} │ temp {:.1} │ max {} │ thinking {}",
+                "connection: {connection}\nendpoint: {}\nmodel: {selected_model} │ system: {} │ temp {:.1} │ max {} │ thinking {}",
+                self.chat_endpoint_draft,
                 self.chat_system_prompt,
                 self.chat_temperature,
                 self.chat_max_tokens,
@@ -3490,15 +3774,21 @@ impl App {
             ))
             .block(
                 Block::default()
-                    .title("Params · p system · [/] temp · -/+ max tokens · t thinking")
+                    .title("Chat · e endpoint · Ctrl+G connect · Ctrl+B detect · ↑/↓ model")
                     .borders(Borders::ALL),
             ),
             chunks[0],
         );
         if self.input_mode == InputMode::ChatSystemPrompt {
             frame.set_cursor_position((
-                chunks[0].x + 9 + self.chat_system_prompt.chars().count() as u16,
-                chunks[0].y + 1,
+                chunks[0].x + 10 + self.chat_system_prompt.chars().count() as u16,
+                chunks[0].y + 3,
+            ));
+        }
+        if self.input_mode == InputMode::ChatEndpoint {
+            frame.set_cursor_position((
+                chunks[0].x + 11 + self.chat_endpoint_draft.chars().count() as u16,
+                chunks[0].y + 2,
             ));
         }
         let mut lines = Vec::new();
@@ -3524,7 +3814,9 @@ impl App {
         }
         if lines.is_empty() {
             lines.push(Line::from("Press i or Enter to compose a message."));
-            lines.push(Line::from("The selected Workbench model is used."));
+            lines.push(Line::from(
+                "Connect with Ctrl+G, detect with Ctrl+B, then choose a model.",
+            ));
         }
         frame.render_widget(
             Paragraph::new(lines)
@@ -3540,7 +3832,7 @@ impl App {
         frame.render_widget(
             Paragraph::new(format!("> {}{marker}", self.chat_input)).block(
                 Block::default()
-                    .title("Message · Enter send · Esc cancel")
+                    .title("Message · Enter send · Esc stop/exit")
                     .borders(Borders::ALL),
             ),
             chunks[2],
@@ -3986,6 +4278,7 @@ impl App {
                 InputMode::BrowserPath => "  PATH INPUT",
                 InputMode::BrowserFilter => "  GGUF FILTER",
                 InputMode::ChatMessage => "  CHAT INPUT",
+                InputMode::ChatEndpoint => "  CHAT ENDPOINT",
                 InputMode::ChatSystemPrompt => "  SYSTEM PROMPT INPUT",
             }
         };
@@ -5737,6 +6030,129 @@ mod tests {
         app.drain_background_events();
 
         assert_eq!(app.download_disk_space, "current disk state");
+    }
+
+    #[test]
+    fn stale_chat_events_are_ignored_after_a_new_request() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.chat_pending = true;
+        app.chat_stream_request_id = 8;
+        app.chat_streaming = "current".into();
+        app.sender
+            .send(BackgroundEvent::ChatDelta {
+                request_id: 7,
+                delta: "stale".into(),
+            })
+            .unwrap();
+        app.sender
+            .send(BackgroundEvent::ChatFinished {
+                request_id: 7,
+                result: Ok(ChatCompletion {
+                    content: "stale completion".into(),
+                    completion_tokens: Some(1),
+                    elapsed: Duration::from_secs(1),
+                }),
+            })
+            .unwrap();
+
+        app.drain_background_events();
+
+        assert!(app.chat_pending);
+        assert_eq!(app.chat_streaming, "current");
+        assert!(app
+            .chat_history
+            .records()
+            .iter()
+            .all(|message| message.content != "stale completion"));
+    }
+
+    #[test]
+    fn chat_endpoint_commits_only_after_the_current_probe_succeeds() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.chat_endpoint_draft = "http://draft.example".into();
+        app.chat_connection_request_id = 2;
+        let client = ChatClient::new("http://connected.example", None).unwrap();
+        app.sender
+            .send(BackgroundEvent::ChatConnected {
+                request_id: 1,
+                endpoint: client.base_url().into(),
+                client: client.clone(),
+                models: Vec::new(),
+            })
+            .unwrap();
+        app.drain_background_events();
+        assert!(app.chat_client.is_none());
+        assert_eq!(app.chat_endpoint_committed, None);
+        assert_eq!(app.chat_endpoint_draft, "http://draft.example");
+
+        app.sender
+            .send(BackgroundEvent::ChatConnected {
+                request_id: 2,
+                endpoint: client.base_url().into(),
+                client,
+                models: vec![SwapModel {
+                    id: "chat-model".into(),
+                    state: "loaded".into(),
+                    name: String::new(),
+                    description: String::new(),
+                }],
+            })
+            .unwrap();
+        app.drain_background_events();
+        assert_eq!(
+            app.chat_endpoint_committed.as_deref(),
+            Some("http://connected.example")
+        );
+        assert_eq!(app.selected_chat_model().unwrap().id, "chat-model");
+    }
+
+    #[test]
+    fn chat_keyboard_and_persistence_guards_prioritize_stop() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::Chat;
+        app.chat_pending = true;
+        app.chat_history.push("user", "in progress");
+        app.chat_stream_cancellation = Some(Arc::new(AtomicBool::new(false)));
+
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .unwrap();
+        assert!(!app.chat_pending);
+        assert_eq!(app.status, "Chat response stopped");
+
+        app.chat_pending = true;
+        app.save_chat_session();
+        assert!(app.status.contains("before saving"));
+        app.open_chat_sessions();
+        assert!(app.status.contains("before loading"));
+        assert!(!app.show_chat_sessions);
+    }
+
+    #[test]
+    fn chat_model_selection_is_independent_from_workbench_selection() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.loaded_model_id = Some("workbench-model".into());
+        app.chat_models = vec![
+            SwapModel {
+                id: "chat-loaded".into(),
+                state: "loaded".into(),
+                name: String::new(),
+                description: String::new(),
+            },
+            SwapModel {
+                id: "chat-other".into(),
+                state: "unloaded".into(),
+                name: String::new(),
+                description: String::new(),
+            },
+        ];
+        app.initialize_chat_model_selection();
+
+        assert_eq!(app.selected_chat_model().unwrap().id, "chat-loaded");
+        assert_eq!(app.loaded_model_id.as_deref(), Some("workbench-model"));
     }
 
     #[test]

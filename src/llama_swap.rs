@@ -146,7 +146,7 @@ struct ModelAction<'a> {
     model: &'a str,
 }
 
-fn normalize_base_url(raw: &str) -> Result<String> {
+pub(crate) fn normalize_base_url(raw: &str) -> Result<String> {
     let raw = raw.trim();
     let raw = if raw.is_empty() {
         DEFAULT_BASE_URL
@@ -178,7 +178,7 @@ fn endpoint_url(base_url: &str, path: &str) -> String {
     )
 }
 
-fn auth_headers(api_key: Option<&str>) -> Result<HeaderMap> {
+pub(crate) fn auth_headers(api_key: Option<&str>) -> Result<HeaderMap> {
     let mut headers = HeaderMap::new();
     let Some(api_key) = api_key.map(str::trim).filter(|key| !key.is_empty()) else {
         return Ok(headers);
@@ -190,7 +190,7 @@ fn auth_headers(api_key: Option<&str>) -> Result<HeaderMap> {
     Ok(headers)
 }
 
-fn parse_models(body: &str) -> Result<Vec<SwapModel>> {
+pub(crate) fn parse_models(body: &str) -> Result<Vec<SwapModel>> {
     let payload: Value = serde_json::from_str(body)?;
     let entries = payload
         .get("data")

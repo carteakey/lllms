@@ -722,7 +722,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Ctrl+G",
         "Connect",
         "Chat: connect to server",
-        false,
+        true,
         ["endpoint", "probe"]
     ),
     command!(
@@ -731,7 +731,7 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Ctrl+B",
         "Detect server",
         "Chat: auto-detect a local server",
-        false,
+        true,
         ["port", "endpoint", "probe"]
     ),
     command!(
@@ -1352,6 +1352,14 @@ mod tests {
         assert!(visible_browser
             .iter()
             .any(|spec| spec.id == CommandId::BrowserFocusFilter));
+
+        let visible_chat = visible_commands(CommandContext::Chat);
+        assert!(visible_chat
+            .iter()
+            .any(|spec| spec.id == CommandId::ChatConnect));
+        assert!(visible_chat
+            .iter()
+            .any(|spec| spec.id == CommandId::ChatDetect));
     }
 
     #[test]

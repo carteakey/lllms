@@ -23,8 +23,8 @@ module tree:
 - `src/cli.rs` owns argument parsing, model/script pickers, repository
   discovery, and headless command execution.
 - `src/llama_swap.rs` owns the authenticated llama-swap HTTP boundary.
-- `src/chat.rs` owns bounded server-sent-event parsing and streaming chat
-  requests.
+- `src/chat.rs` owns the authenticated Chat client, endpoint probing, bounded
+  server-sent-event parsing, and cancellable streaming chat requests.
 - `src/commands.rs` owns typed command metadata, contextual help, and palette
   search.
 - `src/config_store.rs` owns typed download configuration, normalization,
@@ -54,8 +54,9 @@ module tree:
   sampling.
 - `src/text_buffer.rs` owns Unicode-safe editing and cursor movement shared by
   the inline terminal editors.
-- `src/app.rs` owns the Ratatui event loop, shared model selection, background
-  operations, supervised child processes, and the seven top-level views.
+- `src/app.rs` owns the Ratatui event loop, Workbench and Chat model state,
+  request-ID guarded background operations, supervised child processes, and
+  the seven top-level views.
 
 The TUI keeps network requests and subprocess output off the rendering thread.
 Background delivery is bounded, process lines are size-capped, and each tick
@@ -161,7 +162,7 @@ second implementation backlog.
 | --- | --- | --- | --- |
 | Workbench and model load/unload | Authenticated typed client, TUI, and headless CLI | Mature TUI workflow | Rust has the stronger boundary |
 | CLI | `--run`, `--bench`, `--list`, `--quickstart`, filters, and extra args | Similar interactive modes | Rust has the stronger packaging |
-| Chat | Streaming, parameters, sessions, token feedback | Detect, Connect, endpoint editing, model selection, streaming, cancellation, sessions | Textual remains ahead |
+| Chat | Endpoint draft/commit, authenticated Connect/Detect, independent model selection, streaming, cancellation, parameters, sessions, token feedback | Detect, Connect, endpoint editing, model selection, streaming, cancellation, sessions | Rust now matches the declared feature set; Textual remains the live fallback until smoke coverage is complete |
 | Downloads | CRUD, validation, snapshots, restore, preflight, disk feedback, shell-free execution | Broadly complete workflow | Rust has the stronger safety model |
 | Bench and Maintenance | Run/stop, UTF-8 editing, reload/restore, snapshots, supervised processes | Run/stop, editing, and snapshots | Rust is the stronger long-term base |
 | Jobs | Bounded persistence, stale-run reconciliation, stop/retry, safe reconstruction | Persistence, stop/retry, and history | Rust is ahead on recovery safety |
@@ -171,15 +172,14 @@ second implementation backlog.
 | Runtime boundary | Compiled binary plus the intentional Python downloader boundary | Python/Textual runtime | Rust is lighter after build |
 
 The Rust branch is the preferred application for Workbench, model operations,
-Downloads, Bench, Maintenance, Jobs, and GGUF browsing. Keep Textual as the
-Chat fallback until Rust has endpoint draft/committed state, real Connect and
-Detect handlers, independent Chat model selection, app-owned cancellation with
-stale-stream protection, and live authenticated Chat smoke coverage.
+Downloads, Bench, Maintenance, Jobs, GGUF browsing, and Chat. Keep Textual as
+a fallback until the Rust branch has completed live authenticated Chat smoke
+coverage on KPC and the remaining release checklist is closed.
 
 Rust is the better long-term foundation because its process supervision,
-persistence, input bounds, and automated verification are stronger and better
-fit the keyboard-first operating model. Textual remains the better complete
-application for Chat and the lower-friction fallback during the parity period.
+persistence, input bounds, cancellation ownership, and automated verification
+are stronger and better fit the keyboard-first operating model. Textual
+remains the lower-friction fallback during the live-verification period.
 
 Linear issue `CAR-97` contains the authoritative ordered implementation
 checklist; this document records the implemented boundary rather than
