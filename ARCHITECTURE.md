@@ -168,7 +168,7 @@ second implementation backlog.
 | Jobs | Bounded persistence, stale-run reconciliation, stop/retry, safe reconstruction | Persistence, stop/retry, and history | Rust is ahead on recovery safety |
 | GGUF browser | Bounded v2/v3 parsing, recursive inventory, metadata, symlink and budget protection | Similar browsing features | Rust is ahead on malformed-input safety |
 | Keyboard and navigation | Command palette, contextual help, keyboard-first focus | Better mouse/widget ergonomics | Rust matches the project direction |
-| Automated confidence | Locked toolchain, CI, format/lint gates, and 193 Rust tests | No comparable Textual TUI test suite in `main` | Rust is ahead |
+| Automated confidence | Locked toolchain, CI, format/lint gates, and 195 Rust tests | No comparable Textual TUI test suite in `main` | Rust is ahead |
 | Runtime boundary | Compiled binary plus the intentional Python downloader boundary | Python/Textual runtime | Rust is lighter after build |
 
 The Rust branch is the preferred application for Workbench, model operations,
