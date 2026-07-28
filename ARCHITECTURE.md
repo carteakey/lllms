@@ -144,12 +144,12 @@ strict load/save/restore, dirty guards, speed controls, disk feedback, and
 dedicated process output. Download launches now include bounded asynchronous
 cache-aware size/disk preflight, responsive wide/compact/focused-pane layouts,
 and verified selected/enabled execution through the real Hugging Face boundary.
-The Python TUI remains available during the parity period for Chat endpoint
-editing, server detection/connect, explicit model selection, visible response
-cancellation, and any remaining live-only operational gaps. It should only be
-retired after compatibility coverage and live llama-swap smoke verification
-pass. `CAR-97` is still in progress; this is not a claim of full parity or a
-fully green verification matrix.
+Rust now owns the Chat endpoint draft/commit workflow, authenticated
+server detection/connect, independent model selection, request-ID guarded
+streaming, cancellation, and persistence guards. The Python TUI remains
+available as a fallback for any remaining live-only operational gaps and should
+only be retired after live llama-swap smoke verification passes. `CAR-97` is
+still in progress; this is not a claim of a fully green release matrix.
 
 ## Rust vs. Textual readiness
 
@@ -168,7 +168,7 @@ second implementation backlog.
 | Jobs | Bounded persistence, stale-run reconciliation, stop/retry, safe reconstruction | Persistence, stop/retry, and history | Rust is ahead on recovery safety |
 | GGUF browser | Bounded v2/v3 parsing, recursive inventory, metadata, symlink and budget protection | Similar browsing features | Rust is ahead on malformed-input safety |
 | Keyboard and navigation | Command palette, contextual help, keyboard-first focus | Better mouse/widget ergonomics | Rust matches the project direction |
-| Automated confidence | Locked toolchain, CI, format/lint gates, and 186 Rust tests | No comparable Textual TUI test suite in `main` | Rust is ahead |
+| Automated confidence | Locked toolchain, CI, format/lint gates, and 193 Rust tests | No comparable Textual TUI test suite in `main` | Rust is ahead |
 | Runtime boundary | Compiled binary plus the intentional Python downloader boundary | Python/Textual runtime | Rust is lighter after build |
 
 The Rust branch is the preferred application for Workbench, model operations,

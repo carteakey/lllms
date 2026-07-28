@@ -98,11 +98,13 @@ cargo run --locked -- --bench qwen --extra "--ctx-size 32768"
 ## Rust Migration Status
 
 The Rust `0.7.0` foundation now covers the llama-swap run/list CLI, benchmark
-execution, typed stores, atomic snapshots, streamed chat, runtime telemetry,
-and a keyboard-first seven-view Ratatui workbench with a searchable command
-palette. Jobs and chat sessions now persist through the compatible legacy
-formats. The GGUF view uses bounded metadata parsing with recursive inventory,
-filtering, deterministic sorting, detailed metadata, and per-file warnings.
+execution, typed stores, atomic snapshots, authenticated Chat endpoint
+connect/detect, independent Chat model selection, cancellable streaming, runtime
+telemetry, and a keyboard-first seven-view Ratatui workbench with a searchable
+command palette. Jobs and chat sessions now persist through the compatible
+legacy formats. The GGUF view uses bounded metadata parsing with recursive
+inventory, filtering, deterministic sorting, detailed metadata, and per-file
+warnings.
 Bench and maintenance now have inline UTF-8 script editors with dirty guards
 and snapshot save/reload/restore. The Download view exposes the legacy JSON
 fields, runtime speed controls, model CRUD, strict validation, atomic snapshots,
