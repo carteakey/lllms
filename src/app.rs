@@ -6156,6 +6156,26 @@ mod tests {
     }
 
     #[test]
+    fn chat_shortcuts_keep_f3_composer_focus_and_modified_key_precedence() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.chat_client = Some(ChatClient::new("http://chat.example", None).unwrap());
+
+        app.handle_key(KeyEvent::new(KeyCode::F(3), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.tab, Tab::Chat);
+        assert_eq!(app.input_mode, InputMode::ChatMessage);
+        assert_eq!(
+            app.modified_key_command(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL,)),
+            Some(CommandId::ChatConnect)
+        );
+        assert_eq!(
+            app.modified_key_command(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL,)),
+            Some(CommandId::ChatDetect)
+        );
+    }
+
+    #[test]
     fn download_targets_follow_runtime_root_and_custom_directories() {
         let root = Path::new("/runtime/repository");
         let mut config = DownloadConfig {
