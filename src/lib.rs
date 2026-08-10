@@ -1,4 +1,5 @@
 pub mod app;
+pub mod bench_results;
 pub mod chat;
 pub mod chat_history;
 pub mod cli;
@@ -11,8 +12,12 @@ pub mod downloader_command;
 pub mod gguf;
 pub mod job_history;
 pub mod llama_swap;
+pub mod prompt_store;
 pub mod script_editor;
+pub mod script_lint;
 pub mod script_store;
+pub mod serve_bench;
+pub mod settings;
 pub mod state_store;
 pub mod telemetry;
 pub mod text_buffer;

@@ -7,6 +7,14 @@ implemented slices and do not assert full legacy parity or a fully green
 verification matrix.
 
 ### Added
+- Added a bounded benchmark result browser with JSONL/Markdown parsing,
+  deterministic sorting, and `--compare-results` metric diffs.
+- Added persisted operator settings, atomic non-secret profile import/export,
+  and a bounded Chat system-prompt library with a TUI picker.
+- Added paged model inventories, Hugging Face progress/ETA feedback, optional
+  shellcheck-on-save diagnostics, serving/bench flag drift checks, and a safe
+  explicit action to stop a freshly detected external llama-server.
+- Added disk-free and network byte counters to runtime telemetry.
 - Added `maintenance/run-l3ms-kpc.sh` to launch the deployed Rust binary with
   the existing KPC llama-swap service and downloader environment.
 - Added the initial Rust `0.7.0` application: a Clap launcher, authenticated

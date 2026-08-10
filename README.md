@@ -76,6 +76,19 @@ List llama-swap models and benchmark entry points:
 cargo run --locked -- --list all
 ```
 
+Inspect benchmark history and compare two result files without opening the
+TUI:
+
+```bash
+cargo run --locked -- --list results
+cargo run --locked -- --compare-results bench-results/left.md bench-results/right.md
+```
+
+Saved Chat system prompts live under `~/.l3ms/prompts/` and can be listed with
+`--list prompts` (the Chat tab's `l` action opens the same picker). Operator
+settings and non-secret profile bundles use `--settings`,
+`--export-profile DIRECTORY`, and `--import-profile DIRECTORY`.
+
 Interactively select and load a llama-swap model:
 
 ```bash
@@ -113,6 +126,17 @@ selected/enabled launches. Each launch first runs a bounded, cancellable,
 cache-aware size and disk-space preflight off the rendering thread. The Python
 downloader remains the download implementation behind a portable, shell-free
 Rust command boundary.
+
+Run `maintenance/check-serve-bench-drift.sh` after changing serving or bench
+flags. It reports drift in `-ngl` and tensor override flags without rewriting
+either source file. New bench work can start from
+`bench-models/templates/bench-script.sh`; named preset conventions are
+documented in `bench-models/presets/README.md`.
+
+The privileged KPC slow-TG comparison is documented in
+[`docs/slow-tg-investigation.md`](docs/slow-tg-investigation.md). Platform and
+WebAssembly boundaries are recorded in
+[`docs/platform-portability.md`](docs/platform-portability.md).
 
 `CAR-97` remains a work in progress. These implemented slices do not yet imply
 full legacy parity, complete live smoke coverage, or a fully green verification
@@ -158,6 +182,7 @@ and Linear issue `CAR-97` for the authoritative remaining-work checklist.
   - live run logs + start/stop
   - current running model + resource telemetry (CPU/RAM/GPU when available)
   - script editor and per-script snapshots in `.toolkit/script_versions/` for bench mode
+  - paged model tables (`[` / `]`) keep large llama-swap inventories responsive
 - `Model Browser` tab:
   - scan any local directory for `.gguf` files
   - inspect size, quantization, params, architecture, and modified timestamp in a table
@@ -165,8 +190,17 @@ and Linear issue `CAR-97` for the authoritative remaining-work checklist.
 - `Chat` tab:
   - edit and connect an authenticated OpenAI-compatible endpoint
   - detect local llama-server ports and choose a Chat model independently
+  - `K` terminates a freshly detected external llama-server only after PID and
+    command-line identity checks
+  - `l` opens the bounded local system-prompt library
   - stream, stop, clear, save, and restore conversations with stale-result guards
 - Additional tabs: `Maintenance`, `Jobs`
+
+Download output parses Hugging Face progress lines when available and displays
+an ETA beside the disk-space status; the preflight estimate remains the source
+of truth for total and remaining bytes when progress callbacks are unavailable.
+Saving a bench or maintenance script runs `shellcheck` when installed and
+retains warnings in the activity log without blocking a safe snapshot save.
 
 ## Keyboard-first Controls
 

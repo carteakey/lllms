@@ -1,6 +1,7 @@
 use std::{
     env,
     io::{BufRead, BufReader, Read},
+    path::Path,
     process::Command,
     sync::atomic::{AtomicBool, Ordering},
     time::{Duration, Instant},
@@ -213,12 +214,62 @@ pub fn detect_chat_server(api_key: Option<&str>) -> Result<(ChatClient, Vec<Swap
     anyhow::bail!("no reachable chat server found ({})", failures.join("; "))
 }
 
+/// A llama-server process discovered from the local process table. Discovery
+/// is read-only; callers must explicitly pass a returned PID to
+/// [`terminate_detected_server`] before any signal is sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DetectedServer {
+    pub pid: u32,
+    pub command: String,
+    pub port: Option<u16>,
+}
+
+/// Return externally-started llama-server processes visible to this user.
+pub fn detected_servers() -> Vec<DetectedServer> {
+    #[cfg(unix)]
+    {
+        if let Ok(output) = Command::new("pgrep").args(["-fa", "llama-server"]).output() {
+            return parse_detected_servers(&String::from_utf8_lossy(&output.stdout));
+        }
+    }
+    Vec::new()
+}
+
+/// Terminate one explicitly selected externally-started llama-server.
+///
+/// The process must still appear in a fresh `pgrep -fa llama-server` result,
+/// its command line must identify the llama-server binary, and PID 1 is never
+/// accepted. This prevents a stale or unrelated PID from being signalled.
+pub fn terminate_detected_server(pid: u32) -> Result<()> {
+    anyhow::ensure!(pid > 1, "refusing to terminate reserved PID {pid}");
+    let server = detected_servers()
+        .into_iter()
+        .find(|server| server.pid == pid)
+        .ok_or_else(|| anyhow::anyhow!("PID {pid} is not a detected llama-server"))?;
+    anyhow::ensure!(
+        is_llama_server_command(&server.command),
+        "PID {pid} command is not llama-server"
+    );
+    #[cfg(unix)]
+    {
+        let status = Command::new("kill")
+            .arg(pid.to_string())
+            .status()
+            .with_context(|| format!("signal llama-server PID {pid}"))?;
+        anyhow::ensure!(status.success(), "kill returned {status}");
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = server;
+        anyhow::bail!("external server termination is not supported on this platform")
+    }
+}
+
 fn detected_endpoints() -> Vec<String> {
     let mut endpoints = Vec::new();
-    #[cfg(unix)]
-    if let Ok(output) = Command::new("pgrep").args(["-fa", "llama-server"]).output() {
-        let text = String::from_utf8_lossy(&output.stdout);
-        for port in ports_from_process_list(&text) {
+    for server in detected_servers() {
+        if let Some(port) = server.port {
             push_endpoint(&mut endpoints, port);
         }
     }
@@ -226,6 +277,31 @@ fn detected_endpoints() -> Vec<String> {
         push_endpoint(&mut endpoints, port);
     }
     endpoints
+}
+
+fn parse_detected_servers(text: &str) -> Vec<DetectedServer> {
+    text.lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let pid = fields.next()?.parse::<u32>().ok()?;
+            let command = fields.collect::<Vec<_>>().join(" ");
+            if !is_llama_server_command(&command) {
+                return None;
+            }
+            let port = ports_from_process_list(line).into_iter().next();
+            Some(DetectedServer { pid, command, port })
+        })
+        .collect()
+}
+
+fn is_llama_server_command(command: &str) -> bool {
+    command.split_whitespace().any(|token| {
+        let token = token.trim_matches(|character: char| "'\"".contains(character));
+        Path::new(token)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name == "llama-server" || name.starts_with("llama-server-"))
+    })
 }
 
 fn ports_from_process_list(text: &str) -> Vec<u16> {
@@ -634,6 +710,28 @@ mod tests {
             "123 llama-server --port 8001 --host 127.0.0.1\n456 llama-server --port=8080",
         );
         assert_eq!(ports, [8001, 8080]);
+    }
+
+    #[test]
+    fn detects_only_llama_server_processes_and_ports() {
+        let servers = parse_detected_servers(
+            "123 /opt/llama-server --port 8001 --host 127.0.0.1\n456 unrelated --port 9999\n789 llama-server --port=8080",
+        );
+        assert_eq!(
+            servers,
+            [
+                DetectedServer {
+                    pid: 123,
+                    command: "/opt/llama-server --port 8001 --host 127.0.0.1".into(),
+                    port: Some(8001),
+                },
+                DetectedServer {
+                    pid: 789,
+                    command: "llama-server --port=8080".into(),
+                    port: Some(8080),
+                },
+            ]
+        );
     }
 
     #[test]

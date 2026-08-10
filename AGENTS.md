@@ -41,3 +41,13 @@ Update `CHANGELOG.md` on every user-visible change.
 The Rust port is active under `CAR-97` and starts at version `0.7.0`.
 Retain the legacy Python TUI and downloader until their Rust replacement or
 compatibility boundary has explicit parity coverage.
+
+## Planning Authority
+
+Linear is authoritative for committed L3MS work. The repository and Markdown
+remain authoritative for code and canonical documentation. The single Linear
+project is `L3MS` with milestone `Operations backlog completion — 2026-08-10`.
+The reconciled TODO groups are tracked by `CAR-140` through `CAR-146`, while
+`CAR-97` remains the parent Rust-port history and is attached to the same
+project/milestone. `TODO.md` is reserved for speculative or research notes
+that have not been intentionally committed.

@@ -10,8 +10,11 @@ use anyhow::{bail, Context, Result};
 use clap::{ArgGroup, Parser, ValueEnum};
 
 use crate::{
+    bench_results::{load_results_in, sort_results, ResultSort},
     llama_swap::{SwapClient, SwapModel},
     script_store::{collect_scripts_in, ScriptMode},
+    settings::{export_profile_in, import_profile_in, load_settings_in},
+    prompt_store::list_prompts,
 };
 
 #[derive(Debug, Parser)]
@@ -21,7 +24,16 @@ use crate::{
     about = "L3MS launcher (TUI + interactive run/bench CLI)",
     group(
         ArgGroup::new("action")
-            .args(["run", "bench", "list", "quickstart"])
+            .args([
+                "run",
+                "bench",
+                "list",
+                "quickstart",
+                "settings",
+                "export_profile",
+                "import_profile",
+                "compare_results",
+            ])
             .multiple(false)
     )
 )]
@@ -44,13 +56,29 @@ struct Cli {
     )]
     bench: Option<String>,
 
-    /// List llama-swap models, benchmark scripts, or both.
+    /// List llama-swap models, benchmark scripts, results, prompts, or everything.
     #[arg(long, value_name = "MODE")]
     list: Option<ListMode>,
 
     /// Print a quick-start guide and exit.
     #[arg(long)]
     quickstart: bool,
+
+    /// Print the persisted settings and exit.
+    #[arg(long)]
+    settings: bool,
+
+    /// Export models, scripts, and non-secret settings to a directory.
+    #[arg(long, value_name = "DIRECTORY")]
+    export_profile: Option<PathBuf>,
+
+    /// Preview and import a profile directory.
+    #[arg(long, value_name = "DIRECTORY")]
+    import_profile: Option<PathBuf>,
+
+    /// Compare two benchmark result files from the bounded result browser.
+    #[arg(long, value_names = ["LEFT", "RIGHT"], num_args = 2)]
+    compare_results: Option<Vec<PathBuf>>,
 
     /// Shell-style arguments appended to the selected benchmark script.
     #[arg(
@@ -66,6 +94,8 @@ struct Cli {
 enum ListMode {
     Run,
     Bench,
+    Results,
+    Prompts,
     All,
 }
 
@@ -83,6 +113,44 @@ pub fn run() -> Result<u8> {
 fn dispatch(cli: Cli) -> Result<u8> {
     if cli.quickstart {
         print_quickstart();
+        return Ok(0);
+    }
+
+    if cli.settings {
+        let data_root = crate::state_store::data_root()?;
+        let settings = load_settings_in(&data_root)?;
+        println!("settings: {}", crate::settings::settings_path(&data_root).display());
+        println!("{}", serde_json::to_string_pretty(&settings)?);
+        return Ok(0);
+    }
+
+    if let Some(target) = cli.export_profile {
+        let root = repository_root()?;
+        let data_root = crate::state_store::data_root()?;
+        let manifest = export_profile_in(&root, &data_root, &target)?;
+        println!(
+            "exported profile to {} ({} script(s))",
+            target.display(),
+            manifest.scripts.len()
+        );
+        return Ok(0);
+    }
+
+    if let Some(source) = cli.import_profile {
+        let root = repository_root()?;
+        let data_root = crate::state_store::data_root()?;
+        let manifest = import_profile_in(&root, &data_root, &source)?;
+        println!(
+            "imported profile from {} ({} script(s))",
+            source.display(),
+            manifest.scripts.len()
+        );
+        return Ok(0);
+    }
+
+    if let Some(paths) = cli.compare_results {
+        let root = repository_root()?;
+        compare_result_files(&root, &paths)?;
         return Ok(0);
     }
 
@@ -129,6 +197,13 @@ fn print_quickstart() {
     println!();
     println!("  5) Pass extra arguments to a selected benchmark");
     println!(r#"     l3ms --bench qwen --extra "--ctx-size 32768""#);
+    println!();
+    println!("  6) Inspect or move non-secret local profile settings");
+    println!("     l3ms --settings");
+    println!("     l3ms --export-profile ./profile");
+    println!();
+    println!("  7) Compare two benchmark result files");
+    println!("     l3ms --compare-results bench-results/left.md bench-results/right.md");
 }
 
 fn list(mode: ListMode) -> Result<u8> {
@@ -141,12 +216,33 @@ fn list(mode: ListMode) -> Result<u8> {
             let root = repository_root()?;
             print_script_list(&root, &collect_bench_scripts(&root)?);
         }
+        ListMode::Results => {
+            let root = repository_root()?;
+            print_result_list(&root)?;
+        }
+        ListMode::Prompts => {
+            let data_root = crate::state_store::data_root()?;
+            let prompts = list_prompts(&data_root)?;
+            println!("CHAT prompts ({}):", prompts.len());
+            for prompt in prompts {
+                println!("  {prompt}");
+            }
+        }
         ListMode::All => {
             let client = SwapClient::from_env()?;
             print_model_list(&client.list_models()?);
             println!();
             let root = repository_root()?;
             print_script_list(&root, &collect_bench_scripts(&root)?);
+            println!();
+            print_result_list(&root)?;
+            let data_root = crate::state_store::data_root()?;
+            let prompts = list_prompts(&data_root)?;
+            println!();
+            println!("CHAT prompts ({}):", prompts.len());
+            for prompt in prompts {
+                println!("  {prompt}");
+            }
         }
     }
     Ok(0)
@@ -284,6 +380,72 @@ fn print_script_list(root: &Path, scripts: &[PathBuf]) {
     }
 }
 
+fn print_result_list(root: &Path) -> Result<()> {
+    let mut loaded = load_results_in(root)?;
+    sort_results(&mut loaded.results, ResultSort::TimestampDesc);
+    if loaded.results.is_empty() {
+        println!("BENCH results (0): no result records found");
+    } else {
+        println!("BENCH results ({}):", loaded.results.len());
+        for (index, result) in loaded.results.iter().enumerate() {
+            let pp = result
+                .pp_ts
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:.2}"));
+            let tg = result
+                .tg_ts
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:.2}"));
+            println!(
+                "  {:>2}. {:<28} {:<12} pp={:<8} tg={:<8} {}",
+                index + 1,
+                result.model_key,
+                result.strategy,
+                pp,
+                tg,
+                result.ts
+            );
+        }
+    }
+    for issue in loaded.issues {
+        let line = issue.line.map_or_else(String::new, |line| format!(":{line}"));
+        eprintln!("warning: {}{}: {}", issue.source.display(), line, issue.error);
+    }
+    if loaded.truncated_rows > 0 {
+        eprintln!("warning: truncated {} result rows", loaded.truncated_rows);
+    }
+    Ok(())
+}
+
+fn compare_result_files(root: &Path, paths: &[PathBuf]) -> Result<()> {
+    anyhow::ensure!(paths.len() == 2, "--compare-results requires exactly two files");
+    let load = load_results_in(root)?;
+    let records = paths
+        .iter()
+        .map(|path| {
+            let candidate = if path.is_absolute() {
+                path.clone()
+            } else {
+                root.join(path)
+            };
+            load.results
+                .iter()
+                .find(|result| result.source == candidate)
+                .cloned()
+                .ok_or_else(|| anyhow::anyhow!("no result record found for {}", path.display()))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let comparison = crate::bench_results::compare_results(&records[0], &records[1]);
+    println!("BENCH comparison");
+    println!("  left:  {}", records[0].source.display());
+    println!("  right: {}", records[1].source.display());
+    for (name, delta) in comparison.metrics {
+        let value = delta.delta.map_or_else(|| "—".to_owned(), |value| format!("{value:+.3}"));
+        println!("  {name}: left={} right={} delta={value}",
+            delta.left.map_or_else(|| "—".to_owned(), |value| format!("{value:.3}")),
+            delta.right.map_or_else(|| "—".to_owned(), |value| format!("{value:.3}")));
+    }
+    Ok(())
+}
+
 fn choose_index(count: usize, item_name: &str) -> Result<Option<usize>> {
     println!("Select {item_name} index, or 'q' to quit.");
     let stdin = io::stdin();
@@ -419,6 +581,19 @@ mod tests {
 
         let cli = Cli::try_parse_from(["l3ms", "--list", "all"]).unwrap();
         assert_eq!(cli.list, Some(ListMode::All));
+        let cli = Cli::try_parse_from(["l3ms", "--list", "results"]).unwrap();
+        assert_eq!(cli.list, Some(ListMode::Results));
+        let cli = Cli::try_parse_from(["l3ms", "--list", "prompts"]).unwrap();
+        assert_eq!(cli.list, Some(ListMode::Prompts));
+        assert!(Cli::try_parse_from(["l3ms", "--settings"]).unwrap().settings);
+        let cli = Cli::try_parse_from([
+            "l3ms",
+            "--compare-results",
+            "bench-results/left.md",
+            "bench-results/right.md",
+        ])
+        .unwrap();
+        assert_eq!(cli.compare_results.unwrap().len(), 2);
 
         let cli = Cli::try_parse_from(["l3ms", "--bench", "qwen", "--extra", "--ctx-size 32768"])
             .unwrap();
