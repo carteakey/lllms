@@ -215,7 +215,7 @@ fn network_bytes() -> Option<(u64, u64)> {
     #[cfg(target_os = "linux")]
     {
         let text = fs::read_to_string("/proc/net/dev").ok()?;
-        return parse_proc_net_dev(&text);
+        parse_proc_net_dev(&text)
     }
     #[cfg(not(target_os = "linux"))]
     {
