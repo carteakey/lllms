@@ -1,9 +1,10 @@
 # Platform portability decisions
 
-The canonical repository remains `carteakey/l3ms`; renaming the remote is an
-external GitHub administration action and is tracked in CAR-146. Local code
-and documentation should continue using the existing remote until that action
-is intentionally completed.
+The canonical GitHub remote is already `carteakey/l3ms`; `origin` points to
+`https://github.com/carteakey/l3ms.git`. No repository rename is currently
+required. Local code and documentation should continue using this remote until
+a future issue names a specific replacement and the GitHub administration
+change is intentionally approved.
 
 The Rust application is a native terminal binary. Its process supervision,
 `pgrep`/`ps` detection, and signal-based shutdown are intentionally guarded by

@@ -6,14 +6,31 @@ that command from a developer workstation because it requires host hardware and
 `sudo` access.
 
 On KPC, capture both boots with the same model, llama.cpp revision, and power
-state:
+state. Every fast and slow sample must include its timestamp, hostname, boot
+ID, and kernel so that the two runs can be tied to the exact host boot:
 
 ```bash
-sudo bash preflight-check.sh | tee /tmp/l3ms-preflight-fast.txt
+capture_preflight() {
+  label="$1"
+  {
+    printf 'timestamp: '; date --iso-8601=seconds
+    printf 'hostname: '; hostname
+    printf 'boot_id: '; cat /proc/sys/kernel/random/boot_id
+    printf 'kernel: '; uname -r
+    sudo bash preflight-check.sh
+  } | tee "/tmp/l3ms-preflight-${label}.txt"
+}
+
+capture_preflight fast
 # reproduce a slow TG boot, then run the same command:
-sudo bash preflight-check.sh | tee /tmp/l3ms-preflight-slow.txt
+capture_preflight slow
 diff -u /tmp/l3ms-preflight-fast.txt /tmp/l3ms-preflight-slow.txt
 ```
+
+The privileged preflight covers the CPU governor, EPP, current frequency,
+PCIe link and runtime power state, GPU state, RAM availability and speed,
+transparent huge pages (THP), and C-state activity. Keep those checks in both
+samples; do not compare only the benchmark throughput.
 
 Record the diff in the private Forge project context or the CAR-145 Linear
 issue; do not commit host identifiers, credentials, or raw production output.
