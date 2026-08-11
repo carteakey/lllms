@@ -342,8 +342,10 @@ mod tests {
     #[test]
     fn settings_default_and_validation_are_strict() {
         assert_eq!(Settings::default().default_port, 8080);
-        let mut settings = Settings::default();
-        settings.default_port = 0;
+        let settings = Settings {
+            default_port: 0,
+            ..Settings::default()
+        };
         assert!(!settings.validate().is_empty());
     }
 
