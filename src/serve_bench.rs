@@ -43,12 +43,8 @@ pub fn audit_flags(
     serving_config: impl AsRef<Path>,
     bench_scripts: impl IntoIterator<Item = impl AsRef<Path>>,
 ) -> Result<FlagAudit> {
-    let serving_text = fs::read_to_string(serving_config.as_ref()).with_context(|| {
-        format!(
-            "read serving config {}",
-            serving_config.as_ref().display()
-        )
-    })?;
+    let serving_text = fs::read_to_string(serving_config.as_ref())
+        .with_context(|| format!("read serving config {}", serving_config.as_ref().display()))?;
     let serving_flags = extract_tracked_flags(&serving_text);
     let mut bench_flags = BTreeSet::new();
     let mut scripts_checked = Vec::new();
@@ -77,7 +73,9 @@ fn extract_tracked_flags(text: &str) -> BTreeSet<String> {
         .filter(|flag| {
             text.lines().any(|line| {
                 line.split_whitespace().any(|token| {
-                    canonical_flag(token.trim_matches(|character| character == '\"' || character == '\'')) == **flag
+                    canonical_flag(
+                        token.trim_matches(|character| character == '\"' || character == '\''),
+                    ) == **flag
                 })
             })
         })

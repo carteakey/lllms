@@ -12,9 +12,9 @@ use clap::{ArgGroup, Parser, ValueEnum};
 use crate::{
     bench_results::{load_results_in, sort_results, ResultSort},
     llama_swap::{SwapClient, SwapModel},
+    prompt_store::list_prompts,
     script_store::{collect_scripts_in, ScriptMode},
     settings::{export_profile_in, import_profile_in, load_settings_in},
-    prompt_store::list_prompts,
 };
 
 #[derive(Debug, Parser)]
@@ -119,7 +119,10 @@ fn dispatch(cli: Cli) -> Result<u8> {
     if cli.settings {
         let data_root = crate::state_store::data_root()?;
         let settings = load_settings_in(&data_root)?;
-        println!("settings: {}", crate::settings::settings_path(&data_root).display());
+        println!(
+            "settings: {}",
+            crate::settings::settings_path(&data_root).display()
+        );
         println!("{}", serde_json::to_string_pretty(&settings)?);
         return Ok(0);
     }
@@ -406,8 +409,15 @@ fn print_result_list(root: &Path) -> Result<()> {
         }
     }
     for issue in loaded.issues {
-        let line = issue.line.map_or_else(String::new, |line| format!(":{line}"));
-        eprintln!("warning: {}{}: {}", issue.source.display(), line, issue.error);
+        let line = issue
+            .line
+            .map_or_else(String::new, |line| format!(":{line}"));
+        eprintln!(
+            "warning: {}{}: {}",
+            issue.source.display(),
+            line,
+            issue.error
+        );
     }
     if loaded.truncated_rows > 0 {
         eprintln!("warning: truncated {} result rows", loaded.truncated_rows);
@@ -416,7 +426,10 @@ fn print_result_list(root: &Path) -> Result<()> {
 }
 
 fn compare_result_files(root: &Path, paths: &[PathBuf]) -> Result<()> {
-    anyhow::ensure!(paths.len() == 2, "--compare-results requires exactly two files");
+    anyhow::ensure!(
+        paths.len() == 2,
+        "--compare-results requires exactly two files"
+    );
     let load = load_results_in(root)?;
     let records = paths
         .iter()
@@ -438,10 +451,18 @@ fn compare_result_files(root: &Path, paths: &[PathBuf]) -> Result<()> {
     println!("  left:  {}", records[0].source.display());
     println!("  right: {}", records[1].source.display());
     for (name, delta) in comparison.metrics {
-        let value = delta.delta.map_or_else(|| "—".to_owned(), |value| format!("{value:+.3}"));
-        println!("  {name}: left={} right={} delta={value}",
-            delta.left.map_or_else(|| "—".to_owned(), |value| format!("{value:.3}")),
-            delta.right.map_or_else(|| "—".to_owned(), |value| format!("{value:.3}")));
+        let value = delta
+            .delta
+            .map_or_else(|| "—".to_owned(), |value| format!("{value:+.3}"));
+        println!(
+            "  {name}: left={} right={} delta={value}",
+            delta
+                .left
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:.3}")),
+            delta
+                .right
+                .map_or_else(|| "—".to_owned(), |value| format!("{value:.3}"))
+        );
     }
     Ok(())
 }
@@ -585,7 +606,11 @@ mod tests {
         assert_eq!(cli.list, Some(ListMode::Results));
         let cli = Cli::try_parse_from(["l3ms", "--list", "prompts"]).unwrap();
         assert_eq!(cli.list, Some(ListMode::Prompts));
-        assert!(Cli::try_parse_from(["l3ms", "--settings"]).unwrap().settings);
+        assert!(
+            Cli::try_parse_from(["l3ms", "--settings"])
+                .unwrap()
+                .settings
+        );
         let cli = Cli::try_parse_from([
             "l3ms",
             "--compare-results",

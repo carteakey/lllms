@@ -72,8 +72,8 @@ pub fn lint_shell_script(path: impl AsRef<Path>) -> Result<LintReport> {
             }],
         });
     }
-    let payload: ShellcheckPayload = serde_json::from_slice(&output.stdout)
-        .context("parse shellcheck JSON output")?;
+    let payload: ShellcheckPayload =
+        serde_json::from_slice(&output.stdout).context("parse shellcheck JSON output")?;
     let diagnostics = payload
         .comments
         .into_iter()

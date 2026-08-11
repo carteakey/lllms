@@ -19,7 +19,7 @@ use std::os::unix::process::CommandExt;
 
 use crate::{
     chat::{
-        detected_servers, detect_chat_server, terminate_detected_server, ChatClient,
+        detect_chat_server, detected_servers, terminate_detected_server, ChatClient,
         ChatCompletion, ChatRequest,
     },
     chat_history::ChatHistory,
@@ -1723,7 +1723,10 @@ impl App {
         if self.script_input_target == Some(target) && !self.sync_script_buffer(target) {
             return;
         }
-        let saved_path = self.script_editor(target).selected_path().map(PathBuf::from);
+        let saved_path = self
+            .script_editor(target)
+            .selected_path()
+            .map(PathBuf::from);
         match self.script_editor_mut(target).save("manual-save") {
             Ok(outcome) => {
                 self.script_reload_armed = None;
@@ -1743,11 +1746,7 @@ impl App {
                 if let Some(path) = saved_path {
                     match lint_shell_script(&path) {
                         Ok(report) if report.available && !report.diagnostics.is_empty() => {
-                            self.push_log(format!(
-                                "{}: {}",
-                                path.display(),
-                                report.summary()
-                            ));
+                            self.push_log(format!("{}: {}", path.display(), report.summary()));
                             for diagnostic in report.diagnostics.iter().take(8) {
                                 self.push_log(format!(
                                     "  {}:{}:{} SC{} {:?}: {}",
@@ -2409,10 +2408,11 @@ impl App {
             self.download_state.select(None);
             return;
         };
-        self.download_page = (index / DOWNLOAD_PAGE_SIZE)
-            .min(self.download_page_count().saturating_sub(1));
-        self.download_state
-            .select(Some(index.saturating_sub(self.download_page * DOWNLOAD_PAGE_SIZE)));
+        self.download_page =
+            (index / DOWNLOAD_PAGE_SIZE).min(self.download_page_count().saturating_sub(1));
+        self.download_state.select(Some(
+            index.saturating_sub(self.download_page * DOWNLOAD_PAGE_SIZE),
+        ));
     }
 
     fn select_download_previous(&mut self) {
@@ -2443,8 +2443,8 @@ impl App {
     }
 
     fn next_download_page(&mut self) {
-        self.download_page = (self.download_page + 1)
-            .min(self.download_page_count().saturating_sub(1));
+        self.download_page =
+            (self.download_page + 1).min(self.download_page_count().saturating_sub(1));
         let index = self.download_page * DOWNLOAD_PAGE_SIZE;
         self.download.select(index);
         self.sync_download_table_state();
@@ -2840,17 +2840,23 @@ impl App {
         if remaining == 0 {
             return Some("ETA done".into());
         }
-        let speed = progress.speed_bytes_per_second.filter(|speed| *speed > 0.0).or_else(|| {
-            self.download_started_at.and_then(|started| {
-                let seconds = started.elapsed().as_secs_f64();
-                (seconds > 0.0).then(|| downloaded as f64 / seconds)
-            })
-        })?;
+        let speed = progress
+            .speed_bytes_per_second
+            .filter(|speed| *speed > 0.0)
+            .or_else(|| {
+                self.download_started_at.and_then(|started| {
+                    let seconds = started.elapsed().as_secs_f64();
+                    (seconds > 0.0).then(|| downloaded as f64 / seconds)
+                })
+            })?;
         let seconds = remaining as f64 / speed;
         if !seconds.is_finite() || seconds < 0.0 {
             return None;
         }
-        Some(format!("ETA {}", format_duration(Duration::from_secs_f64(seconds))))
+        Some(format!(
+            "ETA {}",
+            format_duration(Duration::from_secs_f64(seconds))
+        ))
     }
 
     fn handle_jobs_key(&mut self, key: KeyEvent) {
@@ -2911,7 +2917,10 @@ impl App {
     }
 
     fn model_page_count(&self) -> usize {
-        self.filtered_models().len().div_ceil(MODEL_PAGE_SIZE).max(1)
+        self.filtered_models()
+            .len()
+            .div_ceil(MODEL_PAGE_SIZE)
+            .max(1)
     }
 
     fn previous_model_page(&mut self) {
@@ -5549,9 +5558,8 @@ fn parse_download_progress_line(line: &str) -> Option<DownloadProgressSnapshot> 
 }
 
 fn parse_progress_size(value: &str) -> Option<u64> {
-    let value = value.trim_matches(|character: char| {
-        matches!(character, '|' | ',' | ')' | ']' | '\r' | '\n')
-    });
+    let value = value
+        .trim_matches(|character: char| matches!(character, '|' | ',' | ')' | ']' | '\r' | '\n'));
     if value.is_empty() {
         return None;
     }
@@ -5819,7 +5827,10 @@ mod tests {
         .unwrap();
         assert_eq!(progress.downloaded_bytes, 1 << 30);
         assert_eq!(progress.total_bytes, 4 << 30);
-        assert_eq!(progress.speed_bytes_per_second, Some(32.0 * (1 << 20) as f64));
+        assert_eq!(
+            progress.speed_bytes_per_second,
+            Some(32.0 * (1 << 20) as f64)
+        );
     }
 
     struct AppFixture {

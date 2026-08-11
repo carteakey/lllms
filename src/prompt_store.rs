@@ -56,8 +56,8 @@ pub fn load_prompt(data_root: impl AsRef<Path>, name: &str) -> Result<Prompt> {
     if bytes.len() > MAX_PROMPT_BYTES {
         return Err(anyhow!("prompt {name} exceeds {MAX_PROMPT_BYTES} bytes"));
     }
-    let content = String::from_utf8(bytes)
-        .with_context(|| format!("prompt {name} is not UTF-8"))?;
+    let content =
+        String::from_utf8(bytes).with_context(|| format!("prompt {name} is not UTF-8"))?;
     Ok(Prompt {
         name: name.to_owned(),
         content,

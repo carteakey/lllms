@@ -106,8 +106,9 @@ pub fn load_results_in(root: &Path) -> Result<BenchResultLoad> {
             Ok(entries) => entries,
             Err(error) if error.kind() == ErrorKind::NotFound => continue,
             Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("failed to read result directory {}", directory.display()))
+                return Err(error).with_context(|| {
+                    format!("failed to read result directory {}", directory.display())
+                })
             }
         };
         for entry in entries {
@@ -118,8 +119,14 @@ pub fn load_results_in(root: &Path) -> Result<BenchResultLoad> {
             if !path.is_file() {
                 continue;
             }
-            let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default();
-            if matches!(extension.to_ascii_lowercase().as_str(), "jsonl" | "json" | "md" | "markdown") {
+            let extension = path
+                .extension()
+                .and_then(|value| value.to_str())
+                .unwrap_or_default();
+            if matches!(
+                extension.to_ascii_lowercase().as_str(),
+                "jsonl" | "json" | "md" | "markdown"
+            ) {
                 files.push(path);
             }
         }
@@ -141,7 +148,10 @@ pub fn load_results_in(root: &Path) -> Result<BenchResultLoad> {
             continue;
         }
         let source = path.clone();
-        let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default();
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default();
         if matches!(extension.to_ascii_lowercase().as_str(), "md" | "markdown") {
             parse_markdown_results(&String::from_utf8_lossy(&bytes), &source, &mut load);
         } else {
@@ -319,8 +329,10 @@ fn parse_speed(cell: &str) -> Option<(f64, Option<f64>)> {
 }
 
 fn compare_optional_f64(left: Option<f64>, right: Option<f64>) -> Ordering {
-    left.zip(right)
-        .map_or_else(|| right.is_some().cmp(&left.is_some()), |(a, b)| a.partial_cmp(&b).unwrap_or(Ordering::Equal))
+    left.zip(right).map_or_else(
+        || right.is_some().cmp(&left.is_some()),
+        |(a, b)| a.partial_cmp(&b).unwrap_or(Ordering::Equal),
+    )
 }
 
 #[cfg(test)]

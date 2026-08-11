@@ -88,7 +88,9 @@ pub fn load_settings_in(data_root: &Path) -> Result<Settings> {
     let bytes = match fs::read(&path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == ErrorKind::NotFound => return Ok(Settings::default()),
-        Err(error) => return Err(error).with_context(|| format!("failed to read {}", path.display())),
+        Err(error) => {
+            return Err(error).with_context(|| format!("failed to read {}", path.display()))
+        }
     };
     if bytes.len() > MAX_SETTINGS_BYTES {
         return Err(anyhow!("settings file exceeds {MAX_SETTINGS_BYTES} bytes"));
@@ -114,7 +116,9 @@ pub fn save_settings_in(data_root: &Path, settings: &Settings) -> Result<()> {
     let mut bytes = serde_json::to_vec_pretty(settings).context("serialize settings")?;
     bytes.push(b'\n');
     if bytes.len() > MAX_SETTINGS_BYTES {
-        return Err(anyhow!("serialized settings exceed {MAX_SETTINGS_BYTES} bytes"));
+        return Err(anyhow!(
+            "serialized settings exceed {MAX_SETTINGS_BYTES} bytes"
+        ));
     }
     let path = settings_path(data_root);
     atomic_write(&path, &bytes)
@@ -123,11 +127,19 @@ pub fn save_settings_in(data_root: &Path, settings: &Settings) -> Result<()> {
 /// Export a deterministic directory bundle. The bundle intentionally contains
 /// only model configuration, script source, and non-secret settings; absolute
 /// machine paths are not copied into the manifest.
-pub fn export_profile(repo_root: impl AsRef<Path>, data_root: impl AsRef<Path>, target: impl AsRef<Path>) -> Result<ProfileManifest> {
+pub fn export_profile(
+    repo_root: impl AsRef<Path>,
+    data_root: impl AsRef<Path>,
+    target: impl AsRef<Path>,
+) -> Result<ProfileManifest> {
     export_profile_in(repo_root.as_ref(), data_root.as_ref(), target.as_ref())
 }
 
-pub fn export_profile_in(repo_root: &Path, data_root: &Path, target: &Path) -> Result<ProfileManifest> {
+pub fn export_profile_in(
+    repo_root: &Path,
+    data_root: &Path,
+    target: &Path,
+) -> Result<ProfileManifest> {
     let settings = load_settings_in(data_root)?;
     let config_path = repo_root.join("model_downloader/models_config.json");
     let config = config_store::load_config_strict(&config_path)
@@ -139,16 +151,27 @@ pub fn export_profile_in(repo_root: &Path, data_root: &Path, target: &Path) -> R
     atomic_write(&target.join(PROFILE_CONFIG), &config_bytes)?;
 
     let mut scripts = Vec::new();
-    for mode in [script_store::ScriptMode::Bench, script_store::ScriptMode::Run] {
+    for mode in [
+        script_store::ScriptMode::Bench,
+        script_store::ScriptMode::Run,
+    ] {
         for script in script_store::collect_scripts_in(repo_root, mode)? {
-            let relative = script.strip_prefix(repo_root).map_err(|_| anyhow!("script outside repository"))?;
+            let relative = script
+                .strip_prefix(repo_root)
+                .map_err(|_| anyhow!("script outside repository"))?;
             let relative = relative.to_string_lossy().replace('\\', "/");
             let destination = scripts_root.join(&relative);
-            let parent = destination.parent().ok_or_else(|| anyhow!("script destination has no parent"))?;
+            let parent = destination
+                .parent()
+                .ok_or_else(|| anyhow!("script destination has no parent"))?;
             fs::create_dir_all(parent)?;
-            let content = fs::read(&script).with_context(|| format!("read script {}", script.display()))?;
+            let content =
+                fs::read(&script).with_context(|| format!("read script {}", script.display()))?;
             if content.len() > MAX_PROFILE_FILE_BYTES {
-                return Err(anyhow!("script {} exceeds {MAX_PROFILE_FILE_BYTES} bytes", script.display()));
+                return Err(anyhow!(
+                    "script {} exceeds {MAX_PROFILE_FILE_BYTES} bytes",
+                    script.display()
+                ));
             }
             atomic_write(&destination, &content)?;
             scripts.push(relative);
@@ -162,7 +185,8 @@ pub fn export_profile_in(repo_root: &Path, data_root: &Path, target: &Path) -> R
         scripts_directory: PROFILE_SCRIPTS.to_owned(),
         scripts,
     };
-    let mut manifest_bytes = serde_json::to_vec_pretty(&manifest).context("serialize profile manifest")?;
+    let mut manifest_bytes =
+        serde_json::to_vec_pretty(&manifest).context("serialize profile manifest")?;
     manifest_bytes.push(b'\n');
     atomic_write(&target.join(PROFILE_MANIFEST), &manifest_bytes)?;
     Ok(manifest)
@@ -179,7 +203,10 @@ pub fn preview_profile_in(source: &Path) -> Result<ProfilePreview> {
     let manifest: ProfileManifest = serde_json::from_slice(&manifest_bytes)
         .with_context(|| format!("parse profile manifest {}", manifest_path.display()))?;
     if manifest.schema_version != 1 {
-        return Err(anyhow!("unsupported profile schema {}", manifest.schema_version));
+        return Err(anyhow!(
+            "unsupported profile schema {}",
+            manifest.schema_version
+        ));
     }
     let errors = manifest.settings.validate();
     if !errors.is_empty() {
@@ -195,41 +222,77 @@ pub fn preview_profile_in(source: &Path) -> Result<ProfilePreview> {
     for relative in &manifest.scripts {
         ensure_relative_file(relative)?;
         if !relative.starts_with("bench-models/") && !relative.starts_with("run-models/") {
-            return Err(anyhow!("profile script must be under bench-models or run-models: {relative}"));
+            return Err(anyhow!(
+                "profile script must be under bench-models or run-models: {relative}"
+            ));
         }
         let path = source.join(&manifest.scripts_directory).join(relative);
         let bytes = bounded_read(&path)?;
-        let content = String::from_utf8(bytes).with_context(|| format!("script {relative} is not UTF-8"))?;
+        let content =
+            String::from_utf8(bytes).with_context(|| format!("script {relative} is not UTF-8"))?;
         scripts.insert(relative.clone(), content);
     }
-    Ok(ProfilePreview { manifest, config, scripts })
+    Ok(ProfilePreview {
+        manifest,
+        config,
+        scripts,
+    })
 }
 
 /// Apply a previously validated profile. Every changed config/script uses the
 /// existing snapshot-aware stores; callers should show [`preview_profile`]
 /// before invoking this mutating operation.
-pub fn import_profile(repo_root: impl AsRef<Path>, data_root: impl AsRef<Path>, source: impl AsRef<Path>) -> Result<ProfileManifest> {
+pub fn import_profile(
+    repo_root: impl AsRef<Path>,
+    data_root: impl AsRef<Path>,
+    source: impl AsRef<Path>,
+) -> Result<ProfileManifest> {
     import_profile_in(repo_root.as_ref(), data_root.as_ref(), source.as_ref())
 }
 
-pub fn import_profile_in(repo_root: &Path, data_root: &Path, source: &Path) -> Result<ProfileManifest> {
+pub fn import_profile_in(
+    repo_root: &Path,
+    data_root: &Path,
+    source: &Path,
+) -> Result<ProfileManifest> {
     let preview = preview_profile_in(source)?;
     save_settings_in(data_root, &preview.manifest.settings)?;
     let config_path = repo_root.join("model_downloader/models_config.json");
     let version_root = repo_root.join(".toolkit/download_config_versions");
-    config_store::save_config_in(&config_path, &preview.config, "profile-import", &version_root)?;
+    config_store::save_config_in(
+        &config_path,
+        &preview.config,
+        "profile-import",
+        &version_root,
+    )?;
     let script_versions = repo_root.join(".toolkit/script_versions");
     for (relative, content) in &preview.scripts {
         let destination = repo_root.join(relative);
-        script_store::save_script_with_version_in(&destination, content, "profile-import", repo_root, &script_versions)?;
+        script_store::save_script_with_version_in(
+            &destination,
+            content,
+            "profile-import",
+            repo_root,
+            &script_versions,
+        )?;
     }
     Ok(preview.manifest)
 }
 
 fn ensure_relative_file(value: &str) -> Result<()> {
     let path = Path::new(value);
-    if value.is_empty() || path.is_absolute() || path.components().any(|component| matches!(component, Component::ParentDir | Component::RootDir | Component::Prefix(_))) {
-        return Err(anyhow!("profile path must be a safe relative file: {value:?}"));
+    if value.is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(anyhow!(
+            "profile path must be a safe relative file: {value:?}"
+        ));
     }
     Ok(())
 }
@@ -237,17 +300,31 @@ fn ensure_relative_file(value: &str) -> Result<()> {
 fn bounded_read(path: &Path) -> Result<Vec<u8>> {
     let bytes = fs::read(path).with_context(|| format!("read profile file {}", path.display()))?;
     if bytes.len() > MAX_PROFILE_FILE_BYTES {
-        return Err(anyhow!("profile file {} exceeds {MAX_PROFILE_FILE_BYTES} bytes", path.display()));
+        return Err(anyhow!(
+            "profile file {} exceeds {MAX_PROFILE_FILE_BYTES} bytes",
+            path.display()
+        ));
     }
     Ok(bytes)
 }
 
 fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
-    let parent = path.parent().ok_or_else(|| anyhow!("target has no parent: {}", path.display()))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| anyhow!("target has no parent: {}", path.display()))?;
     fs::create_dir_all(parent)?;
     let nonce = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
-    let temp = parent.join(format!(".{}.{}.tmp", path.file_name().and_then(|name| name.to_str()).unwrap_or("profile"), nonce));
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&temp)?;
+    let temp = parent.join(format!(
+        ".{}.{}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("profile"),
+        nonce
+    ));
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temp)?;
     file.write_all(bytes)?;
     file.sync_all()?;
     drop(file);
@@ -340,10 +417,15 @@ mod tests {
                 "run-models/run-llama-cpp-demo.sh"
             ]
         );
-        assert_eq!(preview_profile_in(&bundle).unwrap().manifest.settings, settings);
+        assert_eq!(
+            preview_profile_in(&bundle).unwrap().manifest.settings,
+            settings
+        );
 
         fs::write(
-            repository.path().join("model_downloader/models_config.json"),
+            repository
+                .path()
+                .join("model_downloader/models_config.json"),
             r#"{"base_models_dir":"changed","models":[]}"#,
         )
         .unwrap();
@@ -354,11 +436,17 @@ mod tests {
         .unwrap();
         import_profile_in(repository.path(), data.path(), &bundle).unwrap();
         assert_eq!(load_settings_in(data.path()).unwrap(), settings);
-        assert!(fs::read_to_string(repository.path().join("bench-models/bench-demo.sh"))
-            .unwrap()
-            .contains("echo bench"));
-        assert!(fs::read_to_string(repository.path().join("model_downloader/models_config.json"))
-            .unwrap()
-            .contains("org/model"));
+        assert!(
+            fs::read_to_string(repository.path().join("bench-models/bench-demo.sh"))
+                .unwrap()
+                .contains("echo bench")
+        );
+        assert!(fs::read_to_string(
+            repository
+                .path()
+                .join("model_downloader/models_config.json")
+        )
+        .unwrap()
+        .contains("org/model"));
     }
 }
