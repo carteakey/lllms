@@ -6582,7 +6582,7 @@ mod tests {
         assert_eq!(app.bench_filter, "bench-");
         assert_eq!(
             app.selected_script_path(ScriptEditorTarget::Bench),
-            Some(fixture.bench_first.clone())
+            Some(fixture.bench_second.clone())
         );
         app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE))
             .unwrap();
@@ -6630,6 +6630,32 @@ mod tests {
         let mut terminal = Terminal::new(backend).unwrap();
         terminal.draw(|frame| app.draw(frame)).unwrap();
         assert!(terminal_text(&terminal).contains("No bench scripts match the current filter"));
+    }
+
+    #[test]
+    fn bench_inventory_order_is_stable_when_files_are_created_in_reverse_order() {
+        let fixture = AppFixture::new();
+        fs::remove_file(&fixture.bench_first).unwrap();
+        fs::remove_file(&fixture.bench_second).unwrap();
+        fs::write(&fixture.bench_second, "#!/bin/sh\necho b\n").unwrap();
+        fs::write(&fixture.bench_first, "#!/bin/sh\necho a\n").unwrap();
+
+        let app = fixture.app();
+        assert_eq!(
+            app.bench_scripts,
+            vec![fixture.bench_first.clone(), fixture.bench_second.clone()]
+        );
+        assert_eq!(
+            app.visible_bench_scripts()
+                .into_iter()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec![fixture.bench_first.clone(), fixture.bench_second.clone()]
+        );
+        assert_eq!(
+            app.selected_script_path(ScriptEditorTarget::Bench),
+            Some(fixture.bench_first.clone())
+        );
     }
 
     #[test]
