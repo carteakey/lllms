@@ -32,7 +32,7 @@ use crate::{
     job_history::JobHistory,
     llama_swap::{SwapClient, SwapModel, DEFAULT_BASE_URL},
     script_editor::ScriptEditorState,
-    script_store::{collect_scripts_in, command_for_script, ScriptMode},
+    script_store::{collect_scripts_in, command_for_script, pretty_name, ScriptMode},
     state_store::{self, ChatSession, ChatSessionList, ChatSessionSummary, SavedChatSession},
     telemetry::{find_process_named, snapshot_descendants, snapshot_process_group},
     text_buffer::TextBuffer,
@@ -144,6 +144,7 @@ struct EditorViewport {
 enum InputMode {
     Normal,
     ModelFilter,
+    BenchFilter,
     BrowserPath,
     BrowserFilter,
     ChatMessage,
@@ -276,6 +277,7 @@ struct App {
 
     ops_mode: OpsMode,
     bench_scripts: Vec<PathBuf>,
+    bench_filter: String,
     bench_state: ListState,
     bench_editor: ScriptEditorState,
 
@@ -408,6 +410,7 @@ impl App {
             loaded_model_id: None,
             ops_mode: OpsMode::Run,
             bench_scripts: Vec::new(),
+            bench_filter: String::new(),
             bench_state: ListState::default().with_selected(Some(0)),
             bench_editor,
             chat_input: String::new(),
@@ -503,12 +506,13 @@ impl App {
     }
 
     fn refresh_local_inventories(&mut self) {
+        let selected_bench = self.selected_script_path(ScriptEditorTarget::Bench);
         match collect_scripts_in(&self.root, ScriptMode::Bench) {
             Ok(scripts) => self.bench_scripts = scripts,
             Err(error) => self.push_log(format!("Bench inventory failed: {error:#}")),
         }
         self.maintenance_scripts = collect_shell_scripts(&self.root.join("maintenance"), "");
-        clamp_list_selection(&mut self.bench_state, self.bench_scripts.len());
+        self.restore_bench_selection(selected_bench.as_deref());
         clamp_list_selection(&mut self.maintenance_state, self.maintenance_scripts.len());
         self.sync_script_editor_selection(ScriptEditorTarget::Bench);
         self.sync_script_editor_selection(ScriptEditorTarget::Maintenance);
@@ -1340,6 +1344,7 @@ impl App {
                     self.scan_browser();
                 }
                 InputMode::BrowserFilter => self.input_mode = InputMode::Normal,
+                InputMode::BenchFilter => self.input_mode = InputMode::Normal,
                 InputMode::ChatSystemPrompt => self.input_mode = InputMode::Normal,
                 _ => self.input_mode = InputMode::Normal,
             },
@@ -1347,6 +1352,11 @@ impl App {
                 InputMode::ModelFilter => {
                     self.model_filter.pop();
                     self.model_state.select(Some(0));
+                }
+                InputMode::BenchFilter => {
+                    let mut filter = self.bench_filter.clone();
+                    filter.pop();
+                    self.set_bench_filter(filter);
                 }
                 InputMode::BrowserPath => {
                     self.browser_path.pop();
@@ -1372,6 +1382,11 @@ impl App {
                     InputMode::ModelFilter => {
                         self.model_filter.push(character);
                         self.model_state.select(Some(0));
+                    }
+                    InputMode::BenchFilter => {
+                        let mut filter = self.bench_filter.clone();
+                        filter.push(character);
+                        self.set_bench_filter(filter);
                     }
                     InputMode::BrowserPath => self.browser_path.push(character),
                     InputMode::BrowserFilter => {
@@ -1426,13 +1441,46 @@ impl App {
         self.script_editor_view_mut(target).cursor_byte = cursor_byte;
     }
 
+    fn visible_bench_scripts(&self) -> Vec<&PathBuf> {
+        filter_bench_scripts(&self.bench_scripts, &self.root, &self.bench_filter)
+    }
+
+    fn restore_bench_selection(&mut self, preferred: Option<&Path>) {
+        let visible = self.visible_bench_scripts();
+        let selected = preferred
+            .and_then(|path| {
+                visible
+                    .iter()
+                    .position(|candidate| candidate.as_path() == path)
+            })
+            .or_else(|| (!visible.is_empty()).then_some(0));
+        self.bench_state.select(selected);
+    }
+
+    fn set_bench_filter(&mut self, filter: String) {
+        let selected = self.selected_script_path(ScriptEditorTarget::Bench);
+        let visible = filter_bench_scripts(&self.bench_scripts, &self.root, &filter);
+        let dirty_path = self.bench_editor.selected_path();
+        if self.bench_editor.is_dirty()
+            && dirty_path
+                .is_some_and(|path| !visible.iter().any(|candidate| candidate.as_path() == path))
+        {
+            self.status = "Save or reload the edited bench script before filtering it out".into();
+            return;
+        }
+        self.bench_filter = filter;
+        self.restore_bench_selection(selected.as_deref());
+        self.sync_script_editor_selection(ScriptEditorTarget::Bench);
+    }
+
     fn selected_script_path(&self, target: ScriptEditorTarget) -> Option<PathBuf> {
         match target {
-            ScriptEditorTarget::Bench => self
-                .bench_state
-                .selected()
-                .and_then(|index| self.bench_scripts.get(index))
-                .cloned(),
+            ScriptEditorTarget::Bench => self.bench_state.selected().and_then(|index| {
+                self.visible_bench_scripts()
+                    .into_iter()
+                    .nth(index)
+                    .map(|path| path.as_path().to_path_buf())
+            }),
             ScriptEditorTarget::Maintenance => self
                 .maintenance_state
                 .selected()
@@ -1479,11 +1527,15 @@ impl App {
             );
             return;
         }
-        let (current, scripts) = match target {
-            ScriptEditorTarget::Bench => (self.bench_state.selected(), &self.bench_scripts),
-            ScriptEditorTarget::Maintenance => {
-                (self.maintenance_state.selected(), &self.maintenance_scripts)
+        let current = match target {
+            ScriptEditorTarget::Bench => self.bench_state.selected(),
+            ScriptEditorTarget::Maintenance => self.maintenance_state.selected(),
+        };
+        let scripts = match target {
+            ScriptEditorTarget::Bench => {
+                self.visible_bench_scripts().into_iter().cloned().collect()
             }
+            ScriptEditorTarget::Maintenance => self.maintenance_scripts.clone(),
         };
         if scripts.is_empty() {
             return;
@@ -1874,7 +1926,8 @@ impl App {
                 self.ops_mode = match self.ops_mode {
                     OpsMode::Run => OpsMode::Bench,
                     OpsMode::Bench => OpsMode::Run,
-                }
+                };
+                self.input_mode = InputMode::Normal;
             }
             ModelOpsSelectPrevious => match self.ops_mode {
                 OpsMode::Run => {
@@ -1903,7 +1956,7 @@ impl App {
                 if self.ops_mode == OpsMode::Run {
                     self.input_mode = InputMode::ModelFilter;
                 } else {
-                    self.status = "Bench script filtering is not implemented yet".into();
+                    self.input_mode = InputMode::BenchFilter;
                 }
             }
             ModelOpsFocusTable => {
@@ -2086,6 +2139,7 @@ impl App {
                 KeyCode::Down | KeyCode::Char('j') => {
                     self.move_script_selection(ScriptEditorTarget::Bench, false)
                 }
+                KeyCode::Char('/') => self.input_mode = InputMode::BenchFilter,
                 KeyCode::Enter | KeyCode::Char('r') => self.run_selected_bench(),
                 KeyCode::Char('s') => self.stop_running_process(),
                 _ => {}
@@ -3033,10 +3087,12 @@ impl App {
     }
 
     fn run_selected_bench(&mut self) {
-        let Some(index) = self.bench_state.selected() else {
-            return;
-        };
-        let Some(path) = self.bench_scripts.get(index).cloned() else {
+        let Some(path) = self.selected_script_path(ScriptEditorTarget::Bench) else {
+            self.status = if self.bench_scripts.is_empty() {
+                "No bench scripts are available".into()
+            } else {
+                "No bench script matches the current filter".into()
+            };
             return;
         };
         if self.bench_editor.selected_path() == Some(path.as_path()) && self.bench_editor.is_dirty()
@@ -3587,15 +3643,33 @@ impl App {
                     .direction(Direction::Horizontal)
                     .constraints([Constraint::Percentage(38), Constraint::Percentage(62)])
                     .split(chunks[1]);
-                let items = self
-                    .bench_scripts
-                    .iter()
-                    .map(|path| ListItem::new(relative_display(&self.root, path)))
+                let visible = self
+                    .visible_bench_scripts()
+                    .into_iter()
+                    .cloned()
                     .collect::<Vec<_>>();
+                if visible.is_empty() {
+                    self.bench_state.select(None);
+                }
+                let items = if visible.is_empty() {
+                    vec![ListItem::new("No bench scripts match the current filter")]
+                } else {
+                    visible
+                        .iter()
+                        .map(|path| ListItem::new(relative_display(&self.root, path)))
+                        .collect::<Vec<_>>()
+                };
+                let filter = if self.bench_filter.is_empty() {
+                    String::new()
+                } else {
+                    format!(" · filter: {}", self.bench_filter)
+                };
                 let list = List::new(items)
                     .block(
                         Block::default()
-                            .title("Bench scripts · ↑/↓ select · Ctrl+U editor")
+                            .title(format!(
+                                "Bench scripts{filter} · / filter · ↑/↓ select · Ctrl+U editor"
+                            ))
                             .borders(Borders::ALL),
                     )
                     .highlight_symbol("▶ ")
@@ -4275,6 +4349,7 @@ impl App {
             match self.input_mode {
                 InputMode::Normal => "",
                 InputMode::ModelFilter => "  FILTER",
+                InputMode::BenchFilter => "  BENCH FILTER",
                 InputMode::BrowserPath => "  PATH INPUT",
                 InputMode::BrowserFilter => "  GGUF FILTER",
                 InputMode::ChatMessage => "  CHAT INPUT",
@@ -4573,6 +4648,23 @@ fn collect_shell_scripts(directory: &Path, prefix: &str) -> Vec<PathBuf> {
         .collect::<Vec<_>>();
     scripts.sort();
     scripts
+}
+
+fn filter_bench_scripts<'a>(scripts: &'a [PathBuf], root: &Path, filter: &str) -> Vec<&'a PathBuf> {
+    let filter = filter.trim().to_ascii_lowercase();
+    scripts
+        .iter()
+        .filter(|script| {
+            filter.is_empty()
+                || script
+                    .strip_prefix(root)
+                    .unwrap_or(script)
+                    .to_string_lossy()
+                    .to_ascii_lowercase()
+                    .contains(&filter)
+                || pretty_name(script).to_ascii_lowercase().contains(&filter)
+        })
+        .collect()
 }
 
 fn stream_reader(
@@ -6469,6 +6561,125 @@ mod tests {
             app.bench_editor.selected_path(),
             Some(fixture.bench_second.as_path())
         );
+    }
+
+    #[test]
+    fn bench_filter_tracks_keyboard_selection_editor_and_no_results() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::ModelOps;
+        app.ops_mode = OpsMode::Bench;
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.input_mode, InputMode::BenchFilter);
+        for character in "bench-b".chars() {
+            app.handle_key(KeyEvent::new(KeyCode::Char(character), KeyModifiers::NONE))
+                .unwrap();
+        }
+        app.handle_key(KeyEvent::new(KeyCode::Backspace, KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.bench_filter, "bench-");
+        assert_eq!(
+            app.selected_script_path(ScriptEditorTarget::Bench),
+            Some(fixture.bench_first.clone())
+        );
+        app.handle_key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.bench_filter, "bench-b");
+        assert_eq!(app.bench_state.selected(), Some(0));
+        assert_eq!(
+            app.selected_script_path(ScriptEditorTarget::Bench),
+            Some(fixture.bench_second.clone())
+        );
+        assert_eq!(
+            app.bench_editor.selected_path(),
+            Some(fixture.bench_second.as_path())
+        );
+
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('u'), KeyModifiers::CONTROL))
+            .unwrap();
+        assert_eq!(app.script_input_target, Some(ScriptEditorTarget::Bench));
+        app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE))
+            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE))
+            .unwrap();
+        assert!(app.bench_editor.is_dirty());
+
+        app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::NONE))
+            .unwrap();
+        app.handle_key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE))
+            .unwrap();
+        assert_eq!(app.bench_filter, "bench-b");
+        assert!(app.status.contains("Save or reload"));
+        assert_eq!(
+            app.bench_editor.selected_path(),
+            Some(fixture.bench_second.as_path())
+        );
+
+        app.reload_script_editor(ScriptEditorTarget::Bench);
+        app.reload_script_editor(ScriptEditorTarget::Bench);
+        app.set_bench_filter("missing".into());
+        assert!(app.visible_bench_scripts().is_empty());
+        assert_eq!(app.bench_state.selected(), None);
+        assert_eq!(app.bench_editor.selected_path(), None);
+
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        assert!(terminal_text(&terminal).contains("No bench scripts match the current filter"));
+    }
+
+    #[test]
+    fn bench_filter_runs_the_filtered_script() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::ModelOps;
+        app.ops_mode = OpsMode::Bench;
+        app.set_bench_filter("bench-b".into());
+
+        app.run_selected_bench();
+        let job = app.job_history.records().first().expect("bench job");
+        assert_eq!(job.kind, "bench");
+        assert_eq!(job.command.first(), Some(&"bash".to_owned()));
+        assert_eq!(
+            job.command.get(1),
+            Some(&fixture.bench_second.to_string_lossy().into_owned())
+        );
+        wait_for_download(&mut app);
+        assert_eq!(app.job_history.records()[0].exit_code, Some(0));
+    }
+
+    #[test]
+    fn bench_filter_is_available_in_palette_and_help() {
+        let fixture = AppFixture::new();
+        let mut app = fixture.app();
+        app.tab = Tab::ModelOps;
+        app.ops_mode = OpsMode::Bench;
+
+        assert!(visible_commands(CommandContext::ModelOps)
+            .iter()
+            .any(|spec| spec.id == CommandId::ModelOpsFocusFilter));
+        app.open_palette();
+        app.palette_query = "script filter".into();
+        assert!(app
+            .palette_commands()
+            .iter()
+            .any(|spec| spec.id == CommandId::ModelOpsFocusFilter));
+
+        app.show_palette = false;
+        app.execute_command(CommandId::ModelOpsFocusFilter).unwrap();
+        assert_eq!(app.input_mode, InputMode::BenchFilter);
+        app.input_mode = InputMode::Normal;
+        app.show_help = true;
+        let backend = TestBackend::new(120, 36);
+        let mut terminal = Terminal::new(backend).unwrap();
+        terminal.draw(|frame| app.draw(frame)).unwrap();
+        let rendered = terminal_text(&terminal);
+        assert!(rendered.contains("Ctrl+F / /"));
+        assert!(rendered.contains("Filter items"));
     }
 
     #[test]

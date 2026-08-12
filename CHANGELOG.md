@@ -46,6 +46,8 @@ verification matrix.
 - Added a disabled targeted downloader profile and embedding deployment checks.
 - Added Rust Chat endpoint editing, authenticated Connect/Detect, independent
   model selection, request-ID guarded streaming, and responsive cancellation.
+- Added keyboard and palette-backed Bench script filtering with stable editor
+  and run selection mapping plus an explicit no-results state.
 
 ### Changed
 - Made the Rust launcher use llama-swap for `--run` and `--list run`, while
