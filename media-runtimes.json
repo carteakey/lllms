@@ -28,7 +28,7 @@
       "runtime": "LTX-2 Python",
       "variant": "22B distilled BF16, fp8-cast, CPU offload",
       "tasks": ["video", "music"],
-      "inputs": ["text"],
+      "inputs": ["text", "image"],
       "status": "gated-local",
       "script": "media-models/generate-ltx-2.5.sh",
       "description": "Text-to-video/audio generation through the official LTX-2.5 DistilledPipeline. The Yeti profile keeps the BF16 checkpoint but casts to FP8 at runtime and offloads to CPU.",
@@ -40,7 +40,7 @@
       "notes": [
         "The NVFP4 checkpoint is not selected for this Ada (RTX 4070) host; use the official BF16 checkpoint with fp8-cast instead.",
         "The convolutional video VAE is selected to avoid requiring the diffusion VAE attention extra during decode.",
-        "The distilled pipeline is text-first. Use a dedicated LTX pipeline when image-to-video or audio-to-video inputs are needed."
+        "The distilled pipeline accepts still-image conditioning through --image PATH FRAME STRENGTH. Use a dedicated LTX pipeline for audio-to-video or video-to-video inputs."
       ]
     },
     {

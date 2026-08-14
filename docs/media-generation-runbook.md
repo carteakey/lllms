@@ -105,6 +105,13 @@ cargo run --locked -- --media ltx-2.5 --extra \
   '--prompt "a paper boat crosses a puddle as thunder rolls in" --frames 121'
 ```
 
+LTX-2.5 image-conditioned video (the image is passed as data, not shell code):
+
+```bash
+cargo run --locked -- --media ltx-2.5 --extra \
+  '--prompt "the camera slowly pushes toward the boat" --image ./boat.png 0 0.8 --frames 121'
+```
+
 MiniMax hosted music:
 
 ```bash
@@ -119,12 +126,12 @@ The default output directory is `$HOME/media-output`; set
 
 ## Inputs and computer-assisted workflows
 
-The current profiles deliberately expose text and lyrics as stable inputs. H3's
-official model family is multimodal, but the local audio.cpp `FL2VA` package
-and the LTX DistilledPipeline wrapper are text-first. Do not silently pass an
-image, audio, or video path to a text-only pipeline. For image-to-video,
-audio-to-video, or video-to-video work, use the corresponding upstream LTX
-pipeline and add a new registry profile once its exact flags are validated.
+The profiles expose text and lyrics as stable inputs, plus still-image
+conditioning for the LTX DistilledPipeline. H3's official model family is
+multimodal, but the local audio.cpp `FL2VA` package currently exposes the
+text-to-audio/video route only. LTX image paths use explicit
+`--image PATH FRAME STRENGTH` triples; audio-to-video and video-to-video work
+still require their corresponding upstream LTX pipeline and model assets.
 
 This keeps computer-use workflows safe: a UI or notebook can write a prompt or
 lyrics file and invoke `l3ms --media … --extra …`, while local paths are passed
@@ -139,7 +146,8 @@ as data. No browser automation or API key is required by L3MS itself.
   and its [MiniMax-H3 community model guide](https://github.com/0xShug0/audio.cpp/blob/release-0.6/docs/community_models/minimax_h3.md)
   — GGUF package layout, CLI options, and staged/layerwise memory controls.
 - [LTX-2.5 official quick start](https://github.com/Lightricks/LTX-2#-quick-start)
-  — gated components, distilled pipeline, and `fp8-cast`/offload guidance.
+  — gated components, distilled pipeline, image conditioning, and
+  `fp8-cast`/offload guidance.
 - [MiniMax official CLI](https://github.com/MiniMax-AI/cli) and [Music API](https://platform.minimax.io/docs/api-reference/music-generation)
   — hosted music generation and authentication.
 - Reddit reports from [the 12 GB DynamicVRAM thread](https://www.reddit.com/r/StableDiffusion/comments/1vghw05/minimax_h3_on_a_12gb_card_runaway_perstep/),

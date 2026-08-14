@@ -51,6 +51,8 @@ verification matrix.
   MiniMax Music CLI/API.
 - Added Yeti-focused media setup and readiness checks, including the audio.cpp
   MiniMax-H3 Q4_K installer, gated LTX-2.5 bootstrap, and `mmx` installer.
+- Added explicit still-image conditioning to the LTX-2.5 media profile while
+  keeping H3's audio.cpp input surface text-first and shell-safe.
 
 ### Changed
 - Made the Rust launcher use llama-swap for `--run` and `--list run`, while

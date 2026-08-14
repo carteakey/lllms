@@ -14,6 +14,10 @@ Usage:
 Options:
   --prompt TEXT             Text prompt (required)
   --output PATH             MP4 output path (default: L3MS_MEDIA_OUTPUT_DIR)
+  --image PATH FRAME STRENGTH
+                            Optional still-image conditioning. Repeatable;
+                            FRAME is a zero-based target frame and STRENGTH
+                            is typically 0.8-1.0.
   --frames N                Number of frames (default: 121)
   --seed N                  Deterministic seed (default: 42)
   --quantization NAME       fp8-cast (default)
@@ -32,6 +36,7 @@ model_dir="${L3MS_LTX_MODEL_DIR:-${L3MS_MEDIA_ROOT:-${HOME}/models/media}/ltx-2.
 output_dir="${L3MS_MEDIA_OUTPUT_DIR:-${HOME}/media-output}"
 prompt=""
 output=""
+image_args=()
 frames=121
 seed=42
 quantization="fp8-cast"
@@ -48,6 +53,14 @@ while (($#)); do
             (($# >= 2)) || { echo "Missing value for $1" >&2; exit 2; }
             output="$2"
             shift 2
+            ;;
+        --image|--input-image)
+            (($# >= 4)) || {
+                echo "Usage for $1: --image PATH FRAME STRENGTH" >&2
+                exit 2
+            }
+            image_args+=("$2" "$3" "$4")
+            shift 4
             ;;
         --frames|--num-frames|--seed|--quantization|--offload)
             (($# >= 2)) || { echo "Missing value for $1" >&2; exit 2; }
@@ -97,6 +110,18 @@ for required in "$transformer" "$text_encoder" "$video_vae" "$audio_vae" "$spati
     }
 done
 
+for ((image_index = 0; image_index < ${#image_args[@]}; image_index += 3)); do
+    image_path="${image_args[image_index]}"
+    [[ -f "$image_path" ]] || {
+        echo "LTX-2.5 conditioning image not found: $image_path" >&2
+        exit 1
+    }
+    case "$image_path" in
+        /*) ;;
+        *) image_args[image_index]="$PWD/$image_path" ;;
+    esac
+done
+
 command -v uv >/dev/null 2>&1 || {
     echo "uv is required to run LTX-2.5" >&2
     exit 1
@@ -109,7 +134,7 @@ fi
 
 echo "LTX-2.5 distilled: ${frames} frames / ${quantization} / ${offload} offload -> $output"
 cd "$ltx_root"
-exec uv run python -m ltx_pipelines.distilled \
+args=(
     --transformer-path "$transformer" \
     --text-encoder-path "$text_encoder" \
     --video-vae-path "$video_vae" \
@@ -121,3 +146,13 @@ exec uv run python -m ltx_pipelines.distilled \
     --offload "$offload" \
     --output-path "$output" \
     --prompt "$prompt"
+)
+for ((image_index = 0; image_index < ${#image_args[@]}; image_index += 3)); do
+    args+=(
+        --image
+        "${image_args[image_index]}"
+        "${image_args[image_index + 1]}"
+        "${image_args[image_index + 2]}"
+    )
+done
+exec uv run python -m ltx_pipelines.distilled "${args[@]}"
