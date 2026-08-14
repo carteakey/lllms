@@ -188,6 +188,7 @@ args=(
     --session-option "minimax_h3.weight_context_mb=${L3MS_H3_WEIGHT_CONTEXT_MB:-512}"
     --session-option "minimax_h3.mem_saver=true"
     --out "$output"
+    --out-dir "$output_dir"
     --metrics
 )
 for option in "${request_options[@]}"; do
