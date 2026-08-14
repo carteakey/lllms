@@ -41,7 +41,8 @@ On Yeti, from the deployed L3MS checkout:
 `install-audio-cpp` clones the pinned `release-0.6` branch, builds the CUDA
 CLI/server for `minimax_h3`, and installs the public `minimax_h3_q4_k` package
 under `${L3MS_MEDIA_ROOT:-$HOME/models/media}`. It does not touch llama-swap or
-port 8080.
+port 8080. On CachyOS it discovers `/opt/cuda` even from a non-interactive SSH
+shell and pins the compatible CCCL 3.2 fetch needed by audio.cpp release-0.6.
 
 LTX-2.5 is a gated Hugging Face model. Accept the model terms and log in with a
 Read-scoped token, then opt into the roughly 66 GiB download:
