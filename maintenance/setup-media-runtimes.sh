@@ -243,6 +243,11 @@ check_runtime() {
         check_file "LTX video VAE" "$ltx_dir/vae/ltx-2.5-video-vae-conv-bf16.safetensors" || missing=1
         check_file "LTX audio VAE" "$ltx_dir/vae/ltx-2.5-audio-vae-bf16.safetensors" || missing=1
         check_file "LTX spatial upscaler" "$ltx_dir/latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors" || missing=1
+        if [[ -n "${HF_TOKEN:-}" || -s "${HF_HOME:-${HOME}/.cache/huggingface}/token" ]]; then
+            ok "Hugging Face auth material detected (value hidden)"
+        else
+            warn "Hugging Face auth not detected; accept the gated LTX terms and run hf auth login"
+        fi
     else
         warn "LTX-2 checkout missing: $LTX_ROOT"
         missing=1
@@ -250,6 +255,12 @@ check_runtime() {
 
     if command -v mmx >/dev/null 2>&1; then
         ok "MiniMax mmx CLI: $(command -v mmx)"
+        if mmx auth status --non-interactive >/dev/null 2>&1; then
+            ok "MiniMax Music auth configured (credential value hidden)"
+        else
+            warn "MiniMax Music auth missing; run mmx auth login --api-key <key>"
+            missing=1
+        fi
     else
         warn "MiniMax mmx CLI missing"
         missing=1
