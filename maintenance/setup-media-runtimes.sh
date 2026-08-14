@@ -46,6 +46,17 @@ require_command() {
     command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }
 
+prepare_cuda_path() {
+    # CachyOS keeps the toolkit under /opt/cuda; non-interactive SSH and
+    # systemd shells do not necessarily source the user's interactive profile.
+    if [[ -x /opt/cuda/bin/nvcc ]]; then
+        PATH="/opt/cuda/bin:$PATH"
+        export PATH
+        LD_LIBRARY_PATH="/opt/cuda/lib64:${LD_LIBRARY_PATH:-}"
+        export LD_LIBRARY_PATH
+    fi
+}
+
 ensure_checkout() {
     local url="$1"
     local ref="$2"
@@ -81,6 +92,7 @@ audio_cli_path() {
 install_audio_cpp() {
     require_command git
     require_command cmake
+    prepare_cuda_path
     ensure_checkout "https://github.com/0xShug0/audio.cpp.git" "$AUDIO_CPP_REF" "$AUDIO_CPP_ROOT"
     [[ -x "$AUDIO_CPP_ROOT/scripts/build_linux.sh" ]] || die "audio.cpp build helper is missing"
 
@@ -88,13 +100,27 @@ install_audio_cpp() {
         log "Building audio.cpp CUDA CLI/server for minimax_h3"
         (
             cd "$AUDIO_CPP_ROOT"
-            ./scripts/build_linux.sh \
-                --backend cuda \
-                --model-set custom \
-                --models minimax_h3 \
-                --deployment-build \
-                --target audiocpp_cli \
-                --target audiocpp_server
+            build_dir="${AUDIO_CPP_BUILD_DIR:-$AUDIO_CPP_ROOT/build/linux-cuda-release}"
+            # audio.cpp release-0.6 needs CCCL 3.2 for its CUB top-k path.
+            # CUDA 13.3 ships a newer system CCCL, so explicitly fetch the
+            # compatible version instead of relying on the system headers.
+            cmake -S . -B "$build_dir" \
+                -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                -DENGINE_ENABLE_CUDA=ON \
+                -DENGINE_ENABLE_VULKAN=OFF \
+                -DENGINE_ENABLE_HIP=OFF \
+                -DENGINE_ENABLE_NATIVE_CPU=ON \
+                -DENGINE_ENABLE_LLAMAFILE=ON \
+                -DENGINE_BUILD_EXAMPLES=OFF \
+                -DENGINE_BUILD_TESTS=OFF \
+                -DENGINE_BUILD_WARMBENCH=OFF \
+                -DAUDIOCPP_DEPLOYMENT_BUILD=ON \
+                -DAUDIOCPP_MODEL_SET=custom \
+                -DAUDIOCPP_MODELS=minimax_h3 \
+                -DGGML_CUDA_CUB_3DOT2=ON \
+                -DCMAKE_CUDA_ARCHITECTURES="${L3MS_CUDA_ARCHITECTURES:-89-real}"
+            cmake --build "$build_dir" --parallel "$(nproc 2>/dev/null || echo 8)" \
+                --target audiocpp_cli --target audiocpp_server
         )
     fi
     local cli
