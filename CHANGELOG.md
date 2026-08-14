@@ -43,14 +43,22 @@ verification matrix.
   Clippy checks, and GitHub Actions verification.
 - Added an on-demand `nomic-embed-text-v1.5` llama-swap profile with
   authenticated `/v1/embeddings` routing and a five-minute idle unload TTL.
-- Added a disabled targeted downloader profile and embedding deployment checks.
+- Added an enabled targeted downloader profile and embedding deployment checks.
 - Added Rust Chat endpoint editing, authenticated Connect/Detect, independent
   model selection, request-ID guarded streaming, and responsive cancellation.
+- Added declarative media-generation profiles and an argv-safe `--media` CLI
+  for MiniMax-H3 through audio.cpp, LTX-2.5 DistilledPipeline, and the hosted
+  MiniMax Music CLI/API.
+- Added Yeti-focused media setup and readiness checks, including the audio.cpp
+  MiniMax-H3 Q4_K installer, gated LTX-2.5 bootstrap, and `mmx` installer.
 
 ### Changed
 - Made the Rust launcher use llama-swap for `--run` and `--list run`, while
   preserving `bench-*.sh` files as the benchmark entry points and retaining the
   Python downloader as a compatibility child process.
+- Made media prompts, lyrics, and output paths travel through a shell-free
+  process boundary; media runtime scripts remain the editable upstream-facing
+  layer.
 - Connected jobs and chat sessions to their legacy-compatible persistent state,
   including stale-job reconciliation, bounded history, safe retry reconstruction,
   and saved-session browsing.

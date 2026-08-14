@@ -2,7 +2,7 @@
   "base_models_dir": "/home/kchauhan/models",
   "models": [
     {
-      "enabled": false,
+      "enabled": true,
       "repo_id": "nomic-ai/nomic-embed-text-v1.5-GGUF",
       "local_dir": "/mnt/lab/models/nomic-ai/nomic-embed-text-v1.5-GGUF",
       "allow_patterns": [
