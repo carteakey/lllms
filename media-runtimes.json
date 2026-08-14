@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "minimax-h3",
+      "name": "MiniMax H3 audio + video",
+      "runtime": "audio.cpp",
+      "variant": "Q4_K GGUF, CUDA, staged/layerwise",
+      "tasks": ["music", "video", "tts"],
+      "inputs": ["text"],
+      "status": "experimental-local",
+      "script": "media-models/generate-minimax-h3.sh",
+      "description": "Offline MiniMax-H3 generation through audio.cpp release-0.6. The Yeti profile is tuned for a 12 GB RTX 4070: Q4_K, memory saver, layerwise weights, short 480p video, and audio-first defaults.",
+      "requirements": [
+        "audio.cpp release-0.6 audiocpp_cli built with CUDA",
+        "MiniMax-H3-Q4-GGUF package in L3MS_MEDIA_ROOT",
+        "NVIDIA driver/toolkit compatible with the audio.cpp CUDA build"
+      ],
+      "notes": [
+        "The normal Q4_K DiT is the default; the optional INT8 ConvRot package is not selected because audio.cpp reports a higher peak-memory path.",
+        "Video defaults to 480p and 121 frames (about five seconds at 24 fps). Use --video to request an RGB24 video artifact.",
+        "H3 is experimental and can be slow on 12 GB. Keep other GPU-heavy models unloaded while generating."
+      ]
+    },
+    {
+      "id": "ltx-2.5",
+      "name": "LTX-2.5 synchronized video",
+      "runtime": "LTX-2 Python",
+      "variant": "22B distilled BF16, fp8-cast, CPU offload",
+      "tasks": ["video", "music"],
+      "inputs": ["text"],
+      "status": "gated-local",
+      "script": "media-models/generate-ltx-2.5.sh",
+      "description": "Text-to-video/audio generation through the official LTX-2.5 DistilledPipeline. The Yeti profile keeps the BF16 checkpoint but casts to FP8 at runtime and offloads to CPU.",
+      "requirements": [
+        "Lightricks/LTX-2 checkout with uv sync --extra natten",
+        "Hugging Face access to the gated LTX-2.5 files",
+        "about 66 GiB of model storage plus CPU RAM and swap"
+      ],
+      "notes": [
+        "The NVFP4 checkpoint is not selected for this Ada (RTX 4070) host; use the official BF16 checkpoint with fp8-cast instead.",
+        "The convolutional video VAE is selected to avoid requiring the diffusion VAE attention extra during decode.",
+        "The distilled pipeline is text-first. Use a dedicated LTX pipeline when image-to-video or audio-to-video inputs are needed."
+      ]
+    },
+    {
+      "id": "minimax-music",
+      "name": "MiniMax Music generation",
+      "runtime": "MiniMax mmx",
+      "variant": "Music Generation API (hosted)",
+      "tasks": ["music"],
+      "inputs": ["text", "lyrics"],
+      "status": "hosted",
+      "script": "media-models/generate-minimax-music.sh",
+      "description": "Standard song generation through the official MiniMax mmx CLI and hosted Music API. This keeps the very large MiniMax-Music3 checkpoint off the 12 GB Yeti GPU.",
+      "requirements": [
+        "Node.js 18+ and npm",
+        "npm install --global mmx-cli",
+        "MiniMax API authentication configured with mmx auth login"
+      ],
+      "notes": [
+        "Use --instrumental for an instrumental track or --lyrics for a supplied lyric sheet.",
+        "MiniMax-Music3 is not wired into audio.cpp and is not a practical local 12 GB model; the hosted profile is the supported standard path."
+      ]
+    }
+  ]
+}

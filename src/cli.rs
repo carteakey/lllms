@@ -11,6 +11,7 @@ use clap::{ArgGroup, Parser, ValueEnum};
 
 use crate::{
     llama_swap::{SwapClient, SwapModel},
+    media::{interactive_media, load_manifest, print_profile_list},
     script_store::{collect_scripts_in, ScriptMode},
 };
 
@@ -18,10 +19,10 @@ use crate::{
 #[command(
     name = "l3ms",
     version,
-    about = "L3MS launcher (TUI + interactive run/bench CLI)",
+    about = "L3MS launcher (TUI + interactive model, bench, and media CLI)",
     group(
         ArgGroup::new("action")
-            .args(["run", "bench", "list", "quickstart"])
+            .args(["run", "bench", "media", "list", "quickstart"])
             .multiple(false)
     )
 )]
@@ -44,7 +45,16 @@ struct Cli {
     )]
     bench: Option<String>,
 
-    /// List llama-swap models, benchmark scripts, or both.
+    /// Interactively select and run a media-generation profile.
+    #[arg(
+        long,
+        value_name = "FILTER",
+        num_args = 0..=1,
+        default_missing_value = ""
+    )]
+    media: Option<String>,
+
+    /// List llama-swap models, benchmark scripts, media profiles, or all.
     #[arg(long, value_name = "MODE")]
     list: Option<ListMode>,
 
@@ -52,7 +62,7 @@ struct Cli {
     #[arg(long)]
     quickstart: bool,
 
-    /// Shell-style arguments appended to the selected benchmark script.
+    /// Shell-style arguments appended to the selected benchmark or media script.
     #[arg(
         long,
         default_value = "",
@@ -66,6 +76,7 @@ struct Cli {
 enum ListMode {
     Run,
     Bench,
+    Media,
     All,
 }
 
@@ -88,14 +99,14 @@ fn dispatch(cli: Cli) -> Result<u8> {
 
     if let Some(mode) = cli.list {
         if !cli.extra.trim().is_empty() {
-            bail!("--extra is only valid with --bench");
+            bail!("--extra is only valid with --bench or --media");
         }
         return list(mode);
     }
 
     if let Some(filter) = cli.run {
         if !cli.extra.trim().is_empty() {
-            bail!("--extra is only valid with --bench");
+            bail!("--extra is only valid with --bench or --media");
         }
         return interactive_run(&filter);
     }
@@ -104,8 +115,12 @@ fn dispatch(cli: Cli) -> Result<u8> {
         return interactive_bench(&filter, &cli.extra);
     }
 
+    if let Some(filter) = cli.media {
+        return interactive_media(&repository_root()?, &filter, &cli.extra);
+    }
+
     if !cli.extra.trim().is_empty() {
-        bail!("--extra is only valid with --bench");
+        bail!("--extra is only valid with --bench or --media");
     }
 
     crate::app::run_tui()?;
@@ -127,7 +142,10 @@ fn print_quickstart() {
     println!("  4) Discover available models and scripts");
     println!("     l3ms --list all");
     println!();
-    println!("  5) Pass extra arguments to a selected benchmark");
+    println!("  5) Generate music or video with a configured media runtime");
+    println!(r#"     l3ms --media --extra '--prompt "a warm analog synth loop" --instrumental'"#);
+    println!();
+    println!("  6) Pass extra arguments to a selected benchmark or media profile");
     println!(r#"     l3ms --bench qwen --extra "--ctx-size 32768""#);
 }
 
@@ -141,12 +159,20 @@ fn list(mode: ListMode) -> Result<u8> {
             let root = repository_root()?;
             print_script_list(&root, &collect_bench_scripts(&root)?);
         }
+        ListMode::Media => {
+            let root = repository_root()?;
+            let manifest = load_manifest(&root)?;
+            print_profile_list(&manifest.profiles);
+        }
         ListMode::All => {
             let client = SwapClient::from_env()?;
             print_model_list(&client.list_models()?);
             println!();
             let root = repository_root()?;
             print_script_list(&root, &collect_bench_scripts(&root)?);
+            println!();
+            let manifest = load_manifest(&root)?;
+            print_profile_list(&manifest.profiles);
         }
     }
     Ok(0)
@@ -417,8 +443,14 @@ mod tests {
         let cli = Cli::try_parse_from(["l3ms", "--bench"]).unwrap();
         assert_eq!(cli.bench.as_deref(), Some(""));
 
+        let cli = Cli::try_parse_from(["l3ms", "--media", "h3"]).unwrap();
+        assert_eq!(cli.media.as_deref(), Some("h3"));
+
         let cli = Cli::try_parse_from(["l3ms", "--list", "all"]).unwrap();
         assert_eq!(cli.list, Some(ListMode::All));
+
+        let cli = Cli::try_parse_from(["l3ms", "--list", "media"]).unwrap();
+        assert_eq!(cli.list, Some(ListMode::Media));
 
         let cli = Cli::try_parse_from(["l3ms", "--bench", "qwen", "--extra", "--ctx-size 32768"])
             .unwrap();

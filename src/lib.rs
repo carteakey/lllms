@@ -11,6 +11,7 @@ pub mod downloader_command;
 pub mod gguf;
 pub mod job_history;
 pub mod llama_swap;
+pub mod media;
 pub mod script_editor;
 pub mod script_store;
 pub mod state_store;

@@ -8,6 +8,8 @@ L3MS is built for developers who want script-first control with better ergonomic
 
 - Manage model download configs with validation and version history
 - Run and bench llama.cpp models from curated script folders
+- Generate standard music and short synchronized video through declared media
+  runtimes (audio.cpp MiniMax-H3, LTX-2.5, and MiniMax Music API)
 - Browse local GGUF inventories with size, quantization, and metadata details
 - Edit run/bench scripts in-place with snapshot restore
 - Track live process output and runtime resource usage while a model is running
@@ -94,6 +96,23 @@ a shell:
 ```bash
 cargo run --locked -- --bench qwen --extra "--ctx-size 32768"
 ```
+
+Discover and run media-generation profiles. Prompts and paths are passed as
+argv values, so they are not evaluated as shell code:
+
+```bash
+cargo run --locked -- --list media
+cargo run --locked -- --media minimax-h3 --extra \
+  '--prompt "a warm analog synth loop"'
+cargo run --locked -- --media ltx-2.5 --extra \
+  '--prompt "a paper boat crossing a puddle" --frames 121'
+cargo run --locked -- --media minimax-music --extra \
+  '--prompt "dreamy ambient electronica" --instrumental'
+```
+
+See [docs/media-generation-runbook.md](docs/media-generation-runbook.md) for
+Yeti/Cachy installation, gated LTX weights, authentication, input boundaries,
+and the hardware-specific variant choices.
 
 ## Rust Migration Status
 
@@ -257,6 +276,8 @@ Model Browser (active only on Model Browser tab):
 - `model_downloader/`: Hugging Face downloader + model config
 - `llama-swap.yaml`: single source of truth for servable models (see `docs/llama-swap-runbook.md`)
 - `bench-models/`: editable `bench-*.sh` benchmark entry points and helpers
+- `media-runtimes.json`: declared music/video runtime profiles
+- `media-models/`: argv-safe wrappers for each media runtime
 - `maintenance/`: system/build scripts
 - `maintenance/systemd/`: user service units (including `llama-swap.service` and `nanobot-gateway.service`)
 - `src/`: Rust CLI, llama-swap client, stores, process supervisor, and Ratatui app

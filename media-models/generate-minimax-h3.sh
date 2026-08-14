@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+# Generate MiniMax-H3 audio or short video with audio.cpp.
+#
+# Defaults are deliberately conservative for Yeti's RTX 4070 12 GB:
+# audio-first 32x32 latents, 241 frames, and staged/layerwise Q4_K weights.
+# Pass --video for a short 480p RGB24 video artifact.
+
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage:
+  l3ms --media minimax-h3 --extra '--prompt "a warm analog synth loop"'
+  l3ms --media minimax-h3 --extra '--prompt "a rainy neon street" --video'
+
+Options:
+  --prompt TEXT             Text prompt (required)
+  --output PATH             Output audio path (default: L3MS_MEDIA_OUTPUT_DIR)
+  --out-dir DIR             Output directory for runtime artifacts
+  --video                   Also decode an RGB24 video artifact
+  --audio-only              Force audio-only output (default)
+  --steps N                 Joint DiT denoising steps (default: 20)
+  --seed N                  Deterministic seed (default: 42)
+  --width N / --height N    Latent canvas dimensions
+  --frames N                Target frame count (24 fps for video)
+  --request-option K=V      Additional audio.cpp request option
+  --help                    Show this help
+
+Environment:
+  L3MS_AUDIO_CPP_CLI        audiocpp_cli path override
+  L3MS_AUDIO_CPP_ROOT       audio.cpp checkout (default: $HOME/repos/audio.cpp)
+  L3MS_MEDIA_ROOT           model root (default: $HOME/models/media)
+  L3MS_H3_MODEL_DIR         MiniMax-H3-Q4-GGUF directory override
+EOF
+}
+
+find_cli() {
+    if [[ -n "${L3MS_AUDIO_CPP_CLI:-}" ]]; then
+        printf '%s\n' "$L3MS_AUDIO_CPP_CLI"
+        return
+    fi
+    local root="${L3MS_AUDIO_CPP_ROOT:-${HOME}/repos/audio.cpp}"
+    local candidate
+    for candidate in \
+        "$root/build/linux-cuda-release/bin/audiocpp_cli" \
+        "$root/build/bin/audiocpp_cli" \
+        "$root/build/debug/bin/audiocpp_cli" \
+        "$root/build/release/bin/audiocpp_cli"; do
+        if [[ -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return
+        fi
+    done
+    return 1
+}
+
+audio_cpp_root="${L3MS_AUDIO_CPP_ROOT:-${HOME}/repos/audio.cpp}"
+media_root="${L3MS_MEDIA_ROOT:-${HOME}/models/media}"
+model_dir="${L3MS_H3_MODEL_DIR:-${media_root}/MiniMax-H3-Q4-GGUF}"
+model_path="${L3MS_H3_MODEL:-${model_dir}/dit.gguf}"
+spec_path="${L3MS_H3_MODEL_SPEC:-${audio_cpp_root}/model_specs/minimax_h3.json}"
+output_dir="${L3MS_MEDIA_OUTPUT_DIR:-${HOME}/media-output}"
+prompt=""
+output=""
+video=false
+steps=20
+seed=42
+width=32
+height=32
+frames=241
+request_options=()
+
+while (($#)); do
+    case "$1" in
+        --prompt|--text)
+            (($# >= 2)) || { echo "Missing value for $1" >&2; exit 2; }
+            prompt="$2"
+            shift 2
+            ;;
+        --output|--out)
+            (($# >= 2)) || { echo "Missing value for $1" >&2; exit 2; }
+            output="$2"
+            shift 2
+            ;;
+        --out-dir)
+            (($# >= 2)) || { echo "Missing value for --out-dir" >&2; exit 2; }
+            output_dir="$2"
+            shift 2
+            ;;
+        --video)
+            video=true
+            shift
+            ;;
+        --audio-only)
+            video=false
+            shift
+            ;;
+        --steps|--num-inference-steps)
+            (($# >= 2)) || { echo "Missing value for $1" >&2; exit 2; }
+            steps="$2"
+            shift 2
+            ;;
+        --seed|--width|--height|--frames)
+            (($# >= 2)) || { echo "Missing value for $1" >&2; exit 2; }
+            case "$1" in
+                --seed) seed="$2" ;;
+                --width) width="$2" ;;
+                --height) height="$2" ;;
+                --frames) frames="$2" ;;
+            esac
+            shift 2
+            ;;
+        --request-option)
+            (($# >= 2)) || { echo "Missing value for --request-option" >&2; exit 2; }
+            request_options+=("$2")
+            shift 2
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        --)
+            shift
+            ;;
+        *)
+            echo "Unknown MiniMax-H3 option: $1" >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+
+if [[ -z "$prompt" ]]; then
+    echo "MiniMax-H3 requires --prompt TEXT" >&2
+    exit 2
+fi
+
+if [[ "$video" == true ]]; then
+    width="${L3MS_H3_VIDEO_WIDTH:-832}"
+    height="${L3MS_H3_VIDEO_HEIGHT:-480}"
+    frames="${L3MS_H3_VIDEO_FRAMES:-121}"
+else
+    width="${L3MS_H3_AUDIO_WIDTH:-$width}"
+    height="${L3MS_H3_AUDIO_HEIGHT:-$height}"
+    frames="${L3MS_H3_AUDIO_FRAMES:-$frames}"
+fi
+
+cli_path="$(find_cli || true)"
+[[ -n "$cli_path" && -x "$cli_path" ]] || {
+    echo "audiocpp_cli not found; run maintenance/setup-media-runtimes.sh install-audio-cpp" >&2
+    exit 1
+}
+[[ -f "$model_path" ]] || {
+    echo "MiniMax-H3 DiT not found: $model_path" >&2
+    echo "Run maintenance/setup-media-runtimes.sh install-audio-cpp" >&2
+    exit 1
+}
+[[ -f "$spec_path" ]] || {
+    echo "MiniMax-H3 model spec not found: $spec_path" >&2
+    exit 1
+}
+
+mkdir -p "$output_dir"
+if [[ -z "$output" ]]; then
+    output="$output_dir/minimax-h3-$(date +%Y%m%d-%H%M%S).wav"
+fi
+
+args=(
+    --task gen
+    --family minimax_h3
+    --model "$model_path"
+    --model-spec-override "$spec_path"
+    --backend cuda
+    --threads "${L3MS_H3_THREADS:-8}"
+    --text "$prompt"
+    --seed "$seed"
+    --num-inference-steps "$steps"
+    --guidance-scale "${L3MS_H3_GUIDANCE_SCALE:-1.0}"
+    --request-option "height=$height"
+    --request-option "width=$width"
+    --request-option "num_frames=$frames"
+    --request-option "return_video=$video"
+    --request-option "text_layerwise=true"
+    --request-option "text_layerwise_batch=1"
+    --request-option "dit_layerwise=true"
+    --request-option "dit_layerwise_batch=1"
+    --request-option "dit_mlp_chunk_tokens=${L3MS_H3_MLP_CHUNK_TOKENS:-1024}"
+    --session-option "minimax_h3.weight_context_mb=${L3MS_H3_WEIGHT_CONTEXT_MB:-512}"
+    --session-option "minimax_h3.mem_saver=true"
+    --out "$output"
+    --metrics
+)
+for option in "${request_options[@]}"; do
+    args+=(--request-option "$option")
+done
+
+echo "MiniMax-H3: $(basename "$model_path") -> $output"
+if [[ "$video" == true ]]; then
+    echo "Profile: Yeti 12 GB / 480p / ${frames} frames / layerwise Q4_K"
+else
+    echo "Profile: Yeti 12 GB / audio-first / ${frames} frames / layerwise Q4_K"
+fi
+exec "$cli_path" "${args[@]}"
