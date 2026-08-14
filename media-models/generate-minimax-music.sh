@@ -31,6 +31,13 @@ lyrics_optimizer=false
 output_dir="${L3MS_MEDIA_OUTPUT_DIR:-${HOME}/media-output}"
 output=""
 
+if [[ -s "${NVM_DIR:-${HOME}/.nvm}/nvm.sh" ]]; then
+    # SSH/systemd shells often do not source .zshrc, but the user-level Node
+    # install is still a supported path for the official mmx CLI.
+    # shellcheck disable=SC1090
+    . "${NVM_DIR:-${HOME}/.nvm}/nvm.sh"
+fi
+
 while (($#)); do
     case "$1" in
         --prompt)
@@ -92,6 +99,11 @@ fi
 if [[ "$instrumental" == true && -n "$lyrics" ]]; then
     echo "--instrumental and --lyrics are mutually exclusive" >&2
     exit 2
+fi
+if [[ -z "$lyrics" && "$instrumental" == false && "$lyrics_optimizer" == false ]]; then
+    # mmx requires one of these modes. Prompt-only calls get the useful,
+    # deterministic default of having MiniMax write the lyrics.
+    lyrics_optimizer=true
 fi
 command -v mmx >/dev/null 2>&1 || {
     echo "mmx CLI not found; run maintenance/setup-media-runtimes.sh install-music-cli" >&2

@@ -182,6 +182,10 @@ install_ltx() {
 }
 
 install_music_cli() {
+    if [[ -s "${NVM_DIR:-${HOME}/.nvm}/nvm.sh" ]]; then
+        # shellcheck disable=SC1090
+        . "${NVM_DIR:-${HOME}/.nvm}/nvm.sh"
+    fi
     require_command node
     require_command npm
     local node_major
@@ -207,6 +211,10 @@ check_file() {
 
 check_runtime() {
     local missing=0
+    if [[ -s "${NVM_DIR:-${HOME}/.nvm}/nvm.sh" ]]; then
+        # shellcheck disable=SC1090
+        . "${NVM_DIR:-${HOME}/.nvm}/nvm.sh"
+    fi
     if command -v nvidia-smi >/dev/null 2>&1; then
         nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | sed 's/^/GPU: /'
     else
