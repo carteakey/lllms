@@ -7,6 +7,16 @@ Target: Yeti Cachy (`ssh kpc-cachy-ts`)
 Target checkout: `/home/kchauhan/repos/l3ms`  
 Baseline before this documentation commit: `065c58a0edd40d18e60939ef486ec58a0b87d913`
 
+> Follow-up note (2026-08-15): the hosted `minimax-music` profile described in
+> this historical session record was subsequently replaced by local
+> `heartmula-music` using audio.cpp and its Q8_0 GGUF package. LTX-2.5 remains
+> on official BF16 source weights with FP8 quantization at load because no
+> official pre-quantized Ada-compatible 2.5 artifact was found; the newly
+> reported ~18.7 GB NVFP4 transformer targets the Blackwell path and does not
+> fit Yeti's 12 GB GPU. The HeartMuLa package was installed at 7,659,762,592
+> bytes and produced a verified 5.04-second stereo/48 kHz WAV in 2.56 seconds
+> with a one-step smoke; llama-swap remained healthy with 13 listed models.
+
 ## 1. Objective
 
 The session completed the L3MS media-runtime path on the Yeti homelab host:

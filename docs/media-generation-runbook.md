@@ -15,17 +15,16 @@ profiles therefore use the smallest practical local variants:
   default. `--video` switches to 832×480 and 121 frames (about five seconds at
   24 fps). The optional INT8 ConvRot DiT is not the default because the
   audio.cpp performance report measured a higher peak-memory path for it.
-- **LTX-2.5:** the official 22B distilled BF16 transformer with `fp8-cast` and
-  CPU offload. The NVFP4 checkpoint is intended for newer hardware; the
-  convolutional video VAE avoids requiring the diffusion-VAE attention extra.
-- **MiniMax Music:** the official hosted Music Generation API through `mmx`.
-  MiniMax-Music3 is not part of audio.cpp and its local checkpoint is not a
-  sensible 12 GiB deployment, so the API profile is the supported standard
-  music path.
+- **LTX-2.5:** the official 22B distilled BF16 transformer, quantized to FP8
+  while loading with `fp8-cast`, plus CPU offload. The convolutional video VAE
+  avoids requiring the diffusion-VAE attention extra.
+- **HeartMuLa:** audio.cpp `release-0.6` with the published Q8_0 GGUF package,
+  CUDA, and memory saver. This replaces the hosted MiniMax Music API profile
+  with an offline lyrics/tags-to-song path.
 
 These are conservative starting points, not a claim that every route will fit
 or be fast on a 12 GiB card. Keep llama-swap's GPU model unloaded while running
-H3 or LTX and start with five-second clips.
+H3, HeartMuLa, or LTX and start with five-second clips.
 
 ## Install and inspect
 
@@ -34,15 +33,17 @@ On Yeti, from the deployed L3MS checkout:
 ```bash
 ./maintenance/setup-media-runtimes.sh install-audio-cpp
 ./maintenance/setup-media-runtimes.sh install-ltx
-./maintenance/setup-media-runtimes.sh install-music-cli
+./maintenance/setup-media-runtimes.sh install-music
 ./maintenance/setup-media-runtimes.sh check
 ```
 
 `install-audio-cpp` clones the pinned `release-0.6` branch, builds the CUDA
-CLI/server for `minimax_h3`, and installs the public `minimax_h3_q4_k` package
-under `${L3MS_MEDIA_ROOT:-$HOME/models/media}`. It does not touch llama-swap or
-port 8080. On CachyOS it discovers `/opt/cuda` even from a non-interactive SSH
-shell and pins the compatible CCCL 3.2 fetch needed by audio.cpp release-0.6.
+CLI/server for `minimax_h3` and `heartmula`, and installs the public H3 Q4_K
+and HeartMuLa Q8_0 packages under
+`${L3MS_MEDIA_ROOT:-$HOME/models/media}`. `install-music` is an idempotent alias
+for this shared build/install path. It does not touch llama-swap or port 8080.
+On CachyOS it discovers `/opt/cuda` even from a non-interactive SSH shell and
+pins the compatible CCCL 3.2 fetch needed by audio.cpp release-0.6.
 
 LTX-2.5 is a gated Hugging Face model. Accept the model terms and log in with a
 Read-scoped token, then opt into the roughly 66 GiB download:
@@ -57,20 +58,16 @@ transformer, Gemma 4 projection encoder, convolutional video VAE, audio VAE,
 and spatial upscaler. If authentication is not ready, `install-ltx` still sets
 up the checkout and reports the missing gated files.
 
-The official repository also publishes smaller-looking INT8 ConvRot and NVFP4
-transformers, but they are not drop-in replacements here: INT8 ConvRot is for
-ComfyUI rather than this PyTorch `ltx-pipelines` path, while the NVFP4 path
-requires a Blackwell GPU (SM >= 10). Yeti's RTX 4070 is Ada (SM 8.9), so the
-BF16 transformer with `fp8-cast` and CPU offload is the compatible quantized
-runtime choice for this host.
-
-Authenticate MiniMax Music separately. The wrapper does not accept or print a
-key:
-
-```bash
-npm install --global mmx-cli
-mmx auth login --api-key '<key>'
-```
+The official LTX-2.5 repository currently lists BF16 split components and its
+official pipeline documents load-time `fp8-cast`. Web/model-registry checks on
+2026-08-15 did not find an official pre-quantized Ada checkpoint. A newly
+reported 22B distilled NVFP4 transformer is about 18.7 GB before runtime
+overhead and targets Blackwell's native NVFP4 path (`SM >= 10`), so it is not
+a viable RTX 4070 12 GB selection. Yeti therefore keeps the BF16 source file,
+stores eligible transformer linears in FP8 during inference, and offloads to
+CPU. If a compatible artifact is released later, pass `--transformer PATH`
+with its matching `--quantization` policy after validating it against the
+official `ltx-pipelines` loader.
 
 ## CLI usage
 
@@ -113,8 +110,8 @@ cargo run --locked -- --media minimax-h3 --extra \
   '--prompt-file ./prompt.txt --video --video-output ./rainy-street.mp4'
 ```
 
-The same `--prompt-file` option is available on LTX-2.5 and MiniMax Music;
-Music also accepts `--lyrics-file` for a locally authored lyric sheet.
+The same `--prompt-file` option is available on LTX-2.5 and HeartMuLa;
+HeartMuLa also accepts `--lyrics-file` for a locally authored lyric sheet.
 
 LTX-2.5 text-to-video/audio:
 
@@ -130,13 +127,13 @@ cargo run --locked -- --media ltx-2.5 --extra \
   '--prompt "the camera slowly pushes toward the boat" --image ./boat.png 0 0.8 --frames 121'
 ```
 
-MiniMax hosted music:
+Local Q8_0 HeartMuLa music:
 
 ```bash
-cargo run --locked -- --media minimax-music --extra \
+cargo run --locked -- --media heartmula-music --extra \
   '--prompt "dreamy ambient electronica with a gentle pulse" --instrumental'
-cargo run --locked -- --media minimax-music --extra \
-  '--prompt "upbeat indie pop" --lyrics-file ./lyrics.txt --lyrics-optimizer'
+cargo run --locked -- --media heartmula-music --extra \
+  '--prompt "upbeat indie pop" --tags "pop,bright,drums,vocal" --lyrics-file ./lyrics.txt'
 ```
 
 The default output directory is `$HOME/media-output`; set
@@ -167,8 +164,9 @@ as data. No browser automation or API key is required by L3MS itself.
 - [LTX-2.5 official quick start](https://github.com/Lightricks/LTX-2#-quick-start)
   — gated components, distilled pipeline, image conditioning, and
   `fp8-cast`/offload guidance.
-- [MiniMax official CLI](https://github.com/MiniMax-AI/cli) and [Music API](https://platform.minimax.io/docs/api-reference/music-generation)
-  — hosted music generation and authentication.
+- [audio.cpp music-generation guide](https://github.com/0xShug0/audio.cpp/blob/release-0.6/docs/music_generation.md)
+  and [Q8_0 HeartMuLa package](https://huggingface.co/audio-cpp/audio.cpp-gguf)
+  — local lyrics/tags generation, package layout, and quantization status.
 - Reddit reports from [the 12 GB DynamicVRAM thread](https://www.reddit.com/r/StableDiffusion/comments/1vghw05/minimax_h3_on_a_12gb_card_runaway_perstep/),
   [the H3 tips thread](https://www.reddit.com/r/StableDiffusion/comments/1vegtac/minimax_h3_tips_and_tricks_and_what_i_experienced/),
   and [the 16 GB timing thread](https://www.reddit.com/r/StableDiffusion/comments/1vjztod/26_sec_videos_on_16_gb_vram_rtx_5070_ti_and_only/) corroborate the

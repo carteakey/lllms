@@ -9,7 +9,7 @@ L3MS is built for developers who want script-first control with better ergonomic
 - Manage model download configs with validation and version history
 - Run and bench llama.cpp models from curated script folders
 - Generate standard music and short synchronized video through declared media
-  runtimes (audio.cpp MiniMax-H3, LTX-2.5, and MiniMax Music API)
+  runtimes (audio.cpp MiniMax-H3 and HeartMuLa Q8_0, plus LTX-2.5)
 - Browse local GGUF inventories with size, quantization, and metadata details
 - Edit run/bench scripts in-place with snapshot restore
 - Track live process output and runtime resource usage while a model is running
@@ -106,7 +106,7 @@ cargo run --locked -- --media minimax-h3 --extra \
   '--prompt "a warm analog synth loop"'
 cargo run --locked -- --media ltx-2.5 --extra \
   '--prompt "a paper boat crossing a puddle" --frames 121'
-cargo run --locked -- --media minimax-music --extra \
+cargo run --locked -- --media heartmula-music --extra \
   '--prompt "dreamy ambient electronica" --instrumental'
 ```
 

@@ -21,6 +21,7 @@ Options:
                             is typically 0.8-1.0.
   --frames N                Number of frames (default: 121)
   --seed N                  Deterministic seed (default: 42)
+  --transformer PATH        Transformer checkpoint override
   --quantization NAME       fp8-cast (default)
   --offload TARGET          cpu or disk (default: cpu)
   --help                    Show this help
@@ -28,6 +29,7 @@ Options:
 Environment:
   L3MS_LTX_ROOT             LTX-2 checkout (default: $HOME/repos/LTX-2)
   L3MS_LTX_MODEL_DIR        LTX-2.5 model directory (default: $HOME/models/media/ltx-2.5)
+  L3MS_LTX_TRANSFORMER      Transformer checkpoint override
   L3MS_MEDIA_OUTPUT_DIR     Output directory (default: $HOME/media-output)
 EOF
 }
@@ -49,6 +51,7 @@ frames=121
 seed=42
 quantization="fp8-cast"
 offload="cpu"
+transformer="${L3MS_LTX_TRANSFORMER:-}"
 
 while (($#)); do
     case "$1" in
@@ -75,11 +78,12 @@ while (($#)); do
             image_args+=("$2" "$3" "$4")
             shift 4
             ;;
-        --frames|--num-frames|--seed|--quantization|--offload)
+        --frames|--num-frames|--seed|--transformer|--quantization|--offload)
             (($# >= 2)) || { echo "Missing value for $1" >&2; exit 2; }
             case "$1" in
                 --frames|--num-frames) frames="$2" ;;
                 --seed) seed="$2" ;;
+                --transformer) transformer="$2" ;;
                 --quantization) quantization="$2" ;;
                 --offload) offload="$2" ;;
             esac
@@ -115,7 +119,9 @@ fi
     exit 1
 }
 
-transformer="$model_dir/diffusion_models/ltx-2.5-22b-distilled-transformer-bf16.safetensors"
+if [[ -z "$transformer" ]]; then
+    transformer="$model_dir/diffusion_models/ltx-2.5-22b-distilled-transformer-bf16.safetensors"
+fi
 text_encoder="$model_dir/text_encoders/gemma4-12b-with-proj-ltx-2.5-bf16.safetensors"
 video_vae="$model_dir/vae/ltx-2.5-video-vae-conv-bf16.safetensors"
 audio_vae="$model_dir/vae/ltx-2.5-audio-vae-bf16.safetensors"
@@ -154,7 +160,7 @@ case "$output" in
     *) output="$PWD/$output" ;;
 esac
 
-echo "LTX-2.5 distilled: ${frames} frames / ${quantization} / ${offload} offload -> $output"
+echo "LTX-2.5 distilled: $(basename "$transformer") / ${frames} frames / ${quantization} / ${offload} offload -> $output"
 cd "$ltx_root"
 args=(
     --transformer-path "$transformer" \

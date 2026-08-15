@@ -47,10 +47,11 @@ verification matrix.
 - Added Rust Chat endpoint editing, authenticated Connect/Detect, independent
   model selection, request-ID guarded streaming, and responsive cancellation.
 - Added declarative media-generation profiles and an argv-safe `--media` CLI
-  for MiniMax-H3 through audio.cpp, LTX-2.5 DistilledPipeline, and the hosted
-  MiniMax Music CLI/API.
+  for MiniMax-H3 and HeartMuLa through audio.cpp plus the LTX-2.5
+  DistilledPipeline.
 - Added Yeti-focused media setup and readiness checks, including the audio.cpp
-  MiniMax-H3 Q4_K installer, gated LTX-2.5 bootstrap, and `mmx` installer.
+  MiniMax-H3 Q4_K and HeartMuLa Q8_0 installers plus the gated LTX-2.5
+  bootstrap.
 - Added explicit still-image conditioning to the LTX-2.5 media profile while
   keeping H3's audio.cpp input surface text-first and shell-safe.
 - Documented LTX-2.5 quantization compatibility: BF16 plus runtime FP8 for
@@ -59,6 +60,12 @@ verification matrix.
 - Added prompt-file inputs and playable MP4 muxing for H3 video output when
   the host provides ffmpeg, while retaining the raw RGB24 artifact for
   inspection and recovery.
+- Added a local HeartMuLa music profile through audio.cpp using the published
+  Q8_0 GGUF package, with prompt/tag, lyrics-file, instrumental, duration, and
+  memory-saver controls.
+- Added an explicit LTX-2.5 transformer checkpoint override so a future
+  loader-compatible pre-quantized artifact can be selected without changing
+  the wrapper.
 
 ### Changed
 - Made the Rust launcher use llama-swap for `--run` and `--list run`, while
@@ -67,6 +74,8 @@ verification matrix.
 - Made media prompts, lyrics, and output paths travel through a shell-free
   process boundary; media runtime scripts remain the editable upstream-facing
   layer.
+- Replaced the hosted MiniMax Music/mmx profile with offline HeartMuLa Q8_0
+  generation through the same pinned audio.cpp CUDA runtime used by H3.
 - Connected jobs and chat sessions to their legacy-compatible persistent state,
   including stale-job reconciliation, bounded history, safe retry reconstruction,
   and saved-session browsing.

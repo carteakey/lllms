@@ -5,6 +5,44 @@ Deployment target: `yeti-cachy` (`ssh kpc-cachy-ts`)
 Live checkout: `/home/kchauhan/repos/l3ms`  
 Baseline before this handoff commit: `065c58a0edd40d18e60939ef486ec58a0b87d913`
 
+## 2026-08-15 local-Q8 follow-up
+
+The hosted `minimax-music`/`mmx` profile and its API-key blocker have been
+superseded in the working tree by `heartmula-music`: a local HeartMuLa-oss-3B
+Q8_0 GGUF package run through the same pinned audio.cpp CUDA runtime as H3.
+The new setup path compiles both `minimax_h3` and `heartmula` loaders and
+installs both public quantized packages. This follow-up has now been installed
+and smoke-tested on Yeti:
+
+```text
+HeartMuLa GGUF: /home/kchauhan/models/media/HeartMuLa-GGUF/heartmula-q8_0.gguf
+Size:            7,659,762,592 bytes
+Smoke output:    /home/kchauhan/media-output/heartmula-q8-smoke.wav
+Audio:           PCM s16le, 48 kHz, stereo, 5.04 seconds
+Runtime:         2.56 seconds wall, RTF 0.507, 1.97x realtime (one codec step)
+```
+
+The smoke left `llama-swap.service` active, GPU use returned to 44 MiB, and
+the authenticated run listing still returned 13 models. For another run:
+
+```sh
+./maintenance/setup-media-runtimes.sh install-music
+./maintenance/setup-media-runtimes.sh check
+./maintenance/run-l3ms-kpc.sh --media heartmula-music \
+  --extra '--prompt "A short warm piano theme" --instrumental --duration 10'
+```
+
+LTX-2.5 research was repeated against the current official repository and web
+model listings. The official 2.5 split download still exposes BF16 components;
+the wrapper quantizes eligible transformer linears to FP8 during load. A newly
+reported 2.5 NVFP4 transformer is about 18.7 GB and uses the Blackwell-oriented
+NVFP4 path, so it is not a viable choice for Yeti's 12 GB Ada GPU. The wrapper
+now accepts `--transformer PATH` for a future verified pre-quantized artifact.
+
+The remainder of this document records the state at commit `e6d328e`; its
+MiniMax Music authentication instructions are historical and no longer apply
+to the follow-up working tree.
+
 ## Current state
 
 The Rust L3MS media-runtime work is deployed and healthy on Yeti. The
@@ -158,4 +196,3 @@ supported artifact and the runtime integration is verified.
 4. Keep the two Yeti host-local override files during any future deployment.
 5. Restart and health-check `llama-swap.service` after media tests that unload
    it.
-

@@ -27,42 +27,44 @@
       "id": "ltx-2.5",
       "name": "LTX-2.5 synchronized video",
       "runtime": "LTX-2 Python",
-      "variant": "22B distilled BF16, fp8-cast, CPU offload",
+      "variant": "22B distilled, FP8-cast at load, CPU offload",
       "tasks": ["video", "music"],
       "inputs": ["text", "image"],
       "status": "gated-local",
       "script": "media-models/generate-ltx-2.5.sh",
-      "description": "Text-to-video/audio generation through the official LTX-2.5 DistilledPipeline. The Yeti profile keeps the BF16 checkpoint but casts to FP8 at runtime and offloads to CPU.",
+      "description": "Text-to-video/audio generation through the official LTX-2.5 DistilledPipeline. The official BF16 transformer is quantized to FP8 while loading and offloaded to CPU; an explicit transformer-path override is available for future compatible pre-quantized releases.",
       "requirements": [
         "Lightricks/LTX-2 checkout with uv sync --extra natten",
         "Hugging Face access to the gated LTX-2.5 files",
         "about 66 GiB of model storage plus CPU RAM and swap"
       ],
       "notes": [
-        "The NVFP4 checkpoint is not selected for this Ada (RTX 4070) host; use the official BF16 checkpoint with fp8-cast instead.",
-        "The official INT8 ConvRot files are ComfyUI-only and are not accepted by this ltx-pipelines wrapper; the official NVFP4 file requires Blackwell (SM >= 10).",
+        "The official LTX-2.5 repository currently publishes BF16 split components; no official pre-quantized Ada transformer is listed. The selected fp8-cast policy still stores the eligible transformer linears in FP8 during inference.",
+        "The newly reported 2.5 NVFP4 transformer is a Blackwell-oriented path and is about 18.7 GB before runtime overhead, so it is not selected for this 12 GB Ada host.",
         "The convolutional video VAE is selected to avoid requiring the diffusion VAE attention extra during decode.",
+        "Use --transformer PATH with the matching --quantization policy only after a pre-quantized artifact has been verified against the official ltx-pipelines loader.",
         "The distilled pipeline accepts still-image conditioning through --image PATH FRAME STRENGTH. Use a dedicated LTX pipeline for audio-to-video or video-to-video inputs."
       ]
     },
     {
-      "id": "minimax-music",
-      "name": "MiniMax Music generation",
-      "runtime": "MiniMax mmx",
-      "variant": "Music Generation API (hosted)",
+      "id": "heartmula-music",
+      "name": "HeartMuLa local music generation",
+      "runtime": "audio.cpp",
+      "variant": "HeartMuLa-oss-3B Q8_0 GGUF, CUDA",
       "tasks": ["music"],
       "inputs": ["text", "lyrics"],
-      "status": "hosted",
-      "script": "media-models/generate-minimax-music.sh",
-      "description": "Standard song generation through the official MiniMax mmx CLI and hosted Music API. This keeps the very large MiniMax-Music3 checkpoint off the 12 GB Yeti GPU.",
+      "status": "local",
+      "script": "media-models/generate-heartmula-music.sh",
+      "description": "Offline prompt-, tag-, and lyrics-conditioned song generation through audio.cpp using its published HeartMuLa Q8_0 GGUF package.",
       "requirements": [
-        "Node.js 18+ and npm",
-        "npm install --global mmx-cli",
-        "MiniMax API authentication configured with mmx auth login"
+        "audio.cpp release-0.6 audiocpp_cli built with HeartMuLa and CUDA",
+        "HeartMuLa Q8_0 GGUF package in L3MS_MEDIA_ROOT",
+        "NVIDIA driver/toolkit compatible with the audio.cpp CUDA build"
       ],
       "notes": [
-        "Use --instrumental for an instrumental track or --lyrics for a supplied lyric sheet.",
-        "MiniMax-Music3 is not wired into audio.cpp and is not a practical local 12 GB model; the hosted profile is the supported standard path."
+        "The Q8_0 package is audio.cpp's recommended HeartMuLa download and contains the MuLa generator and HeartCodec assets in one GGUF.",
+        "Use --instrumental for a no-vocals tag preset or --lyrics/--lyrics-file for a supplied lyric sheet.",
+        "Memory saver is enabled for the 12 GB Yeti profile; keep llama-swap GPU models unloaded during generation."
       ]
     }
   ]

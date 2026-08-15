@@ -16,6 +16,7 @@ LTX_ROOT="${L3MS_LTX_ROOT:-${HOME}/repos/LTX-2}"
 AUDIO_CPP_REF="${L3MS_AUDIO_CPP_REF:-release-0.6}"
 LTX_REF="${L3MS_LTX_REF:-main}"
 H3_PACKAGE_ID="${L3MS_H3_PACKAGE_ID:-minimax_h3_q4_k}"
+MUSIC_PACKAGE_ID="${L3MS_MUSIC_PACKAGE_ID:-heartmula_q8_0}"
 
 log() { printf '%s\n' "-> $*"; }
 ok() { printf '%s\n' "[OK] $*"; }
@@ -37,10 +38,11 @@ Usage: maintenance/setup-media-runtimes.sh <command>
 
 Commands:
   check              Report runtime, model, and authentication readiness
-  install-audio-cpp Clone/build audio.cpp and install MiniMax-H3 Q4_K GGUF
+  install-audio-cpp Clone/build audio.cpp and install H3 Q4_K + HeartMuLa Q8_0
   install-ltx        Clone LTX-2 and create its uv environment
-  install-music-cli  Install the official mmx CLI with npm
-  install            Run all three installers (LTX weights remain gated)
+  install-music      Build audio.cpp and install HeartMuLa Q8_0 GGUF
+  install-music-cli  Compatibility alias for install-music
+  install            Install both audio.cpp models and LTX (weights remain gated)
 
 Environment:
   L3MS_MEDIA_ROOT       Shared media models/output root (default: ~/models/media)
@@ -98,6 +100,12 @@ audio_cli_path() {
     return 1
 }
 
+audio_loader_available() {
+    local cli="$1"
+    local family="$2"
+    "$cli" --list-loaders --json 2>/dev/null | grep -Fq "\"$family\""
+}
+
 install_audio_cpp() {
     require_command git
     require_command cmake
@@ -105,8 +113,12 @@ install_audio_cpp() {
     ensure_checkout "https://github.com/0xShug0/audio.cpp.git" "$AUDIO_CPP_REF" "$AUDIO_CPP_ROOT"
     [[ -x "$AUDIO_CPP_ROOT/scripts/build_linux.sh" ]] || die "audio.cpp build helper is missing"
 
-    if ! audio_cli_path >/dev/null; then
-        log "Building audio.cpp CUDA CLI/server for minimax_h3"
+    local existing_cli=""
+    existing_cli="$(audio_cli_path || true)"
+    if [[ -z "$existing_cli" ]] \
+        || ! audio_loader_available "$existing_cli" minimax_h3 \
+        || ! audio_loader_available "$existing_cli" heartmula; then
+        log "Building audio.cpp CUDA CLI/server for minimax_h3 and heartmula"
         (
             cd "$AUDIO_CPP_ROOT"
             build_dir="${AUDIO_CPP_BUILD_DIR:-$AUDIO_CPP_ROOT/build/linux-cuda-release}"
@@ -125,7 +137,7 @@ install_audio_cpp() {
                 -DENGINE_BUILD_WARMBENCH=OFF \
                 -DAUDIOCPP_DEPLOYMENT_BUILD=ON \
                 -DAUDIOCPP_MODEL_SET=custom \
-                -DAUDIOCPP_MODELS=minimax_h3 \
+                -DAUDIOCPP_MODELS=minimax_h3,heartmula \
                 -DGGML_CUDA_CUB_3DOT2=ON \
                 -DCMAKE_CUDA_ARCHITECTURES="${L3MS_CUDA_ARCHITECTURES:-89-real}"
             cmake --build "$build_dir" --parallel "$(nproc 2>/dev/null || echo 8)" \
@@ -158,6 +170,17 @@ install_audio_cpp() {
     [[ -f "$h3_dir/audio_vae_folded_f16.gguf" ]] || die "MiniMax-H3 audio VAE is missing"
     [[ -f "$h3_dir/video_vae.gguf" ]] || die "MiniMax-H3 video VAE is missing"
     ok "MiniMax-H3 Q4_K package: $h3_dir"
+
+    local music_dir="$MEDIA_ROOT/HeartMuLa-GGUF"
+    if [[ ! -f "$music_dir/heartmula-q8_0.gguf" ]]; then
+        log "Installing audio.cpp package $MUSIC_PACKAGE_ID into $MEDIA_ROOT"
+        (
+            cd "$AUDIO_CPP_ROOT"
+            "$model_python" tools/model_manager_v2.py install "$MUSIC_PACKAGE_ID" --models-root "$MEDIA_ROOT"
+        )
+    fi
+    [[ -f "$music_dir/heartmula-q8_0.gguf" ]] || die "HeartMuLa Q8_0 package is incomplete"
+    ok "HeartMuLa Q8_0 package: $music_dir"
 }
 
 download_ltx_models() {
@@ -192,23 +215,6 @@ install_ltx() {
     fi
 }
 
-install_music_cli() {
-    if [[ -s "${NVM_DIR:-${HOME}/.nvm}/nvm.sh" ]]; then
-        # shellcheck disable=SC1090
-        . "${NVM_DIR:-${HOME}/.nvm}/nvm.sh"
-    fi
-    require_command node
-    require_command npm
-    local node_major
-    node_major="$(node -p 'process.versions.node.split(".")[0]')"
-    ((node_major >= 18)) || die "mmx-cli requires Node.js 18+ (found $node_major)"
-    log "Installing official MiniMax mmx CLI"
-    npm install --global mmx-cli
-    command -v mmx >/dev/null 2>&1 || die "npm install completed without mmx on PATH"
-    ok "mmx CLI: $(command -v mmx)"
-    warn "Authenticate once with: mmx auth login --api-key <key> (the key is never stored in L3MS files)"
-}
-
 check_file() {
     local label="$1"
     local path="$2"
@@ -222,12 +228,14 @@ check_file() {
 
 check_runtime() {
     local missing=0
-    if [[ -s "${NVM_DIR:-${HOME}/.nvm}/nvm.sh" ]]; then
-        # shellcheck disable=SC1090
-        . "${NVM_DIR:-${HOME}/.nvm}/nvm.sh"
-    fi
     if command -v nvidia-smi >/dev/null 2>&1; then
-        nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | sed 's/^/GPU: /'
+        local gpu_info=""
+        if gpu_info="$(nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader 2>/dev/null)"; then
+            printf '%s\n' "$gpu_info" | sed 's/^/GPU: /'
+        else
+            warn "nvidia-smi is installed but cannot communicate with the NVIDIA driver"
+            missing=1
+        fi
     else
         warn "nvidia-smi is unavailable; CUDA runtimes cannot be verified"
         missing=1
@@ -236,6 +244,18 @@ check_runtime() {
     local cli
     if cli="$(audio_cli_path 2>/dev/null)"; then
         ok "audio.cpp CLI: $cli"
+        if audio_loader_available "$cli" minimax_h3; then
+            ok "audio.cpp MiniMax-H3 loader compiled"
+        else
+            warn "audio.cpp MiniMax-H3 loader is not compiled into $cli"
+            missing=1
+        fi
+        if audio_loader_available "$cli" heartmula; then
+            ok "audio.cpp HeartMuLa loader compiled"
+        else
+            warn "audio.cpp HeartMuLa loader is not compiled into $cli"
+            missing=1
+        fi
     else
         warn "audio.cpp CLI missing under $AUDIO_CPP_ROOT"
         missing=1
@@ -250,6 +270,8 @@ check_runtime() {
     else
         warn "H3 playable MP4 mux tools incomplete; raw RGB24 JSON output remains available"
     fi
+    local music_dir="$MEDIA_ROOT/HeartMuLa-GGUF"
+    check_file "HeartMuLa Q8_0 GGUF" "$music_dir/heartmula-q8_0.gguf" || missing=1
 
     if [[ -d "$LTX_ROOT" ]]; then
         ok "LTX-2 checkout: $LTX_ROOT"
@@ -269,18 +291,6 @@ check_runtime() {
         missing=1
     fi
 
-    if command -v mmx >/dev/null 2>&1; then
-        ok "MiniMax mmx CLI: $(command -v mmx)"
-        if mmx auth status --non-interactive >/dev/null 2>&1; then
-            ok "MiniMax Music auth configured (credential value hidden)"
-        else
-            warn "MiniMax Music auth missing; run mmx auth login --api-key <key>"
-            missing=1
-        fi
-    else
-        warn "MiniMax mmx CLI missing"
-        missing=1
-    fi
     return "$missing"
 }
 
@@ -296,13 +306,15 @@ case "$command" in
     install-ltx)
         install_ltx
         ;;
-    install-music-cli)
-        install_music_cli
+    install-music|install-music-cli)
+        if [[ "$command" == "install-music-cli" ]]; then
+            warn "install-music-cli now installs the local audio.cpp HeartMuLa Q8_0 profile"
+        fi
+        install_audio_cpp
         ;;
     install)
         install_audio_cpp
         install_ltx
-        install_music_cli
         ;;
     -h|--help|"")
         usage
