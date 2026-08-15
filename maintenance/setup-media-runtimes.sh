@@ -236,6 +236,11 @@ check_runtime() {
     check_file "H3 text encoder" "$h3_dir/text_encoder_q4_k.gguf" || missing=1
     check_file "H3 audio VAE" "$h3_dir/audio_vae_folded_f16.gguf" || missing=1
     check_file "H3 video VAE" "$h3_dir/video_vae.gguf" || missing=1
+    if command -v ffmpeg >/dev/null 2>&1 && command -v jq >/dev/null 2>&1 && command -v xxd >/dev/null 2>&1; then
+        ok "H3 playable MP4 mux tools: ffmpeg, jq, xxd"
+    else
+        warn "H3 playable MP4 mux tools incomplete; raw RGB24 JSON output remains available"
+    fi
 
     if [[ -d "$LTX_ROOT" ]]; then
         ok "LTX-2 checkout: $LTX_ROOT"
