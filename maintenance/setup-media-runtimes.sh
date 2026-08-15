@@ -153,7 +153,7 @@ install_audio_cpp() {
 
 download_ltx_models() {
     log "Downloading gated LTX-2.5 distilled BF16 components"
-    (
+    if ! (
         cd "$LTX_ROOT"
         # HF_TOKEN is consumed by huggingface_hub from the environment when set;
         # no token is placed in argv or output.
@@ -164,7 +164,9 @@ download_ltx_models() {
             vae/ltx-2.5-audio-vae-bf16.safetensors \
             latent_upscale_models/ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors \
             --local-dir "$MEDIA_ROOT/ltx-2.5"
-    )
+    ); then
+        die "LTX download was denied; accept the LTX-2.5 model terms and ensure the token has read-gated-repository access"
+    fi
 }
 
 install_ltx() {

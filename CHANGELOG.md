@@ -53,6 +53,9 @@ verification matrix.
   MiniMax-H3 Q4_K installer, gated LTX-2.5 bootstrap, and `mmx` installer.
 - Added explicit still-image conditioning to the LTX-2.5 media profile while
   keeping H3's audio.cpp input surface text-first and shell-safe.
+- Documented LTX-2.5 quantization compatibility: BF16 plus runtime FP8 for
+  the Ada Yeti target, rather than the ComfyUI-only INT8 or Blackwell-only
+  NVFP4 files.
 
 ### Changed
 - Made the Rust launcher use llama-swap for `--run` and `--list run`, while

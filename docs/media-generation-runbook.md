@@ -57,6 +57,13 @@ transformer, Gemma 4 projection encoder, convolutional video VAE, audio VAE,
 and spatial upscaler. If authentication is not ready, `install-ltx` still sets
 up the checkout and reports the missing gated files.
 
+The official repository also publishes smaller-looking INT8 ConvRot and NVFP4
+transformers, but they are not drop-in replacements here: INT8 ConvRot is for
+ComfyUI rather than this PyTorch `ltx-pipelines` path, while the NVFP4 path
+requires a Blackwell GPU (SM >= 10). Yeti's RTX 4070 is Ada (SM 8.9), so the
+BF16 transformer with `fp8-cast` and CPU offload is the compatible quantized
+runtime choice for this host.
+
 Authenticate MiniMax Music separately. The wrapper does not accept or print a
 key:
 

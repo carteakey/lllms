@@ -39,6 +39,7 @@
       ],
       "notes": [
         "The NVFP4 checkpoint is not selected for this Ada (RTX 4070) host; use the official BF16 checkpoint with fp8-cast instead.",
+        "The official INT8 ConvRot files are ComfyUI-only and are not accepted by this ltx-pipelines wrapper; the official NVFP4 file requires Blackwell (SM >= 10).",
         "The convolutional video VAE is selected to avoid requiring the diffusion VAE attention extra during decode.",
         "The distilled pipeline accepts still-image conditioning through --image PATH FRAME STRENGTH. Use a dedicated LTX pipeline for audio-to-video or video-to-video inputs."
       ]
