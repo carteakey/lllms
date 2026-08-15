@@ -13,6 +13,11 @@ BIN="${L3MS_BIN:-${ROOT}/target/release/l3ms}"
 SERVICE="${L3MS_LLAMA_SWAP_SERVICE:-llama-swap.service}"
 DEFAULT_PORT="${L3MS_LLAMA_SWAP_PORT:-8001}"
 
+if [ -d "${HOME}/.local/bin" ]; then
+  PATH="${HOME}/.local/bin:${PATH}"
+  export PATH
+fi
+
 if [ -f "${HOME}/.cargo/env" ]; then
   # shellcheck source=/dev/null
   . "${HOME}/.cargo/env"

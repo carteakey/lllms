@@ -22,6 +22,15 @@ ok() { printf '%s\n' "[OK] $*"; }
 warn() { printf '%s\n' "[WARN] $*" >&2; }
 die() { printf '%s\n' "[ERROR] $*" >&2; exit 1; }
 
+prepare_user_path() {
+    # uv is normally installed under ~/.local/bin, which non-interactive SSH
+    # shells do not always include. Keep script invocations deterministic.
+    if [[ -d "$HOME/.local/bin" ]]; then
+        PATH="$HOME/.local/bin:$PATH"
+        export PATH
+    fi
+}
+
 usage() {
     cat <<'EOF'
 Usage: maintenance/setup-media-runtimes.sh <command>
@@ -276,6 +285,7 @@ check_runtime() {
 }
 
 command="${1:-}"
+prepare_user_path
 case "$command" in
     check)
         check_runtime

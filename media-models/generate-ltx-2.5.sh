@@ -35,6 +35,12 @@ EOF
 ltx_root="${L3MS_LTX_ROOT:-${HOME}/repos/LTX-2}"
 model_dir="${L3MS_LTX_MODEL_DIR:-${L3MS_MEDIA_ROOT:-${HOME}/models/media}/ltx-2.5}"
 output_dir="${L3MS_MEDIA_OUTPUT_DIR:-${HOME}/media-output}"
+
+if [[ -d "${HOME}/.local/bin" ]]; then
+    PATH="${HOME}/.local/bin:${PATH}"
+    export PATH
+fi
+
 prompt=""
 prompt_file=""
 output=""
