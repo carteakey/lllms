@@ -13,6 +13,7 @@ Usage:
 
 Options:
   --prompt TEXT             Text prompt (required)
+  --prompt-file PATH        Read the prompt from a UTF-8 text file
   --output PATH             MP4 output path (default: L3MS_MEDIA_OUTPUT_DIR)
   --image PATH FRAME STRENGTH
                             Optional still-image conditioning. Repeatable;
@@ -35,6 +36,7 @@ ltx_root="${L3MS_LTX_ROOT:-${HOME}/repos/LTX-2}"
 model_dir="${L3MS_LTX_MODEL_DIR:-${L3MS_MEDIA_ROOT:-${HOME}/models/media}/ltx-2.5}"
 output_dir="${L3MS_MEDIA_OUTPUT_DIR:-${HOME}/media-output}"
 prompt=""
+prompt_file=""
 output=""
 image_args=()
 frames=121
@@ -47,6 +49,11 @@ while (($#)); do
         --prompt)
             (($# >= 2)) || { echo "Missing value for --prompt" >&2; exit 2; }
             prompt="$2"
+            shift 2
+            ;;
+        --prompt-file)
+            (($# >= 2)) || { echo "Missing value for --prompt-file" >&2; exit 2; }
+            prompt_file="$2"
             shift 2
             ;;
         --output|--output-path)
@@ -87,6 +94,11 @@ while (($#)); do
     esac
 done
 
+if [[ -n "$prompt_file" ]]; then
+    [[ -f "$prompt_file" ]] || { echo "Prompt file not found: $prompt_file" >&2; exit 1; }
+    [[ -z "$prompt" ]] || { echo "--prompt and --prompt-file are mutually exclusive" >&2; exit 2; }
+    prompt="$(<"$prompt_file")"
+fi
 if [[ -z "$prompt" ]]; then
     echo "LTX-2.5 requires --prompt TEXT" >&2
     exit 2
@@ -131,6 +143,10 @@ mkdir -p "$output_dir"
 if [[ -z "$output" ]]; then
     output="$output_dir/ltx-2.5-$(date +%Y%m%d-%H%M%S).mp4"
 fi
+case "$output" in
+    /*) ;;
+    *) output="$PWD/$output" ;;
+esac
 
 echo "LTX-2.5 distilled: ${frames} frames / ${quantization} / ${offload} offload -> $output"
 cd "$ltx_root"

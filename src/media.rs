@@ -144,9 +144,15 @@ pub fn interactive_media(root: &Path, filter: &str, extra: &str) -> Result<u8> {
     }
 
     print_profile_list(&profiles);
-    let Some(index) = choose_index(profiles.len(), "media profile")? else {
-        println!("Cancelled.");
-        return Ok(0);
+    let index = if profiles.len() == 1 && !extra.trim().is_empty() {
+        println!("Auto-selecting the only matching media profile for --extra.");
+        0
+    } else {
+        let Some(index) = choose_index(profiles.len(), "media profile")? else {
+            println!("Cancelled.");
+            return Ok(0);
+        };
+        index
     };
 
     let profile = &profiles[index];

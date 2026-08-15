@@ -56,6 +56,9 @@ verification matrix.
 - Documented LTX-2.5 quantization compatibility: BF16 plus runtime FP8 for
   the Ada Yeti target, rather than the ComfyUI-only INT8 or Blackwell-only
   NVFP4 files.
+- Added prompt-file inputs and playable MP4 muxing for H3 video output when
+  the host provides ffmpeg, while retaining the raw RGB24 artifact for
+  inspection and recovery.
 
 ### Changed
 - Made the Rust launcher use llama-swap for `--run` and `--list run`, while

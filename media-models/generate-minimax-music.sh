@@ -10,6 +10,7 @@ Usage:
 
 Options:
   --prompt TEXT             Music style/scene prompt (required)
+  --prompt-file PATH        Read the prompt from a UTF-8 text file
   --lyrics TEXT             Lyrics to arrange
   --lyrics-file PATH        Read lyrics from a local UTF-8 file
   --instrumental            Generate without vocals
@@ -24,6 +25,7 @@ EOF
 }
 
 prompt=""
+prompt_file=""
 lyrics=""
 lyrics_file=""
 instrumental=false
@@ -43,6 +45,11 @@ while (($#)); do
         --prompt)
             (($# >= 2)) || { echo "Missing value for --prompt" >&2; exit 2; }
             prompt="$2"
+            shift 2
+            ;;
+        --prompt-file)
+            (($# >= 2)) || { echo "Missing value for --prompt-file" >&2; exit 2; }
+            prompt_file="$2"
             shift 2
             ;;
         --lyrics)
@@ -88,6 +95,11 @@ while (($#)); do
     esac
 done
 
+if [[ -n "$prompt_file" ]]; then
+    [[ -f "$prompt_file" ]] || { echo "Prompt file not found: $prompt_file" >&2; exit 1; }
+    [[ -z "$prompt" ]] || { echo "--prompt and --prompt-file are mutually exclusive" >&2; exit 2; }
+    prompt="$(<"$prompt_file")"
+fi
 if [[ -n "$lyrics_file" ]]; then
     [[ -f "$lyrics_file" ]] || { echo "Lyrics file not found: $lyrics_file" >&2; exit 1; }
     lyrics="$(<"$lyrics_file")"

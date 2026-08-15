@@ -98,12 +98,23 @@ cargo run --locked -- --media minimax-h3 --extra \
   '--prompt "slow modular synth arpeggio, warm tape saturation" --steps 20'
 ```
 
-MiniMax-H3 short video with synchronized audio:
+MiniMax-H3 short video with synchronized audio (writes a playable MP4 when
+`ffmpeg`, `jq`, and `xxd` are installed, while retaining the raw RGB24 JSON):
 
 ```bash
 cargo run --locked -- --media minimax-h3 --extra \
   '--prompt "a rainy neon street, locked camera, reflections in puddles" --video'
 ```
+
+Computer-assisted prompt input can use a local file instead of shell quoting:
+
+```bash
+cargo run --locked -- --media minimax-h3 --extra \
+  '--prompt-file ./prompt.txt --video --video-output ./rainy-street.mp4'
+```
+
+The same `--prompt-file` option is available on LTX-2.5 and MiniMax Music;
+Music also accepts `--lyrics-file` for a locally authored lyric sheet.
 
 LTX-2.5 text-to-video/audio:
 
@@ -133,12 +144,13 @@ The default output directory is `$HOME/media-output`; set
 
 ## Inputs and computer-assisted workflows
 
-The profiles expose text and lyrics as stable inputs, plus still-image
-conditioning for the LTX DistilledPipeline. H3's official model family is
-multimodal, but the local audio.cpp `FL2VA` package currently exposes the
-text-to-audio/video route only. LTX image paths use explicit
-`--image PATH FRAME STRENGTH` triples; audio-to-video and video-to-video work
-still require their corresponding upstream LTX pipeline and model assets.
+The profiles expose text-file and lyrics-file inputs for computer-assisted
+workflows, plus still-image conditioning for the LTX DistilledPipeline. H3's
+official model family is multimodal, but the local audio.cpp `FL2VA` package
+currently exposes the text-to-audio/video route only. LTX image paths use
+explicit `--image PATH FRAME STRENGTH` triples; audio-to-video and
+video-to-video work still require their corresponding upstream LTX pipeline and
+model assets.
 
 This keeps computer-use workflows safe: a UI or notebook can write a prompt or
 lyrics file and invoke `l3ms --media … --extra …`, while local paths are passed
@@ -163,3 +175,8 @@ as data. No browser automation or API key is required by L3MS itself.
   practical advice to start at low resolution with substantial system RAM and
   expect multi-minute generation. Reddit is treated as field evidence, not as
   the source of runtime flags or model compatibility claims.
+- A newer 12 GB H3 report gives a useful planning baseline: roughly 864×480,
+  124 frames, and 20 steps completed in under nine minutes with 32 GB system
+  RAM. Other reports describe reference-video/audio paths stalling or crashing
+  on 12 GB, so this L3MS profile intentionally keeps inputs text-first and
+  exposes still-image conditioning only where the selected runtime supports it.

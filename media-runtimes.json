@@ -18,7 +18,8 @@
       ],
       "notes": [
         "The normal Q4_K DiT is the default; the optional INT8 ConvRot package is not selected because audio.cpp reports a higher peak-memory path.",
-        "Video defaults to 480p and 121 frames (about five seconds at 24 fps). Use --video to request an RGB24 video artifact.",
+        "Video defaults to 480p and 121 frames (about five seconds at 24 fps). Use --video to request synchronized video output.",
+        "When ffmpeg, jq, and xxd are available, --video also muxes the RGB24 payload with the generated WAV into a playable MP4; the raw JSON artifact is retained.",
         "H3 is experimental and can be slow on 12 GB. Keep other GPU-heavy models unloaded while generating."
       ]
     },
