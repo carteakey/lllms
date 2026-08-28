@@ -16,6 +16,23 @@ Build a keyboard-first, script-first homelab LLM toolkit with strong operational
 - Preserve existing files by default for downloads unless explicitly overridden.
 - Keep version snapshots for both model configs and scripts before writes.
 
+## llama-swap Operations
+
+- Config hot-reload: `kill -HUP $(pgrep '[l]lama-swap')`. New/edited
+  `llama-swap.yaml` entries are picked up without restarting the router
+  (verified: no dropped connections, running models keep serving).
+- Full-VRAM experiments (bench ladders, OOM hunting, fitting runs): pause the
+  router and its spawned servers with `systemctl --user stop llama-swap.service`,
+  run the experiment, then `systemctl --user start llama-swap.service`. A 12 GB
+  card cannot hold two loaded models; llama-swap models claim the whole card.
+- Requesting a model through the router swaps out whatever is loaded (server
+  for the previous model is killed, new one spawned with its declared flags).
+  `globalTTL: 600` unloads idle models after 10 minutes.
+- New model entries: snapshot the yaml first
+  (`llama-swap.yaml.bak-YYYYmmdd-HHMMSS`), add a `${...}_server` macro for any
+  non-default binary under `vendor/`, then SIGHUP and smoke-test with a
+  `max_tokens: 6` chat request before considering it wired.
+
 ## Structure
 
 - `src/app.rs`: Ratatui layout, keybindings, workflows, and process supervision
