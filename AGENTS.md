@@ -42,6 +42,8 @@ Build a keyboard-first, script-first homelab LLM toolkit with strong operational
 
 ## Qwen3.8-Flash-Next (qwen4exp) Tiers
 
+Deep detail, decisions and next steps: `docs/qwen38-flash-next-internal.md`.
+
 Three router tiers share one AtomicChat AD-4.27bpw quant:
 
 - gold `qwen38-flash-next`: plain upstream master (`vendor/llama.cpp-master`,
