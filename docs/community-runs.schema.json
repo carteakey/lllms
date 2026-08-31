@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://l3ms.carteakey.dev/community-runs.schema.json",
+  "title": "L3MS community benchmark runs",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["runs"],
+  "properties": {
+    "runs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/run" }
+    }
+  },
+  "$defs": {
+    "run": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "submittedAt", "sourceUrl", "hardware", "software", "model", "benchmark", "metrics"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]+$" },
+        "submittedAt": { "type": "string", "format": "date" },
+        "sourceUrl": { "type": "string", "format": "uri", "pattern": "^https://" },
+        "notes": { "type": "string" },
+        "hardware": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["gpu", "vramGb", "cpu", "ramGb"],
+          "properties": {
+            "gpu": { "type": "string" },
+            "gpuCount": { "type": "integer", "minimum": 1, "default": 1 },
+            "vramGb": { "type": "number", "exclusiveMinimum": 0 },
+            "cpu": { "type": "string" },
+            "ramGb": { "type": "number", "exclusiveMinimum": 0 },
+            "ramSpeed": { "type": ["string", "null"] },
+            "interconnect": { "type": ["string", "null"] }
+          }
+        },
+        "software": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["os", "backend", "llamaCppCommit"],
+          "properties": {
+            "os": { "type": "string" },
+            "backend": { "type": "string" },
+            "llamaCppCommit": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+            "driver": { "type": ["string", "null"] }
+          }
+        },
+        "model": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "quant"],
+          "properties": {
+            "name": { "type": "string" },
+            "quant": { "type": "string" },
+            "modelUrl": { "type": ["string", "null"], "format": "uri" }
+          }
+        },
+        "benchmark": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["command", "testedContext", "cacheState", "promptTokens", "generatedTokens", "repetitions"],
+          "properties": {
+            "command": { "type": "string", "minLength": 1 },
+            "testedContext": { "type": "integer", "minimum": 1 },
+            "cacheState": { "type": "string", "enum": ["cold", "warm", "mixed"] },
+            "promptTokens": { "type": "integer", "minimum": 1 },
+            "generatedTokens": { "type": "integer", "minimum": 1 },
+            "repetitions": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pp", "tg", "draftAcceptance"],
+          "properties": {
+            "pp": { "type": ["number", "null"], "minimum": 0 },
+            "tg": { "type": "number", "exclusiveMinimum": 0 },
+            "draftAcceptance": { "type": ["number", "null"], "minimum": 0, "maximum": 1 }
+          }
+        }
+      }
+    }
+  }
+}

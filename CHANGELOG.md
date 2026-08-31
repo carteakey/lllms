@@ -77,7 +77,15 @@ verification matrix.
   loader-compatible pre-quantized artifact can be selected without changing
   the wrapper.
 
+- Added a reproducibility evidence record to every published local profile,
+  including explicit historical gaps for PP, tested context, cache state,
+  draft acceptance, llama.cpp commit, and benchmark command.
+- Added a validated community-run schema, submission guide, generator tests,
+  and a separate unranked dashboard view for non-local hardware.
+
 ### Changed
+- Kept community runs structurally separate from the local RTX 4070 ranking
+  and updated the dashboard methodology to make that boundary visible.
 - `qwen38-flash-next` router entry now caps thinking by default: `--reasoning-effort medium --reasoning-budget 4000 --reasoning-preserve` (Qwen3.8 ships xhigh thinking; the cap trades a small quality delta for large effective-throughput gains in agentic use).
 - Made the Rust launcher use llama-swap for `--run` and `--list run`, while
   preserving `bench-*.sh` files as the benchmark entry points and retaining the

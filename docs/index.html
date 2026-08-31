@@ -169,6 +169,10 @@
     .detail-facts { display: grid; gap: .65rem; align-content: start; }
     .detail-value { display: block; margin-top: .15rem; color: #fff; font-weight: 700; }
     .detail-links { display: flex; flex-direction: column; gap: .35rem; margin-top: .3rem; font-size: .68rem; }
+    .evidence-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; margin-bottom: .8rem; }
+    .evidence-item { min-width: 0; padding: .55rem; border: 1px solid var(--border); background: #090909; }
+    .evidence-item code { display: block; margin-top: .18rem; overflow-wrap: anywhere; color: #fff; font-size: .65rem; }
+    .missing { color: var(--yellow); font-weight: 700; }
     .command-head { display: flex; justify-content: space-between; align-items: center; gap: .8rem; margin-bottom: .45rem; }
     .command-note { margin: 0 0 .55rem; color: var(--yellow); font-size: .65rem; }
     pre { margin: 0; padding: .75rem; overflow: auto; border: 1px solid var(--border); background: #050505; color: #bbb; font-size: .67rem; line-height: 1.55; }
@@ -202,6 +206,10 @@
     .archive-card h3 { margin: 0; color: #fff; font-size: .8rem; }
     .archive-card p { margin: .55rem 0; color: var(--muted); font-size: .68rem; }
     .archive-meta { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; padding-top: .55rem; border-top: 1px dashed var(--border); }
+    .community-list { display: grid; gap: .75rem; }
+    .community-card { padding: .9rem; border-left: 4px solid var(--blue); }
+    .community-card h3 { margin: 0; color: #fff; font-size: .85rem; }
+    .community-card p { color: var(--muted); }
 
     .empty { padding: 2rem; color: var(--muted); text-align: center; }
     footer { margin-top: 2rem; padding: 1rem 0; border-top: 2px solid var(--border); color: var(--muted); font-size: .66rem; text-align: center; }
@@ -224,6 +232,7 @@
       .mobile-speed { color: #fff; font-size: 1rem; font-weight: 800; text-align: right; }
       .mobile-meta { display: flex; gap: .8rem; margin: .65rem 0; color: #aaa; }
       .model-details { grid-template-columns: 1fr; margin-top: .75rem; padding: .8rem 0 0; border-top: 2px solid var(--green); border-left: 0; }
+      .evidence-grid { grid-template-columns: 1fr 1fr; }
       .benchmark-layout { grid-template-columns: 1fr; }
       .benchmark-list { display: grid; grid-template-columns: 1fr; }
       .chart-row { grid-template-columns: 95px minmax(0, 1fr); }
@@ -265,7 +274,8 @@
     <nav class="tabs" aria-label="Dashboard views">
       <button class="tab active" data-tab="models">[1] Served profiles</button>
       <button class="tab" data-tab="benchmarks">[2] Benchmark runs</button>
-      <button class="tab" data-tab="archive">[3] Retired profiles</button>
+      <button class="tab" data-tab="community">[3] Community runs</button>
+      <button class="tab" data-tab="archive">[4] Retired profiles</button>
     </nav>
 
     <section class="tab-panel active" id="models-panel">
@@ -302,6 +312,14 @@
       </div>
     </section>
 
+    <section class="tab-panel" id="community-panel">
+      <div class="archive-intro surface">
+        <span class="label">Different hardware, separate evidence</span>
+        <p>Community results never enter the RTX 4070 ranking. Each run must include hardware, exact command, llama.cpp commit, context, cache state, PP/TG, and a reviewable source. See the <a href="community-runs.schema.json">submission schema</a>.</p>
+      </div>
+      <div class="community-list" id="community-list"></div>
+    </section>
+
     <section class="tab-panel" id="archive-panel">
       <div class="archive-intro surface">
         <span class="label">Retired, with reasons</span>
@@ -319,6 +337,7 @@
   <script>
     const dashboard = window.L3MS_DASHBOARD;
     const models = dashboard.models;
+    const communityRuns = dashboard.communityRuns;
     let activeFilter = "All";
     let searchTerm = "";
     let activeBenchmark = Object.keys(dashboard.benchmarks)[0];
@@ -331,6 +350,9 @@
     const badges = model => model.tags.map(tag => `<span class="badge ${badgeClass(tag)}">${escapeHtml(tag)}</span>`).join("");
     const rankFor = model => String(models.findIndex(item => item.id === model.id) + 1).padStart(2, "0");
     const barWidth = model => Math.round((model.tps / models[0].tps) * 100);
+    const evidenceValue = (value, suffix = "") => value === null || value === undefined
+      ? '<span class="missing">not recorded</span>'
+      : `<span class="detail-value">${escapeHtml(value)}${suffix}</span>`;
 
     function modelDetails(model) {
       return `
@@ -344,6 +366,15 @@
             </div>
           </div>
           <div>
+            <div class="evidence-grid" aria-label="Benchmark evidence">
+              <div class="evidence-item"><span class="label">PP</span>${evidenceValue(model.evidence.pp, " t/s")}</div>
+              <div class="evidence-item"><span class="label">TG</span>${evidenceValue(model.evidence.tg, " t/s")}</div>
+              <div class="evidence-item"><span class="label">Tested context</span>${evidenceValue(model.evidence.testedContext)}</div>
+              <div class="evidence-item"><span class="label">Cache state</span>${evidenceValue(model.evidence.cacheState)}</div>
+              <div class="evidence-item"><span class="label">Draft acceptance</span>${evidenceValue(model.evidence.draftAcceptance, "%")}</div>
+              <div class="evidence-item"><span class="label">llama.cpp commit</span>${evidenceValue(model.evidence.llamaCppCommit)}</div>
+              <div class="evidence-item" style="grid-column:1/-1"><span class="label">Benchmark command</span><code>${escapeHtml(model.evidence.benchmarkCommand)}</code></div>
+            </div>
             <div class="command-head"><span class="label">Portable llama.cpp command</span><button class="button" data-copy="${escapeHtml(model.id)}">Copy command</button></div>
             <p class="command-note">Paths are placeholders and the public-safe default binds to localhost. CPU pinning and fit values match this node.</p>
             <pre><code>${escapeHtml(model.command)}</code></pre>
@@ -444,6 +475,29 @@
       `).join("");
     }
 
+    function renderCommunity() {
+      const container = document.getElementById("community-list");
+      if (!communityRuns.length) {
+        container.innerHTML = '<div class="surface empty">No reviewed community runs yet. The empty state is intentional; incomplete submissions do not become benchmark claims.</div>';
+        return;
+      }
+      container.innerHTML = communityRuns.map(run => `
+        <article class="community-card surface">
+          <h3>${escapeHtml(run.model.name)} · ${escapeHtml(run.model.quant)}</h3>
+          <p>${escapeHtml(run.hardware.gpu)} (${escapeHtml(run.hardware.vramGb)} GB) · ${escapeHtml(run.hardware.cpu)} · ${escapeHtml(run.software.backend)}</p>
+          <div class="evidence-grid">
+            <div class="evidence-item"><span class="label">PP</span>${evidenceValue(run.metrics.pp, " t/s")}</div>
+            <div class="evidence-item"><span class="label">TG</span>${evidenceValue(run.metrics.tg, " t/s")}</div>
+            <div class="evidence-item"><span class="label">Context</span>${evidenceValue(run.benchmark.testedContext)}</div>
+            <div class="evidence-item"><span class="label">Cache</span>${evidenceValue(run.benchmark.cacheState)}</div>
+            <div class="evidence-item"><span class="label">Acceptance</span>${evidenceValue(run.metrics.draftAcceptance === null ? null : (run.metrics.draftAcceptance * 100).toFixed(1), "%")}</div>
+            <div class="evidence-item"><span class="label">Commit</span>${evidenceValue(run.software.llamaCppCommit)}</div>
+          </div>
+          <a href="${escapeHtml(run.sourceUrl)}" rel="noopener">Review source</a>
+        </article>
+      `).join("");
+    }
+
     document.addEventListener("click", event => {
       const tab = event.target.closest("[data-tab]");
       if (tab) {
@@ -474,6 +528,7 @@
     document.getElementById("generated-date").textContent = `Snapshot generated ${dashboard.generatedAt}`;
     renderModels();
     renderBenchmarks();
+    renderCommunity();
     renderArchive();
   </script>
 </body>

@@ -1,17 +1,19 @@
 {
-  "updated": "2026-06-22",
+  "updated": "2026-07-17",
   "system": {
     "gpu": "RTX 4070 12GB",
     "cpu": "i5-12600K",
     "ram": "32GB DDR5-6000",
     "os": "CachyOS / CUDA"
   },
-  "methodology": "Token-generation throughput measured on the hardware above. Values are profile-level reference results, not universal speed claims. Prompt processing and task-level MTP results use separate benchmark runs.",
+  "methodology": "The ranked list contains only results from the RTX 4070 node above. Historical fields that were not captured in the same run are shown as not recorded instead of being inferred. Community hardware is kept in a separate, unranked dataset.",
   "models": {
     "gemma-4-12b-qat-mtp": {
       "displayName": "Gemma 4 12B QAT + MTP",
       "summary": "Fastest profile on this node; native MTP drafting with the official assistant model.",
       "tps": 120.8,
+      "cacheState": "cold; default target/draft KV",
+      "draftAcceptance": 65.8,
       "quant": "UD-Q4_K_XL (QAT)",
       "tags": ["MTP", "MoE", "QAT"],
       "benchmark": "mtp_bench_gemma.py"
