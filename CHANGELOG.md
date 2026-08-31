@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-31
+
 The Rust port remains in progress under `CAR-97`; these entries describe
 implemented slices and do not assert full legacy parity or a fully green
 verification matrix.
