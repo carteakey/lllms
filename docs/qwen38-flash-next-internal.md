@@ -94,7 +94,7 @@ occupies VRAM → ctx cap) + `--spec-type draft-mtp,ngram-mod
 
 | metric | value | conditions |
 | --- | --- | --- |
-| tg (counting probe, spec warm) | 24.8-25.4 t/s | 64k, converged, spec-friendly text |
+| tg (counting probe, spec warm) | 24.8-25.4 t/s balanced · **25.7-26.3 t/s with performance mode** | 64k, converged, spec-friendly text; +~3% from keeping uncore/P-cores hot between speculative verify rounds (measured 2026-08-31, post-`power-profiles-daemon` performance switch) |
 | tg (novel prose, spec cold→warm) | 19.1 → 19.8 t/s | 192-tok story gens |
 | tg (novel prose, converged) | **19.5 t/s** | 256-tok story, 1.3 MB reads = 5 KB/tok design floor |
 | tg (prose, during spill) | 16.2-16.9 t/s | full box, expert re-faulting |
@@ -107,7 +107,14 @@ occupies VRAM → ctx cap) + `--spec-type draft-mtp,ngram-mod
 
 Number identities: **16-17 t/s = spilling (unhealthy) · ~19.5 = healthy prose
 floor · 24.8+ = speculation multiplier on predictable text** (pool 18.9 →
-35.9 t/s on repeated identical prompts, +90%).
+35.9 t/s on repeated identical prompts, +90%). Note the speculation pool
+goes cold after unrelated generations — a single cold reading (e.g. 16.8)
+is pool state, not a regression; re-probe 1-3× to re-warm.
+
+CPU power profile: `performance` (governor + EPP). Effect measured: ~+3% on
+the spec-warm path (ramp penalty between verify rounds), neutral on
+sustained prose (loaded clocks were already pegged). Verify after reboot:
+`cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor` → `performance`.
 
 ## 6. Memory model (the ledger)
 
@@ -233,6 +240,8 @@ update runbook + AGENTS.md.
    settings change is deferred.
 2. Reboot into the chosen target (GUI or `multi-user.target`).
 3. Verify llama-swap auto-alive (linger): `systemctl --user is-active llama-swap`.
+3b. Verify CPU power profile survived: scaling_governor → `performance`
+   (see §5); re-set via power-profiles-daemon if it reset to balanced.
 4. Load gold via router, run the page-in warm-up (2-3 throwaway gens), then
    the spill check — expect ≤1.5 MB/256tok.
 5. Re-run the §5 quick numbers (counting probe ×2, story gen ×1) and diff
