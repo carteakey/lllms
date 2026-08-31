@@ -88,6 +88,15 @@ Gotchas:
   RAM. Note zram swap metrics are useless for this check (in-RAM, churns
   wildly); read_bytes is the ground truth. Fix: free RAM before long
   sessions, or A/B a higher `--fit-target` to shift more weights to VRAM.
+- Headless mode (reclaim desktop RAM for the model): `llama-swap.service` is
+  a `systemctl --user` unit, so the user manager must survive session teardown
+  — `loginctl enable-linger kchauhan` is set (Linger=yes). Then
+  `sudo systemctl isolate multi-user.target` drops the GUI (recover with
+  `sudo systemctl isolate graphical.target`); SSH sessions are unaffected.
+  Even headless, the AD-4.27bpw model (~45.5 GB RAM-side weights) + live
+  anon + zram compressed stores leave the box only marginally above its
+  working set — re-verify with the read_bytes spill check; a fresh boot
+  (empty zram, no GUI apps) is the clean-state reset.
 - `target/` can contain artifacts built in another tree (deploy snapshots
   carry it) — test binaries then bake a foreign `CARGO_MANIFEST_DIR` and
   repo-detection tests fail with `left: None`. Fix: `cargo clean -p l3ms`.
