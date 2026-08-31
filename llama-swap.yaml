@@ -222,7 +222,7 @@ models:
   # ===========================================================================
 
   "qwen38-flash-next":
-    name: "Qwen3.8-Flash-Next (master 85c55223c, AtomicChat AD-4.27bpw, ngram-on-SSD)"
+    name: "Qwen3.8-Flash-Next (master e4b9af007, AtomicChat AD-4.27bpw, ngram-on-SSD)"
     description: "Gold: plain upstream master, conservative. pp=198 tg=25 (steady) t/s @ 64k ctx, q8 KV, ngram-mod spec. Reasoning capped: effort=medium, budget=4000. See docs/qwen3-8-flash-next-local-post.md."
     env:
       - "GGML_CUDA_GRAPH_OPT=1"
@@ -284,7 +284,7 @@ models:
       -ngl 99 -ncmoe 46
       -c 32768 --parallel 1
       -b 4096 -ub 1024
-      -fa on --jinja -fit off
+      -fa on --jinja -fit off -fit off
       -ctk q8_0 -ctv q8_0
       -t 10 --threads-batch 12 --prio 2
       --lazy-mode on

@@ -172,13 +172,43 @@ limiter) + 5 KB from SSD. Prefill multiplies PLE reads by batch size →
 
 ### 9.1 MTP implementation (current tier: working, ahead of upstream)
 
-- [ ] Track #27836 + #28097 (draft-head-only GGUFs, unsloth layout) — when
-      merged, rebuild master and collapse the MTP delta.
+**2026-08-31 rollback-stack experiment (concluded, reverted).** Context: PR
+#28123 (recurrent-state rollback, CISC-approved) + the port PR
+(#28118 on-device checkpoints, #28120 rollback enable, #28061 replay fix)
+show 1.33-1.73x MTP multipliers on 80 GB-class cards (RTX PRO 6000: 83 →
+144 t/s prose) — the host-path state serialization our old build partially
+pays. Hand-merged all four onto our MTP branch (`pr-test-exp-mtp-rollback`,
+78718f37e) and measured on this 12 GB box:
+
+| config | code t/s | stability |
+| --- | --- | --- |
+| old build (host ckpt, ncmoe 46, Q4_K_M head) | **25.0** | stable |
+| rollback, static 46 | — | CUDA OOM at first decode (graph capture) |
+| rollback, static 48 | 32.8 once → 20.6 repro | OOM'd during later graph instantiate |
+| rollback, fit 3072 | ~12 | stable but starved |
+| rollback, fit 2048 | 14-16 | stable but starved |
+| rollback, static 48 + Q3_K_M head (2.15 GB, requantized locally) | 20.9 → 20.6 | crashed on 2nd probe |
+
+Findings: (a) the on-device checkpoint buffers need ~2.5-4 GB VRAM this
+card does not have alongside the head + KV + compute; (b) the one 32.8
+reading was ngram-pool resonance (the Fibonacci output was still in the
+speculation pool), not steady state — treat one-off spec spikes as noise;
+(c) the Q3_K_M requant (`agentionai-mtp-Q3_K_M.gguf`, kept on disk) did not
+rescue VRAM and lowered acceptance; (d) hand-merging four PR heads with
+divergent bases carries integration noise — net slower than the old build
+at steady state. Reverted MTP tier to 0b7d6d57d (host checkpoints + p-min
+0.7 gating = the right design for 12 GB). **Retry conditions**: #28123 +
+#28118/#28120 merge into master (then gold refresh — no hand-merges), a
+lighter draft head (unsloth layout via #28097 — note: unsloth has NOT
+published a head; community heads dzannotti/ashbash/drluoto are gated/gone),
+or bigger VRAM. The atomicchat org publishes no MTP head.
+
+- [ ] Track #27836 + #28097 (draft-head-only GGUFs, unsloth layout) + the
+      rollback stack above — when merged, rebuild master and collapse the
+      MTP delta; then re-validate the 32k ctx cap (lighter head may allow
+      48k/64k with MTP).
 - [ ] Re-validate MTP on the exp stack after #28068-class fixes merge
       (draft head acceptance may shift with GDN l2norm change).
-- [ ] Investigate raising the 32k ctx cap: the cap exists because the
-      Q4_K_M head occupies VRAM. A lighter head (the #28097 layout) or
-      `--spec-draft-ngl` reduction could free VRAM → 48k/64k with MTP.
 - [ ] Re-bench code vs prose acceptance with `--spec-draft-p-min` sweep
       (0.6/0.7/0.8) on the current stack — acceptance data is from the old
       build.
