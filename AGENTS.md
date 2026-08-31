@@ -79,6 +79,9 @@ Gotchas:
   prefixes to defeat KV reuse. A/B harness:
   `bench-models/bench-llama-qwen38-flash-next-build-ab.sh` (stop llama-swap
   first).
+- `target/` can contain artifacts built in another tree (deploy snapshots
+  carry it) — test binaries then bake a foreign `CARGO_MANIFEST_DIR` and
+  repo-detection tests fail with `left: None`. Fix: `cargo clean -p l3ms`.
 
 ## Structure
 
