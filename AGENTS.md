@@ -31,7 +31,54 @@ Build a keyboard-first, script-first homelab LLM toolkit with strong operational
 - New model entries: snapshot the yaml first
   (`llama-swap.yaml.bak-YYYYmmdd-HHMMSS`), add a `${...}_server` macro for any
   non-default binary under `vendor/`, then SIGHUP and smoke-test with a
-  `max_tokens: 6` chat request before considering it wired.
+  chat request before considering it wired. Reasoning models need
+  `max_tokens >= 64` in the smoke request: smaller budgets land entirely in
+  `<think>` and return empty `content`, which is not a failure (check
+  `reasoning_content` instead).
+- Flag generation matters when porting cmd blocks between entries:
+  master-based builds take `--lazy-mode on`; pre-rename PR builds (e.g. the
+  pr-test-27836 era) take `--tensor-read-lazy on`. Verify with
+  `llama-server --help` before reusing a flag.
+
+## Qwen3.8-Flash-Next (qwen4exp) Tiers
+
+Three router tiers share one AtomicChat AD-4.27bpw quant:
+
+- gold `qwen38-flash-next`: plain upstream master (`vendor/llama.cpp-master`,
+  macro `qwen38_master_server`). Refresh = `git fetch` + rebuild; stays
+  current as qwen4exp PRs merge upstream.
+- exp `qwen38-flash-next-exp`: master + unmerged qwen4exp PRs
+  (`build/bin/llama-server-exp` inside `vendor/llama.cpp-pr-test-28023-28068-27941`,
+  branch `pr-test-28023-28068-27941`). Becomes redundant when its PRs merge;
+  delete the delta then.
+- MTP `qwen38-flash-next-mtp`: exp + #27836 draft head + detached-head patch
+  (`build/bin/llama-server` in the same clone, branch `pr-test-exp-mtp`),
+  32k ctx cap, opt-in.
+
+Gotchas:
+
+- The exp clone's build dir serves two branches: `llama-server` = MTP binary,
+  `llama-server-exp` = exp binary. Switching branches there requires
+  rebuilding both.
+- Vendor clones can carry uncommitted local patches — check `git status`
+  before trusting or rebuilding a clone (the MTP detached-head patch once
+  lived only as a dirty file).
+- PR stacks: `maintenance/llama-test-pr.sh <pr>...` merges PR heads onto
+  master and builds with house flags; `vendor/llama.cpp` is a stale bisect
+  checkout, not a master build — use `vendor/llama.cpp-master` for master.
+- Memory rule: the PLE/n-gram table (~30-38 GB) must stay on SSD. AtomicChat
+  quants do it natively (separate shard + lazy reads); unsloth quants need
+  `-ot "per_layer_token_embd\.weight=CPU"` with mmap (never `--no-mmap` or
+  `--mlock`, which force the table into RAM). Non-PLE weights must fit fast
+  memory (~72 GB here: 60 RAM + 12 VRAM) — UD-Q4_K_XL does not fit; IQ4_XS
+  fits but is quality-lateral to AD-4.27bpw (KLD 0.0836 vs 0.0842). Preflight
+  big downloads by range-fetching GGUF shard headers and parsing the
+  PLE/non-PLE split before committing disk.
+- Bench hygiene: tg has a warm-up transient (ngram-mod pool) — discard the
+  first 2-3 fresh-load probes and report steady state; pp probes need unique
+  prefixes to defeat KV reuse. A/B harness:
+  `bench-models/bench-llama-qwen38-flash-next-build-ab.sh` (stop llama-swap
+  first).
 
 ## Structure
 
