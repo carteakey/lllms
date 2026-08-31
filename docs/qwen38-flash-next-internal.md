@@ -234,7 +234,28 @@ Suggested ladder (reboot 1):
 Reboot 2 candidates (after RAM): re-bench §5 numbers; if tg moves >5%,
 update runbook + AGENTS.md.
 
-### 9.4 Reboot checklist
+### 9.4 The 30 t/s campaign (target: 30 tok/s sustained)
+
+Ladder measured 2026-08-31 (all warm, converged): gold prose 19.5 · gold
+spec-warm 26.3 · MTP code 25.0 (32k cap). Gap analysis:
+
+1. **MTP/ngram param sweep** (no reboot, ~30 min): `--spec-draft-p-min`
+   0.5/0.6/0.7 × `--spec-draft-n-max` 2/3 × ngram-mod `-min 8 -max 32`.
+   Best-known acceptance data is from the old build; the exp stack may
+   accept differently. Also probe MTP's ceiling with the counting prompt.
+2. **RAM clocks** (reboot 1, §9.3): +5-10% across every class →
+   spec-warm ~28-29, code ~27-28.
+3. **Upstream merges** (watch list §10): #27977 (tg-vs-ctx decay) +
+   #27992 (O(log n) n-gram lookups) → refresh gold, re-bench at 64k;
+   #27836 + #28097 → MTP on master, lighter head → MTP at 64k.
+4. **True QSA sparsity** upstream: the last leg for prose 30.
+5. Expected milestones: spec-warm 30 ≈ steps 1+2 (days); code 30 ≈ steps
+   1-3 (weeks); prose 30 ≈ steps 2-4 (weeks, upstream-dependent).
+   Prose 30 via local flags alone is NOT available — the 19.5 floor is
+   RAM random-access bound (3.2 GB/token gathers); only bandwidth/latency
+   (RAM clocks) or algorithmic cuts (upstream) move it.
+
+### 9.5 Reboot checklist
 
 1. Capture `sudo dmidecode -t 17` baseline (see §9.3.1) — or skip if RAM
    settings change is deferred.
