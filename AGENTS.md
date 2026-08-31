@@ -87,7 +87,12 @@ Gotchas:
   54.5 GB fast-memory model thrashes when the desktop stack competes for
   RAM. Note zram swap metrics are useless for this check (in-RAM, churns
   wildly); read_bytes is the ground truth. Fix: free RAM before long
-  sessions, or A/B a higher `--fit-target` to shift more weights to VRAM.
+  sessions. `--fit-target` is MiB of VRAM to leave FREE, so a LOWER value
+  packs more weights onto the GPU; only relevant if VRAM has real slack
+  (at 64k/12 GB it does not — VRAM is already ~11.3/12.28 GiB). Also: most
+  of a mid-session "spill" is actually cold page-in of the ~46 GB expert
+  pool — reads converge (8.6 GB → 0.5 GB per 256-token gen) over ~5-10
+  generations after load; run 2-3 throwaway generations before judging.
 - Headless mode (reclaim desktop RAM for the model): `llama-swap.service` is
   a `systemctl --user` unit, so the user manager must survive session teardown
   — `loginctl enable-linger kchauhan` is set (Linger=yes). Then
