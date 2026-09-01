@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import re
 import yaml
 import os
 import glob
@@ -9,7 +10,11 @@ def audit():
     repo_root = Path(__file__).parent.parent.parent.parent
     config_path = repo_root / "model_downloader/models_config.json"
     swap_path = repo_root / "llama-swap.yaml"
-    models_dir = Path("/mnt/lab/models")
+    # Model store: /mnt/lab/models (old mount) if present, else /home/kchauhan/models
+    models_dir = (
+        Path("/mnt/lab/models") if Path("/mnt/lab/models").is_dir()
+        else Path("/home/kchauhan/models")
+    )
 
     # 1. Load configs
     with open(config_path, 'r') as f:
@@ -25,13 +30,32 @@ def audit():
         # Simple extraction of paths from cmd string
         parts = cmd.split()
         for i, p in enumerate(parts):
-            if p in ('-m', '--model', '--mmproj', '--mtp-head'):
+            if p in ('-m', '--model', '--mmproj', '--mtp-head', '--spec-draft-model'):
                 if i + 1 < len(parts):
                     served_paths.add(os.path.abspath(parts[i+1].replace("${env.L3MS_ROOT}", str(repo_root))))
 
     # 3. Scan disk
     disk_files = set(glob.glob(str(models_dir / "**/*.gguf"), recursive=True))
     disk_files = {os.path.abspath(f) for f in disk_files}
+
+    # Shard awareness: a served "-00001-of-N" shard implies the whole shard set
+    # is served (llama.cpp auto-loads all shards). Key = (prefix, total).
+    def shard_key(path):
+        m = re.search(r'-(\d+)-of-(\d+)\.gguf$', path)
+        if not m:
+            return None
+        prefix = re.sub(r'-\d+-of-\d+\.gguf$', '', path)
+        return (prefix, m.group(2))
+
+    served_sets = {k for k in (shard_key(p) for p in served_paths) if k}
+
+    # Media models (video/image/audio/music) are served outside llama-swap and
+    # preserved per SKILL.md — never report them as orphans/unregistered.
+    def is_media(path):
+        return (
+            "/media/" in path
+            or re.search(r'/(LTX|Image|MiniMax|HeartMuLa|audio|music)', path) is not None
+        )
 
     # 4. Downloader inventory
     registered_dirs = {os.path.abspath(m['local_dir']) for m in downloader_config['models']}
@@ -49,15 +73,21 @@ def audit():
     # Check Orphans (On disk but not in serving config)
     orphans = []
     for f in disk_files:
-        if f not in served_paths:
-            # Check if it's a known non-serving model (image/video)
-            is_known_non_serving = False
-            for d in registered_dirs:
-                if f.startswith(d) and ("Image" in d or "LTX" in d):
-                    is_known_non_serving = True
-                    break
-            if not is_known_non_serving:
-                orphans.append(f)
+        if f in served_paths:
+            continue
+        k = shard_key(f)
+        if k and k in served_sets:
+            continue
+        if is_media(f):
+            continue
+        # Check if it's a known non-serving model (image/video)
+        is_known_non_serving = False
+        for d in registered_dirs:
+            if f.startswith(d) and ("Image" in d or "LTX" in d):
+                is_known_non_serving = True
+                break
+        if not is_known_non_serving:
+            orphans.append(f)
 
     if orphans:
         print("\n[?] POTENTIAL ORPHANS (On disk but not in llama-swap.yaml):")
@@ -78,6 +108,8 @@ def audit():
     # Unregistered models
     unregistered = []
     for f in disk_files:
+        if is_media(f):
+            continue
         is_registered = False
         for d in registered_dirs:
             if f.startswith(d):

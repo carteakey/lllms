@@ -48,178 +48,185 @@ models:
   # Embeddings
   # ===========================================================================
 
-  "nomic-embed-text-v1.5":
-    name: "Nomic Embed Text v1.5 (F16, 768 dimensions)"
-    description: "OpenAI-compatible embeddings for semantic search. Starts on demand and unloads after 5 minutes idle."
-    ttl: 300
-    metadata:
-      task: embeddings
-      dimensions: 768
-      context_length: 2048
-      query_prefix: "search_query: "
-      document_prefix: "search_document: "
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /home/kchauhan/models/nomic-ai/nomic-embed-text-v1.5-GGUF/nomic-embed-text-v1.5.f16.gguf
-      --alias nomic-embed-text-v1.5
-      --embedding
-      --pooling mean
-      --embd-normalize 2
-      --ctx-size 2048
-      --batch-size 2048 --ubatch-size 512
-      --n-gpu-layers 99
-      --parallel 1
-      --threads 10 --threads-batch 12
-      --host 0.0.0.0 --port ${PORT}
-      --no-warmup
+  #"nomic-embed-text-v1.5":
+  #  name: "Nomic Embed Text v1.5 (F16, 768 dimensions)"
+  #  description: "OpenAI-compatible embeddings for semantic search. Starts on demand and unloads after 5 minutes idle."
+  #  ttl: 300
+  #  metadata:
+  #    task: embeddings
+  #    dimensions: 768
+  #    context_length: 2048
+  #    query_prefix: "search_query: "
+  #    document_prefix: "search_document: "
+  #  cmd: |
+  #    taskset -c ${cpu_range} ${llama_server}
+  #    -m /home/kchauhan/models/nomic-ai/nomic-embed-text-v1.5-GGUF/nomic-embed-text-v1.5.f16.gguf
+  #    --alias nomic-embed-text-v1.5
+  #    --embedding
+  #    --pooling mean
+  #    --embd-normalize 2
+  #    --ctx-size 2048
+  #    --batch-size 2048 --ubatch-size 512
+  #    --n-gpu-layers 99
+  #    --parallel 1
+  #    --threads 10 --threads-batch 12
+  #    --host 0.0.0.0 --port ${PORT}
+  #    --no-warmup
 
-  # ===========================================================================
-  # gpt-oss family
-  # ===========================================================================
+  ## ===========================================================================
+  ## gpt-oss family
+  ## ===========================================================================
+# [retired 2026-08-31 — model files deleted from disk, see docs/bench-results.md archive]
 
-  "gpt-oss-120b":
-    name: "gpt-oss 120B (optimized, bench-derived static placement, reasoning=high)"
-    description: "Production default. pp=427 tg=23.4 t/s. See docs/bench-results.md."
-    env:
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /home/kchauhan/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf
-      --alias ggml-org/gpt-oss-120b
-      # bench-derived static split: blk 0-4 on GPU, blk 5+ experts on CPU
-      -ngl 37
-      --override-tensor "blk\.(5|[6-9]|[0-9][0-9]|[0-9][0-9][0-9])\.ffn_(up|down|gate)_(ch|)exps=CPU"
-      --no-mmap
-      -ctk q8_0 -ctv q8_0
-      --ctx-size 32768 --parallel 1
-      --flash-attn on
-      --batch-size 2048 --ubatch-size 512
-      --threads 10 --threads-batch 12
-      --temp 1.0 --min-p 0.0 --top-p 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --no-warmup --jinja --reasoning-format none
-      --chat-template-file ${chat_template}
-    filters:
-      setParamsByID:
-        "${MODEL_ID}":      { chat_template_kwargs: { reasoning_effort: high } }
-        "${MODEL_ID}:high": { chat_template_kwargs: { reasoning_effort: high } }
-        "${MODEL_ID}:med":  { chat_template_kwargs: { reasoning_effort: medium } }
-        "${MODEL_ID}:low":  { chat_template_kwargs: { reasoning_effort: low } }
+  #"gpt-oss-120b":
+  #  name: "gpt-oss 120B (optimized, bench-derived static placement, reasoning=high)"
+  #  description: "Production default. pp=427 tg=23.4 t/s. See docs/bench-results.md."
+  #  env:
+  #    - "GGML_CUDA_GRAPH_OPT=1"
+  #  cmd: |
+  #    taskset -c ${cpu_range} ${llama_server}
+  #    -m /home/kchauhan/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf
+  #    --alias ggml-org/gpt-oss-120b
+  #    # bench-derived static split: blk 0-4 on GPU, blk 5+ experts on CPU
+  #    -ngl 37
+  #    --override-tensor "blk\.(5|[6-9]|[0-9][0-9]|[0-9][0-9][0-9])\.ffn_(up|down|gate)_(ch|)exps=CPU"
+  #    --no-mmap
+  #    -ctk q8_0 -ctv q8_0
+  #    --ctx-size 32768 --parallel 1
+  #    --flash-attn on
+  #    --batch-size 2048 --ubatch-size 512
+  #    --threads 10 --threads-batch 12
+  #    --temp 1.0 --min-p 0.0 --top-p 1.0
+  #    --host 0.0.0.0 --port ${PORT}
+  #    --no-warmup --jinja --reasoning-format none
+  #    --chat-template-file ${chat_template}
+  #  filters:
+  #    setParamsByID:
+  #      "${MODEL_ID}":      { chat_template_kwargs: { reasoning_effort: high } }
+  #      "${MODEL_ID}:high": { chat_template_kwargs: { reasoning_effort: high } }
+  #      "${MODEL_ID}:med":  { chat_template_kwargs: { reasoning_effort: medium } }
+  #      "${MODEL_ID}:low":  { chat_template_kwargs: { reasoning_effort: low } }
+# [retired 2026-08-31 — model files deleted from disk, see docs/bench-results.md archive]
 
-  "gpt-oss-120b-legacy":
-    name: "gpt-oss 120B (legacy, --fit auto-placement)"
-    description: "Pre-optimized variant using --fit. Keep for regression comparison."
-    unlisted: true
-    env:
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /home/kchauhan/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf
-      --alias ggml-org/gpt-oss-120b
-      --fit on --fit-ctx 32768 --fit-target 512
-      --no-mmap
-      -ctk q8_0 -ctv q8_0
-      --threads 10 --threads-batch 12 --flash-attn on
-      --batch-size 2048 --ubatch-size 512
-      --prio 2 --no-warmup
-      --temp 1.0 --min-p 0.0 --top-p 1.0
-      --jinja --reasoning-format none
-      --chat-template-kwargs '{"reasoning_effort":"high"}'
-      --chat-template-file ${chat_template}
-      --host 0.0.0.0 --port ${PORT}
+  #"gpt-oss-120b-legacy":
+  #  name: "gpt-oss 120B (legacy, --fit auto-placement)"
+  #  description: "Pre-optimized variant using --fit. Keep for regression comparison."
+  #  unlisted: true
+  #  env:
+  #    - "GGML_CUDA_GRAPH_OPT=1"
+  #  cmd: |
+  #    taskset -c ${cpu_range} ${llama_server}
+  #    -m /home/kchauhan/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf
+  #    --alias ggml-org/gpt-oss-120b
+  #    --fit on --fit-ctx 32768 --fit-target 512
+  #    --no-mmap
+  #    -ctk q8_0 -ctv q8_0
+  #    --threads 10 --threads-batch 12 --flash-attn on
+  #    --batch-size 2048 --ubatch-size 512
+  #    --prio 2 --no-warmup
+  #    --temp 1.0 --min-p 0.0 --top-p 1.0
+  #    --jinja --reasoning-format none
+  #    --chat-template-kwargs '{"reasoning_effort":"high"}'
+  #    --chat-template-file ${chat_template}
+  #    --host 0.0.0.0 --port ${PORT}
+# [retired 2026-08-31 — model files deleted from disk, see docs/bench-results.md archive]
 
-  "gpt-oss-120b-low":
-    name: "gpt-oss 120B (legacy --fit, reasoning=low)"
-    description: "Lower-latency variant. Preserved from run-llama-cpp-gpt-oss-low-120b.sh."
-    unlisted: true
-    env:
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /home/kchauhan/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf
-      --alias ggml-org/gpt-oss-120b
-      --fit on --fit-ctx 32768 --fit-target 512
-      --no-mmap
-      --threads 10 --threads-batch 12 --flash-attn on
-      --batch-size 2048 --ubatch-size 512 --prio 2 --no-warmup
-      --temp 1.0 --top-k 100 --min-p 0.0 --top-p 1.0
-      --jinja --reasoning-format none
-      --chat-template-kwargs '{"reasoning_effort":"low"}'
-      --chat-template-file ${chat_template}
-      --host 0.0.0.0 --port ${PORT}
+  #"gpt-oss-120b-low":
+  #  name: "gpt-oss 120B (legacy --fit, reasoning=low)"
+  #  description: "Lower-latency variant. Preserved from run-llama-cpp-gpt-oss-low-120b.sh."
+  #  unlisted: true
+  #  env:
+  #    - "GGML_CUDA_GRAPH_OPT=1"
+  #  cmd: |
+  #    taskset -c ${cpu_range} ${llama_server}
+  #    -m /home/kchauhan/models/ggml-org/gpt-oss-120b-GGUF/gpt-oss-120b-mxfp4-00001-of-00003.gguf
+  #    --alias ggml-org/gpt-oss-120b
+  #    --fit on --fit-ctx 32768 --fit-target 512
+  #    --no-mmap
+  #    --threads 10 --threads-batch 12 --flash-attn on
+  #    --batch-size 2048 --ubatch-size 512 --prio 2 --no-warmup
+  #    --temp 1.0 --top-k 100 --min-p 0.0 --top-p 1.0
+  #    --jinja --reasoning-format none
+  #    --chat-template-kwargs '{"reasoning_effort":"low"}'
+  #    --chat-template-file ${chat_template}
+  #    --host 0.0.0.0 --port ${PORT}
 
-  # ===========================================================================
-  # Qwen3 Coder Next (80B.A3B)
-  # ===========================================================================
+  ## ===========================================================================
+  ## Qwen3 Coder Next (80B.A3B)
+  ## ===========================================================================
+# [retired 2026-08-31 — model files deleted from disk, see docs/bench-results.md archive]
 
-  "qwen3-coder-next":
-    name: "Qwen3-Coder-Next 80B.A3B (optimized, bench-derived static placement)"
-    description: "Default coder. pp=502 tg=39.6 t/s @ 64k ctx. See docs/bench-results.md."
-    env:
-      # GRAPH_OPT=0: CUDA graph re-capture can OOM with tight VRAM headroom
-      - "GGML_CUDA_GRAPH_OPT=0"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /home/kchauhan/models/unsloth/Qwen3-Coder-Next-GGUF/Qwen3-Coder-Next-UD-Q4_K_XL.gguf
-      --alias unsloth/Qwen3-Coder-Next
-      # bench-derived (FIT_CTX=65536 + q8_0 KV + 512 MiB margin)
-      -ngl 49
-      --override-tensor "blk\.7\.ffn_down.*=CPU,blk\.([89]|[1-9][0-9])\.ffn_(up|down|gate)_(ch|)exps=CPU"
-      --no-mmap --mlock
-      -ctk q8_0 -ctv q8_0
-      --ctx-size 65536 --parallel 1
-      --threads 10 --threads-batch 12
-      --flash-attn on
-      --batch-size 2048 --ubatch-size 512
-      --seed 3407
-      --temp 1.0 --top-p 0.95 --min-p 0.01 --top-k 40 --repeat-penalty 1
-      --host 0.0.0.0 --port ${PORT}
-      --jinja --prio 2 --no-warmup
+  #"qwen3-coder-next":
+  #  name: "Qwen3-Coder-Next 80B.A3B (optimized, bench-derived static placement)"
+  #  description: "Default coder. pp=502 tg=39.6 t/s @ 64k ctx. See docs/bench-results.md."
+  #  env:
+  #    # GRAPH_OPT=0: CUDA graph re-capture can OOM with tight VRAM headroom
+  #    - "GGML_CUDA_GRAPH_OPT=0"
+  #  cmd: |
+  #    taskset -c ${cpu_range} ${llama_server}
+  #    -m /home/kchauhan/models/unsloth/Qwen3-Coder-Next-GGUF/Qwen3-Coder-Next-UD-Q4_K_XL.gguf
+  #    --alias unsloth/Qwen3-Coder-Next
+  #    # bench-derived (FIT_CTX=65536 + q8_0 KV + 512 MiB margin)
+  #    -ngl 49
+  #    --override-tensor "blk\.7\.ffn_down.*=CPU,blk\.([89]|[1-9][0-9])\.ffn_(up|down|gate)_(ch|)exps=CPU"
+  #    --no-mmap --mlock
+  #    -ctk q8_0 -ctv q8_0
+  #    --ctx-size 65536 --parallel 1
+  #    --threads 10 --threads-batch 12
+  #    --flash-attn on
+  #    --batch-size 2048 --ubatch-size 512
+  #    --seed 3407
+  #    --temp 1.0 --top-p 0.95 --min-p 0.01 --top-k 40 --repeat-penalty 1
+  #    --host 0.0.0.0 --port ${PORT}
+  #    --jinja --prio 2 --no-warmup
+# [retired 2026-08-31 — model files deleted from disk, see docs/bench-results.md archive]
 
-  "qwen3-coder-next-legacy":
-    name: "Qwen3-Coder-Next 80B.A3B (legacy --fit, 131k ctx)"
-    description: "Pre-optimized variant using --fit @ 131k. Keep for long-context use."
-    unlisted: true
-    env:
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /home/kchauhan/models/unsloth/Qwen3-Coder-Next-GGUF/Qwen3-Coder-Next-UD-Q4_K_XL.gguf
-      --alias unsloth/Qwen3-Coder-Next
-      --seed 3407
-      --temp 1.0 --top-p 0.95 --min-p 0.01 --top-k 40
-      --jinja
-      -ctk q8_0 -ctv q8_0
-      --ctx-size 131072
-      --fit on --fit-ctx 131072 --fit-target 128
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12 --flash-attn on
-      --prio 2 --no-warmup --repeat-penalty 1
-      --host 0.0.0.0 --port ${PORT}
+  #"qwen3-coder-next-legacy":
+  #  name: "Qwen3-Coder-Next 80B.A3B (legacy --fit, 131k ctx)"
+  #  description: "Pre-optimized variant using --fit @ 131k. Keep for long-context use."
+  #  unlisted: true
+  #  env:
+  #    - "GGML_CUDA_GRAPH_OPT=1"
+  #  cmd: |
+  #    taskset -c ${cpu_range} ${llama_server}
+  #    -m /home/kchauhan/models/unsloth/Qwen3-Coder-Next-GGUF/Qwen3-Coder-Next-UD-Q4_K_XL.gguf
+  #    --alias unsloth/Qwen3-Coder-Next
+  #    --seed 3407
+  #    --temp 1.0 --top-p 0.95 --min-p 0.01 --top-k 40
+  #    --jinja
+  #    -ctk q8_0 -ctv q8_0
+  #    --ctx-size 131072
+  #    --fit on --fit-ctx 131072 --fit-target 128
+  #    --no-mmap --mlock
+  #    --threads 10 --threads-batch 12 --flash-attn on
+  #    --prio 2 --no-warmup --repeat-penalty 1
+  #    --host 0.0.0.0 --port ${PORT}
+# [retired 2026-08-31 — model files deleted from disk, see docs/bench-results.md archive]
 
-  "qwen3-coder-next-ik":
-    name: "Qwen3-Coder-Next 80B.A3B (ik_llama.cpp)"
-    description: "ik_llama fork binary, --n-cpu-moe 38 @ 131k. Preserved from run-llama-cpp-qwen3-coder-next-test.sh."
-    unlisted: true
-    env:
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${ik_server}
-      -m /home/kchauhan/models/unsloth/Qwen3-Coder-Next-GGUF/Qwen3-Coder-Next-UD-Q4_K_XL.gguf
-      --alias unsloth/Qwen3-Coder-Next
-      --seed 3407
-      --temp 1.0 --top-p 0.95 --min-p 0.01 --top-k 40
-      --jinja
-      -ctk q8_0 -ctv q8_0
-      --ctx-size 131072
-      --n-cpu-moe 38
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12 --flash-attn on --no-warmup
-      --host 0.0.0.0 --port ${PORT}
+  #"qwen3-coder-next-ik":
+  #  name: "Qwen3-Coder-Next 80B.A3B (ik_llama.cpp)"
+  #  description: "ik_llama fork binary, --n-cpu-moe 38 @ 131k. Preserved from run-llama-cpp-qwen3-coder-next-test.sh."
+  #  unlisted: true
+  #  env:
+  #    - "GGML_CUDA_GRAPH_OPT=1"
+  #  cmd: |
+  #    taskset -c ${cpu_range} ${ik_server}
+  #    -m /home/kchauhan/models/unsloth/Qwen3-Coder-Next-GGUF/Qwen3-Coder-Next-UD-Q4_K_XL.gguf
+  #    --alias unsloth/Qwen3-Coder-Next
+  #    --seed 3407
+  #    --temp 1.0 --top-p 0.95 --min-p 0.01 --top-k 40
+  #    --jinja
+  #    -ctk q8_0 -ctv q8_0
+  #    --ctx-size 131072
+  #    --n-cpu-moe 38
+  #    --no-mmap --mlock
+  #    --threads 10 --threads-batch 12 --flash-attn on --no-warmup
+  #    --host 0.0.0.0 --port ${PORT}
 
-  # ===========================================================================
-  # Qwen3.8 Flash Next (177B: 125B-A6B MoE + 51B ngram table on SSD)
-  # ===========================================================================
+  ## ===========================================================================
+  ## Qwen3.8 Flash Next (177B: 125B-A6B MoE + 51B ngram table on SSD)
+  ## ===========================================================================
+# [retired 2026-08-31 — model files deleted from disk, see docs/bench-results.md archive]
 
   "qwen38-flash-next":
     name: "Qwen3.8-Flash-Next (master e4b9af007, AtomicChat AD-4.27bpw, ngram-on-SSD)"
@@ -300,54 +307,56 @@ models:
   # Qwen3.6 MTP
   # ===========================================================================
 
-  "qwen3-6-mtp":
-    name: "Qwen3.6-35B-A3B MTP (UD-Q4_K_XL)"
-    env:
-      - "GGML_CUDA_GRAPH_OPT=1"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /home/kchauhan/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
-      --alias "unsloth/Qwen3.6-35B-A3B MTP"
-      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
-      --presence-penalty 0.0 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --chat-template-kwargs '{"preserve_thinking": true}'
-      --ctx-size 131072 --n-predict 32768
-      --fit on --fit-ctx 131072 --fit-target 1536
-      -ctk q8_0 -ctv q8_0
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12
-      --flash-attn on
-      --spec-type draft-mtp --spec-draft-n-max 2
-      --parallel 1
-      --batch-size 1024 --ubatch-size 512
-      --prio 2 --no-warmup
+  #"qwen3-6-mtp":
+  #  name: "Qwen3.6-35B-A3B MTP (UD-Q4_K_XL)"
+  #  env:
+  #    - "GGML_CUDA_GRAPH_OPT=1"
+  #  cmd: |
+  #    taskset -c ${cpu_range} ${llama_server}
+  #    -m /home/kchauhan/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+  #    --alias "unsloth/Qwen3.6-35B-A3B MTP"
+  #    --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
+  #    --presence-penalty 0.0 --repeat-penalty 1.0
+  #    --host 0.0.0.0 --port ${PORT}
+  #    --jinja
+  #    --chat-template-kwargs '{"preserve_thinking": true}'
+  #    --ctx-size 131072 --n-predict 32768
+  #    --fit on --fit-ctx 131072 --fit-target 1536
+  #    -ctk q8_0 -ctv q8_0
+  #    --no-mmap --mlock
+  #    --threads 10 --threads-batch 12
+  #    --flash-attn on
+  #    --spec-type draft-mtp --spec-draft-n-max 2
+  #    --parallel 1
+  #    --batch-size 1024 --ubatch-size 512
+  #    --prio 2 --no-warmup
+# [retired 2026-08-31 — model files deleted from disk, see docs/bench-results.md archive]
 
-  "qwen3-6-mtp-vision":
-    name: "Qwen3.6-35B-A3B MTP (UD-Q4_K_XL, vision/mmproj-F16)"
-    env:
-      - "GGML_CUDA_GRAPH_OPT=0"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /home/kchauhan/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
-      --mmproj /home/kchauhan/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/mmproj-F16.gguf
-      --alias "unsloth/Qwen3.6-35B-A3B MTP (vision/mmproj-F16)"
-      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
-      --presence-penalty 0.0 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --chat-template-kwargs '{"preserve_thinking": true}'
-      --ctx-size 131072 --n-predict 32768
-      --fit on --fit-ctx 131072 --fit-target 2048
-      -ctk q8_0 -ctv q8_0
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12
-      --flash-attn on
-      --spec-type draft-mtp --spec-draft-n-max 2
-      --parallel 1
-      --batch-size 256 --ubatch-size 512
-      --prio 2 --no-warmup
+  #"qwen3-6-mtp-vision":
+  #  name: "Qwen3.6-35B-A3B MTP (UD-Q4_K_XL, vision/mmproj-F16)"
+  #  env:
+  #    - "GGML_CUDA_GRAPH_OPT=0"
+  #  cmd: |
+  #    taskset -c ${cpu_range} ${llama_server}
+  #    -m /home/kchauhan/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf
+  #    --mmproj /home/kchauhan/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF/mmproj-F16.gguf
+  #    --alias "unsloth/Qwen3.6-35B-A3B MTP (vision/mmproj-F16)"
+  #    --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
+  #    --presence-penalty 0.0 --repeat-penalty 1.0
+  #    --host 0.0.0.0 --port ${PORT}
+  #    --jinja
+  #    --chat-template-kwargs '{"preserve_thinking": true}'
+  #    --ctx-size 131072 --n-predict 32768
+  #    --fit on --fit-ctx 131072 --fit-target 2048
+  #    -ctk q8_0 -ctv q8_0
+  #    --no-mmap --mlock
+  #    --threads 10 --threads-batch 12
+  #    --flash-attn on
+  #    --spec-type draft-mtp --spec-draft-n-max 2
+  #    --parallel 1
+  #    --batch-size 256 --ubatch-size 512
+  #    --prio 2 --no-warmup
+# [retired 2026-08-31 — model files deleted from disk, see docs/bench-results.md archive]
 
   "qwen3-6-mtp-q6":
     name: "Qwen3.6-35B-A3B MTP (UD-Q6_K)"
@@ -584,48 +593,50 @@ models:
       --batch-size 1024 --ubatch-size 512
       --prio 2 --no-warmup
 
-  "gemma-4-26b-qat-mtp-vision":
-    name: "Gemma 4 26B QAT + MTP (UD-Q4_K_XL + Assistant, vision, Mainline)"
-    env:
-      - "GGML_CUDA_GRAPH_OPT=0"
-    cmd: |
-      taskset -c ${cpu_range} ${llama_server}
-      -m /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-qat-GGUF/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
-      --spec-draft-model /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-qat-GGUF/mtp-gemma-4-26B-A4B-it.gguf
-      --mmproj /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF/mmproj-BF16.gguf
-      --alias "unsloth/Gemma 4 26B QAT + MTP (vision)"
-      --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
-      --presence-penalty 0.0 --repeat-penalty 1.0
-      --host 0.0.0.0 --port ${PORT}
-      --jinja
-      --chat-template-kwargs '{"preserve_thinking": true}'
-      --ctx-size 131072 --n-predict 32768
-      --fit on --fit-ctx 131072 --fit-target 2048
-      -ctk f16 -ctv f16
-      --no-mmap --mlock
-      --threads 10 --threads-batch 12
-      --flash-attn on
-      --spec-type draft-mtp --spec-draft-n-max 2
-      --parallel 1
-      --batch-size 256 --ubatch-size 512
-      --prio 2 --no-warmup
+  #"gemma-4-26b-qat-mtp-vision":
+  #  name: "Gemma 4 26B QAT + MTP (UD-Q4_K_XL + Assistant, vision, Mainline)"
+  #  env:
+  #    - "GGML_CUDA_GRAPH_OPT=0"
+  #  cmd: |
+  #    taskset -c ${cpu_range} ${llama_server}
+  #    -m /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-qat-GGUF/gemma-4-26B-A4B-it-qat-UD-Q4_K_XL.gguf
+  #    --spec-draft-model /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-qat-GGUF/mtp-gemma-4-26B-A4B-it.gguf
+  #    --mmproj /home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF/mmproj-BF16.gguf
+  #    --alias "unsloth/Gemma 4 26B QAT + MTP (vision)"
+  #    --temp 0.6 --top-p 0.95 --top-k 20 --min-p 0.00
+  #    --presence-penalty 0.0 --repeat-penalty 1.0
+  #    --host 0.0.0.0 --port ${PORT}
+  #    --jinja
+  #    --chat-template-kwargs '{"preserve_thinking": true}'
+  #    --ctx-size 131072 --n-predict 32768
+  #    --fit on --fit-ctx 131072 --fit-target 2048
+  #    -ctk f16 -ctv f16
+  #    --no-mmap --mlock
+  #    --threads 10 --threads-batch 12
+  #    --flash-attn on
+  #    --spec-type draft-mtp --spec-draft-n-max 2
+  #    --parallel 1
+  #    --batch-size 256 --ubatch-size 512
+  #    --prio 2 --no-warmup
+# [retired 2026-08-31 — model files deleted from disk, see docs/bench-results.md archive]
 
-  "sarvam-30b":
-    name: "sarvam-30B (Q6_K)"
-    description: "Requires the PR-20275 llama.cpp build (./maintenance/build-sarvam-llama-cpp.sh)."
-    cmd: |
-      ${sarvam_server}
-      --host 0.0.0.0 --port ${PORT}
-      --model /home/kchauhan/models/Sumitc13/sarvam-30b-GGUF/sarvam-30B-Q6_K.gguf
-      --ctx-size 4096
-      --n-gpu-layers 99
-      --fit on --fit-target 512 --fit-ctx 4096
-      --n-predict 512
-      --batch-size 2048 --ubatch-size 512
-      --threads 10 --threads-batch 12
-      --temp 1.0 --top-p 1.0 --top-k 20 --min-p 0.0 --repeat-penalty 1.0
-      --flash-attn on
-      --jinja --no-mmap --mlock --prio 2
+  #"sarvam-30b":
+  #  name: "sarvam-30B (Q6_K)"
+  #  description: "Requires the PR-20275 llama.cpp build (./maintenance/build-sarvam-llama-cpp.sh)."
+  #  cmd: |
+  #    ${sarvam_server}
+  #    --host 0.0.0.0 --port ${PORT}
+  #    --model /home/kchauhan/models/Sumitc13/sarvam-30b-GGUF/sarvam-30B-Q6_K.gguf
+  #    --ctx-size 4096
+  #    --n-gpu-layers 99
+  #    --fit on --fit-target 512 --fit-ctx 4096
+  #    --n-predict 512
+  #    --batch-size 2048 --ubatch-size 512
+  #    --threads 10 --threads-batch 12
+  #    --temp 1.0 --top-p 1.0 --top-k 20 --min-p 0.0 --repeat-penalty 1.0
+  #    --flash-attn on
+  #    --jinja --no-mmap --mlock --prio 2
+# [retired 2026-08-31 — model files deleted from disk, see docs/bench-results.md archive]
 
 # ===========================================================================
 # Startup: preload the default so the first request is instant.

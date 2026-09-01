@@ -323,7 +323,7 @@
     <section class="tab-panel" id="archive-panel">
       <div class="archive-intro surface">
         <span class="label">Retired, with reasons</span>
-        <p>Models leave the node when their quality, storage cost, or throughput no longer earns the disk space.</p>
+        <p>Models leave the node when their quality, storage cost, or throughput no longer earns the disk space. Last measured performance is kept here for reference; archived numbers are not reproducible on the current node.</p>
       </div>
       <div class="archive-list" id="archive-list"></div>
     </section>
@@ -470,9 +470,12 @@
     }
 
     function renderArchive() {
-      document.getElementById("archive-list").innerHTML = dashboard.archived.map(model => `
-        <article class="archive-card surface"><h3>${escapeHtml(model.name)}</h3><p>${escapeHtml(model.reason)}</p><div class="archive-meta"><div><span class="label">Retired</span><span class="detail-value">${escapeHtml(model.retired)}</span></div><div><span class="label">Replacement</span><span class="detail-value accent">${escapeHtml(model.replacement)}</span></div></div></article>
-      `).join("");
+      document.getElementById("archive-list").innerHTML = dashboard.archived.map(model => {
+        const tps = model.tps != null ? `<div><span class="label">Best tg</span><span class="detail-value accent">${escapeHtml(String(model.tps))} t/s</span></div>` : "";
+        const quant = model.quant ? `<div><span class="label">Quant</span><span class="detail-value">${escapeHtml(model.quant)}</span></div>` : "";
+        const profiles = model.profiles ? `<div style="grid-column: 1 / -1"><span class="label">Profiles</span><span class="detail-value">${escapeHtml(model.profiles)}</span></div>` : "";
+        return `<article class="archive-card surface"><h3>${escapeHtml(model.name)}</h3><p>${escapeHtml(model.reason)}</p><div class="archive-meta">${tps}${quant}<div><span class="label">Retired</span><span class="detail-value">${escapeHtml(model.retired)}</span></div><div><span class="label">Replacement</span><span class="detail-value accent">${escapeHtml(model.replacement)}</span></div>${profiles}</div></article>`;
+      }).join("");
     }
 
     function renderCommunity() {

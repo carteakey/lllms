@@ -2,7 +2,7 @@
   "base_models_dir": "/home/kchauhan/models",
   "models": [
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "nomic-ai/nomic-embed-text-v1.5-GGUF",
       "local_dir": "/mnt/lab/models/nomic-ai/nomic-embed-text-v1.5-GGUF",
       "allow_patterns": [
@@ -134,7 +134,7 @@
       "description": "Qwen3.5 122B-A10B UD-IQ4_XS (already downloaded)"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "unsloth/Qwen3-Coder-Next-GGUF",
       "local_dir": "/mnt/lab/models/unsloth/Qwen3-Coder-Next-GGUF",
       "allow_patterns": [
@@ -186,7 +186,7 @@
       "description": "GPT OSS Puzzle 88B GGUF (MXFP4_MOE primary profile; requires puzzle PR build flow #21032)"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "unsloth/gemma-4-26B-A4B-it-GGUF",
       "local_dir": "/home/kchauhan/models/unsloth/gemma-4-26B-A4B-it-GGUF",
       "allow_patterns": [
@@ -266,7 +266,7 @@
       "description": "NVIDIA Nemotron 3 Super 120B-A12B UD-Q3_K_XL (already downloaded)"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "Sumitc13/sarvam-30b-GGUF",
       "local_dir": "/mnt/lab/models/Sumitc13/sarvam-30b-GGUF",
       "allow_patterns": [
@@ -281,19 +281,18 @@
     {
       "enabled": true,
       "repo_id": "unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
-      "local_dir": "/mnt/lab/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
+      "local_dir": "/home/kchauhan/models/unsloth/Qwen3.6-35B-A3B-MTP-GGUF",
       "allow_patterns": [
-        "*UD-Q4_K_XL*",
         "*UD-Q6_K.gguf*"
       ],
       "ignore_patterns": [],
       "revision": "",
       "force_download": false,
       "max_workers": 2,
-      "description": "Qwen 3.6 35B-A3B MTP UD-Q4_K_XL profile"
+      "description": "Qwen 3.6 35B-A3B MTP UD-Q6_K profile"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "limegreenpeper1/sarvam-105B-GGUF",
       "local_dir": "/mnt/lab/models/limegreenpeper1/sarvam-105B-GGUF",
       "allow_patterns": [
@@ -349,7 +348,7 @@
       "description": "Gemma 4 12B QAT UD-Q4_K_XL + MTP Assistant"
     },
     {
-      "enabled": true,
+      "enabled": false,
       "repo_id": "unsloth/diffusiongemma-26B-A4B-it-GGUF",
       "local_dir": "/home/kchauhan/models/unsloth/diffusiongemma-26B-A4B-it-GGUF",
       "allow_patterns": [
