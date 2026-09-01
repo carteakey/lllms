@@ -15,6 +15,9 @@
   - Cross-references updated in: `llama-swap.yaml` model descriptions (§8 → `docs/bench-results.md`; pre-edit snapshot `llama-swap.yaml.bak-20260831-203159`), `.claude/commands/{add-bench-result,new-model-config,model-status,bench-model,optimize-model}.md`, `docs/model-onboarding-playbook.md`, `docs/qwen38-flash-next-internal.md`. `.bak-*` snapshots and `thread.md` transcript left untouched (historical record).
 - Bench runbook: added a "CPU power layering" section (docs/bench-runbook.md) disentangling governor vs EPP vs HWP vs profile managers — on `intel_pstate` the governor name is mostly a label and EPP is the knob that matters (`powersave` + EPP=performance is a valid high-perf setup); Tuned is not a CachyOS default (PPD is; tuned-ppd is the shim bridging them) and its `throughput-performance` profile is functionally equivalent to the manual setup; I/O scheduler noted as an unrelated block layer. Recorded current box state (2026-08-31): PPD 0.30 active at `performance` profile, tuned/tuned-ppd not installed (tuned-ppd swap reverted), governor/EPP=performance verified live; added a status-update note to the historical root-cause section.
 
+### Fixed
+- llama-swap v247 API alignment (src/llama_swap.rs): model state now parses the nested `status.value` field from `/v1/models` (top-level `state`/`status` strings still honored for older routers) — states no longer show "unknown"; model load switched from the nonexistent `POST /models/load` to `GET /upstream/{model}/load` (verified live: triggers the on-demand startup path and holds until health-check); per-model unload moved to `POST /api/models/unload` with the existing `{"model": id}` body (verified live: `DELETE /upstream/{model}` does not evict a still-starting process, the API endpoint does).
+
 ## [0.7.0] - 2026-08-31
 
 The Rust port remains in progress under `CAR-97`; these entries describe

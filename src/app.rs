@@ -41,6 +41,7 @@ use crate::{
     state_store::{self, ChatSession, ChatSessionList, ChatSessionSummary, SavedChatSession},
     telemetry::{find_process_named, snapshot_descendants, snapshot_process_group},
     text_buffer::TextBuffer,
+    theme,
 };
 use anyhow::{Context, Result};
 use crossterm::{
@@ -51,11 +52,11 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Style, Stylize},
     text::{Line, Span, Text},
     widgets::{
-        Block, Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState,
-        Tabs, Wrap,
+        Borders, Cell, Clear, List, ListItem, ListState, Paragraph, Row, Table, TableState, Tabs,
+        Wrap,
     },
     Frame, Terminal,
 };
@@ -3826,14 +3827,11 @@ impl App {
         let endpoint =
             env::var("LLAMA_SWAP_URL").unwrap_or_else(|_| "http://localhost:8080".into());
         let line = Line::from(vec![
-            Span::styled(
-                " L3MS ",
-                Style::default().fg(Color::Black).bg(Color::Cyan).bold(),
-            ),
+            Span::styled(" L3MS ", theme::badge()),
             Span::raw(format!(" Rust v{}  ", env!("CARGO_PKG_VERSION"))),
-            Span::styled(endpoint, Style::default().fg(Color::DarkGray)),
+            Span::styled(endpoint, theme::dim()),
         ]);
-        frame.render_widget(Paragraph::new(line), area);
+        frame.render_widget(Paragraph::new(line).style(theme::text()), area);
     }
 
     fn draw_tabs(&self, frame: &mut Frame, area: Rect) {
@@ -3842,13 +3840,10 @@ impl App {
             .map(|name| Line::from(*name))
             .collect::<Vec<_>>();
         let tabs = Tabs::new(titles)
-            .block(Block::default().borders(Borders::ALL))
+            .block(theme::block().borders(Borders::ALL))
+            .style(theme::text())
             .select(self.tab.index())
-            .highlight_style(
-                Style::default()
-                    .fg(Color::Cyan)
-                    .add_modifier(Modifier::BOLD),
-            )
+            .highlight_style(theme::title())
             .divider("│");
         frame.render_widget(tabs, area);
     }
@@ -3862,10 +3857,7 @@ impl App {
         let model = self.selected_model();
         let text = if let Some(model) = model {
             Text::from(vec![
-                Line::from(Span::styled(
-                    model.id,
-                    Style::default().fg(Color::Cyan).bold(),
-                )),
+                Line::from(Span::styled(model.id, theme::title())),
                 Line::from(format!("state: {}", model.state)),
                 Line::from(format!("name: {}", value_or_dash(&model.name))),
                 Line::from(""),
@@ -3879,7 +3871,8 @@ impl App {
         };
         frame.render_widget(
             Paragraph::new(text)
-                .block(Block::default().title("Fast actions").borders(Borders::ALL))
+                .style(theme::text())
+                .block(theme::block().title("Fast actions").borders(Borders::ALL))
                 .wrap(Wrap { trim: false }),
             chunks[1],
         );
@@ -3899,7 +3892,7 @@ impl App {
                 " {mode}   m toggle mode · r/Enter start · s stop\n {}",
                 self.telemetry
             ))
-            .style(Style::default().fg(Color::Yellow)),
+            .style(theme::warning()),
             chunks[0],
         );
         match self.ops_mode {
@@ -3931,15 +3924,16 @@ impl App {
                     format!(" · filter: {}", self.bench_filter)
                 };
                 let list = List::new(items)
+                    .style(theme::text())
                     .block(
-                        Block::default()
+                        theme::block()
                             .title(format!(
                                 "Bench scripts{filter} · / filter · ↑/↓ select · Ctrl+U editor"
                             ))
                             .borders(Borders::ALL),
                     )
                     .highlight_symbol("▶ ")
-                    .highlight_style(Style::default().fg(Color::Cyan).bold());
+                    .highlight_style(theme::title());
                 frame.render_stateful_widget(list, panes[0], &mut self.bench_state);
                 self.draw_script_editor(frame, panes[1], ScriptEditorTarget::Bench);
             }
@@ -3999,7 +3993,7 @@ impl App {
             ""
         };
         let border = if focused {
-            Style::default().fg(Color::Cyan)
+            theme::border_focused()
         } else {
             Style::default()
         };
@@ -4013,8 +4007,9 @@ impl App {
         };
         frame.render_widget(
             Paragraph::new(content)
+                .style(theme::text())
                 .block(
-                    Block::default()
+                    theme::block()
                         .title(format!(
                             "{} script · {path}{state} · {versions} snapshot(s)",
                             target.label()
@@ -4027,7 +4022,7 @@ impl App {
         );
         frame.render_widget(
             Paragraph::new("Ctrl+U edit/Esc list · Alt+P save · Alt+O reload · Alt+V versions")
-                .style(Style::default().fg(Color::DarkGray)),
+                .style(theme::dim()),
             chunks[1],
         );
 
@@ -4073,17 +4068,18 @@ impl App {
             rows,
             [Constraint::Percentage(76), Constraint::Percentage(24)],
         )
+        .style(theme::text())
         .header(
             Row::new(["Model", "State"])
-                .style(Style::default().fg(Color::Yellow).bold())
+                .style(theme::title())
                 .bottom_margin(1),
         )
         .block(
-            Block::default()
+            theme::block()
                 .title(format!("{title}{filter}{page}"))
                 .borders(Borders::ALL),
         )
-        .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+        .row_highlight_style(theme::selected())
         .highlight_symbol("▶ ");
         frame.render_stateful_widget(table, area, &mut self.model_state);
     }
@@ -4117,8 +4113,9 @@ impl App {
                 self.chat_max_tokens,
                 if self.chat_thinking { "on" } else { "off" }
             ))
+            .style(theme::text())
             .block(
-                Block::default()
+                theme::block()
                     .title("Chat · e endpoint · Ctrl+G connect · Ctrl+B detect · K stop detected · ↑/↓ model")
                     .borders(Borders::ALL),
             ),
@@ -4139,9 +4136,9 @@ impl App {
         let mut lines = Vec::new();
         for message in self.chat_history.records().iter().rev().take(14).rev() {
             let color = if message.role == "user" {
-                Color::Cyan
+                theme::AMBER
             } else {
-                Color::Green
+                theme::GREEN
             };
             lines.push(Line::from(Span::styled(
                 format!("{}:", message.role),
@@ -4153,7 +4150,7 @@ impl App {
         if !self.chat_streaming.is_empty() {
             lines.push(Line::from(Span::styled(
                 "assistant (streaming):",
-                Style::default().fg(Color::Green).bold(),
+                Style::default().fg(theme::GREEN).bold(),
             )));
             lines.push(Line::from(self.chat_streaming.as_str()));
         }
@@ -4165,8 +4162,9 @@ impl App {
         }
         frame.render_widget(
             Paragraph::new(lines)
+                .style(theme::text())
                 .block(
-                    Block::default()
+                    theme::block()
                         .title("Conversation · Alt+S save · o sessions")
                         .borders(Borders::ALL),
                 )
@@ -4175,11 +4173,13 @@ impl App {
         );
         let marker = if self.chat_pending { " waiting…" } else { "" };
         frame.render_widget(
-            Paragraph::new(format!("> {}{marker}", self.chat_input)).block(
-                Block::default()
-                    .title("Message · Enter send · Esc stop/exit")
-                    .borders(Borders::ALL),
-            ),
+            Paragraph::new(format!("> {}{marker}", self.chat_input))
+                .style(theme::text())
+                .block(
+                    theme::block()
+                        .title("Message · Enter send · Esc stop/exit")
+                        .borders(Borders::ALL),
+                ),
             chunks[2],
         );
         if self.input_mode == InputMode::ChatMessage {
@@ -4200,18 +4200,20 @@ impl App {
             ])
             .split(area);
         frame.render_widget(
-            Paragraph::new(self.browser_path.as_str()).block(
-                Block::default()
-                    .title(format!(
-                        "GGUF path · g edit · r scan · t {}",
-                        if self.browser_recursive {
-                            "recursive"
-                        } else {
-                            "top-level"
-                        }
-                    ))
-                    .borders(Borders::ALL),
-            ),
+            Paragraph::new(self.browser_path.as_str())
+                .style(theme::text())
+                .block(
+                    theme::block()
+                        .title(format!(
+                            "GGUF path · g edit · r scan · t {}",
+                            if self.browser_recursive {
+                                "recursive"
+                            } else {
+                                "top-level"
+                            }
+                        ))
+                        .borders(Borders::ALL),
+                ),
             outer[0],
         );
         if self.input_mode == InputMode::BrowserPath {
@@ -4238,7 +4240,7 @@ impl App {
                 format_bytes(shown_size),
                 warning_count,
             ))
-            .style(Style::default().fg(Color::Yellow)),
+            .style(theme::warning()),
             outer[1],
         );
         if self.input_mode == InputMode::BrowserFilter {
@@ -4282,17 +4284,17 @@ impl App {
                 Constraint::Length(17),
             ],
         )
+        .style(theme::text())
         .header(
             Row::new(["#", "GGUF", "Quant", "Size", "Params", "Arch", "Modified"])
-                .yellow()
-                .bold(),
+                .style(theme::title()),
         )
         .block(
-            Block::default()
+            theme::block()
                 .title("Inventory · / filter · c cycle sort")
                 .borders(Borders::ALL),
         )
-        .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+        .row_highlight_style(theme::selected())
         .highlight_symbol("▶ ");
         frame.render_stateful_widget(table, main[0], &mut self.browser_state);
 
@@ -4302,11 +4304,8 @@ impl App {
         );
         frame.render_widget(
             Paragraph::new(details)
-                .block(
-                    Block::default()
-                        .title("Selected GGUF")
-                        .borders(Borders::ALL),
-                )
+                .style(theme::text())
+                .block(theme::block().title("Selected GGUF").borders(Borders::ALL))
                 .wrap(Wrap { trim: false }),
             main[1],
         );
@@ -4458,7 +4457,7 @@ impl App {
             ""
         };
         let table_border = if self.download.focus() == DownloadFocus::Table {
-            Style::default().fg(Color::Cyan)
+            theme::border_focused()
         } else {
             Style::default()
         };
@@ -4482,8 +4481,7 @@ impl App {
         } else {
             Row::new(["#", "Enabled", "Repository", "Pattern", "Local dir"])
         }
-        .yellow()
-        .bold();
+        .style(theme::title());
         let table_title = if compact {
             format!(
                 "Models{state} · page {}/{} · [/ ] page · Space toggle · Alt+D/E download",
@@ -4498,14 +4496,15 @@ impl App {
             )
         };
         let table = Table::new(rows, table_widths)
+            .style(theme::text())
             .header(table_header)
             .block(
-                Block::default()
+                theme::block()
                     .title(table_title)
                     .borders(Borders::ALL)
                     .border_style(table_border),
             )
-            .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+            .row_highlight_style(theme::selected())
             .highlight_symbol("▶ ");
         if let Some(table_area) = table_area {
             frame.render_stateful_widget(table, table_area, &mut self.download_state);
@@ -4531,8 +4530,9 @@ impl App {
             .map_or_else(String::new, |label| format!(" · {label}"));
         frame.render_widget(
             Paragraph::new(log_lines)
+                .style(theme::text())
                 .block(
-                    Block::default()
+                    theme::block()
                         .title(format!(
                             "Download activity · Alt+Y clear · {}{}",
                             self.download_disk_space, eta
@@ -4568,17 +4568,17 @@ impl App {
                 Constraint::Length(8),
             ],
         )
+        .style(theme::text())
         .header(
             Row::new(["ID", "Kind", "Name", "Status", "Started", "Elapsed", "Exit"])
-                .yellow()
-                .bold(),
+                .style(theme::title()),
         )
         .block(
-            Block::default()
+            theme::block()
                 .title("Jobs · s stop · r retry · c clear")
                 .borders(Borders::ALL),
         )
-        .row_highlight_style(Style::default().bg(Color::DarkGray))
+        .row_highlight_style(theme::selected())
         .highlight_symbol("▶ ");
         frame.render_stateful_widget(table, area, &mut self.jobs_state);
     }
@@ -4594,13 +4594,14 @@ impl App {
             .map(|path| ListItem::new(relative_display(&self.root, path)))
             .collect::<Vec<_>>();
         let list = List::new(items)
+            .style(theme::text())
             .block(
-                Block::default()
+                theme::block()
                     .title("Maintenance · r/Enter run · s stop · Ctrl+U editor")
                     .borders(Borders::ALL),
             )
             .highlight_symbol("▶ ")
-            .highlight_style(Style::default().fg(Color::Cyan).bold());
+            .highlight_style(theme::title());
         frame.render_stateful_widget(list, panes[0], &mut self.maintenance_state);
         self.draw_script_editor(frame, panes[1], ScriptEditorTarget::Maintenance);
     }
@@ -4616,7 +4617,8 @@ impl App {
             .collect::<Vec<_>>();
         frame.render_widget(
             Paragraph::new(lines)
-                .block(Block::default().title("Activity").borders(Borders::ALL))
+                .style(theme::text())
+                .block(theme::block().title("Activity").borders(Borders::ALL))
                 .wrap(Wrap { trim: false }),
             area,
         );
@@ -4652,7 +4654,7 @@ impl App {
         let footer = format!(" {}{}  │ {controls} ", self.status, input);
         frame.render_widget(
             Paragraph::new(footer)
-                .style(Style::default().fg(Color::Black).bg(Color::Cyan))
+                .style(theme::badge())
                 .alignment(Alignment::Left),
             area,
         );
@@ -4663,27 +4665,21 @@ impl App {
         frame.render_widget(Clear, area);
         let context = self.command_context();
         let mut help = vec![
-            Line::from(Span::styled(
-                "L3MS Rust key bindings",
-                Style::default().fg(Color::Cyan).bold(),
-            )),
+            Line::from(Span::styled("L3MS Rust key bindings", theme::title())),
             Line::from(""),
             Line::from("Global  F1–F7/Alt+1–7 tabs · Alt+←/→ cycle · Ctrl+P palette · q quit"),
             Line::from(""),
         ];
         help.push(Line::from(Span::styled(
             format!("{} commands", context),
-            Style::default().fg(Color::Yellow).bold(),
+            theme::title(),
         )));
         for spec in visible_commands(context)
             .into_iter()
             .filter(|spec| !spec.contexts.contains(&CommandContext::Global))
         {
             help.push(Line::from(vec![
-                Span::styled(
-                    format!("  {:<20}", spec.shortcut),
-                    Style::default().fg(Color::Cyan),
-                ),
+                Span::styled(format!("  {:<20}", spec.shortcut), theme::border_focused()),
                 Span::raw(spec.label),
             ]));
         }
@@ -4691,7 +4687,8 @@ impl App {
         help.push(Line::from("Press any key to close."));
         frame.render_widget(
             Paragraph::new(help)
-                .block(Block::default().title(" Help ").borders(Borders::ALL))
+                .style(theme::text())
+                .block(theme::block().title(" Help ").borders(Borders::ALL))
                 .wrap(Wrap { trim: false }),
             area,
         );
@@ -4705,11 +4702,13 @@ impl App {
             .constraints([Constraint::Length(3), Constraint::Min(4)])
             .split(area);
         frame.render_widget(
-            Paragraph::new(self.palette_query.as_str()).block(
-                Block::default()
-                    .title(" Command palette · type to search · Esc close ")
-                    .borders(Borders::ALL),
-            ),
+            Paragraph::new(self.palette_query.as_str())
+                .style(theme::text())
+                .block(
+                    theme::block()
+                        .title(" Command palette · type to search · Esc close ")
+                        .borders(Borders::ALL),
+                ),
             chunks[0],
         );
         let commands = self.palette_commands();
@@ -4718,11 +4717,11 @@ impl App {
             .map(|spec| Row::new([Cell::from(spec.shortcut), Cell::from(spec.palette_label)]));
         let table = Table::new(rows, [Constraint::Length(22), Constraint::Percentage(100)])
             .block(
-                Block::default()
+                theme::block()
                     .title(format!(" {} command(s) · Enter run ", commands.len()))
                     .borders(Borders::ALL),
             )
-            .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+            .row_highlight_style(theme::selected())
             .highlight_symbol("▶ ");
         frame.render_stateful_widget(table, chunks[1], &mut self.palette_state);
         frame.set_cursor_position((
@@ -4754,9 +4753,10 @@ impl App {
                 Constraint::Percentage(100),
             ],
         )
+        .style(theme::text())
         .header(Row::new(["Saved", "Messages", "File"]).yellow().bold())
-        .block(Block::default().title(title).borders(Borders::ALL))
-        .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
+        .block(theme::block().title(title).borders(Borders::ALL))
+        .row_highlight_style(theme::selected())
         .highlight_symbol("▶ ");
         frame.render_stateful_widget(table, area, &mut self.chat_sessions_state);
     }
@@ -4771,13 +4771,10 @@ impl App {
             .map(ListItem::new)
             .collect::<Vec<_>>();
         let list = List::new(items)
-            .block(
-                Block::default()
-                    .title(" System prompts · Enter load · l/Esc close ")
-                    .borders(Borders::ALL),
-            )
+            .style(theme::text())
+            .block(theme::block().title(" System prompts · Enter load · l/Esc close "))
             .highlight_symbol("▶ ")
-            .highlight_style(Style::default().fg(Color::Cyan).bold());
+            .highlight_style(theme::title());
         frame.render_stateful_widget(list, area, &mut self.chat_prompts_state);
     }
 
@@ -4795,8 +4792,9 @@ impl App {
             .map(ListItem::new)
             .collect::<Vec<_>>();
         let list = List::new(items)
+            .style(theme::text())
             .block(
-                Block::default()
+                theme::block()
                     .title(format!(
                         " {} snapshots · Enter restore · Esc/Alt+V close ",
                         target.label()
@@ -4804,7 +4802,7 @@ impl App {
                     .borders(Borders::ALL),
             )
             .highlight_symbol("▶ ")
-            .highlight_style(Style::default().fg(Color::Cyan).bold());
+            .highlight_style(theme::title());
         frame.render_stateful_widget(list, area, &mut self.script_version_state);
     }
 
@@ -4824,11 +4822,12 @@ impl App {
             Paragraph::new(format!(
                 "{dirty} edits are not saved.\n\nS  save snapshots, then quit\nD  discard edits and quit\nEsc  return to L3MS"
             ))
+            .style(theme::text())
             .block(
-                Block::default()
+                theme::block()
                     .title(" Unsaved changes ")
                     .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Yellow)),
+                    .border_style(theme::warning()),
             )
             .wrap(Wrap { trim: false }),
             area,
@@ -5179,7 +5178,7 @@ fn visible_cursor_offset(cursor: usize, rendered_scroll: u16, visible_extent: u1
 
 fn download_compact_focus_style(focused: bool) -> Style {
     if focused {
-        Style::default().fg(Color::Black).bg(Color::Cyan).bold()
+        theme::badge()
     } else {
         Style::default()
     }
@@ -5265,11 +5264,11 @@ fn render_download_compact_settings(frame: &mut Frame, area: Rect, download: &Do
             | DownloadFocus::GlobalWorkers
             | DownloadFocus::SaveNote
     );
-    let block = Block::default()
+    let block = theme::block()
         .title("Settings · Tab/Shift+Tab")
         .borders(Borders::ALL)
         .border_style(if settings_focused {
-            Style::default().fg(Color::Cyan)
+            theme::border_focused()
         } else {
             Style::default()
         });
@@ -5416,14 +5415,15 @@ fn render_download_model_editor(frame: &mut Frame, area: Rect, download: &Downlo
         })
         .collect::<Vec<_>>();
     let editor_border = if matches!(download.focus(), DownloadFocus::Model(_)) {
-        Style::default().fg(Color::Cyan)
+        theme::border_focused()
     } else {
         Style::default()
     };
     frame.render_widget(
         Paragraph::new(editor_lines)
+            .style(theme::text())
             .block(
-                Block::default()
+                theme::block()
                     .title("Model editor · Alt+I focus · Tab/Shift+Tab fields")
                     .borders(Borders::ALL)
                     .border_style(editor_border),
@@ -5453,11 +5453,11 @@ fn render_download_model_editor(frame: &mut Frame, area: Rect, download: &Downlo
 
 fn render_download_compact_model_editor(frame: &mut Frame, area: Rect, download: &DownloadUiState) {
     let editor_focused = matches!(download.focus(), DownloadFocus::Model(_));
-    let block = Block::default()
+    let block = theme::block()
         .title("Model editor · Tab/Shift+Tab")
         .borders(Borders::ALL)
         .border_style(if editor_focused {
-            Style::default().fg(Color::Cyan)
+            theme::border_focused()
         } else {
             Style::default()
         });
@@ -5509,14 +5509,14 @@ fn render_download_value_field(
     focused: bool,
 ) {
     let border = if focused {
-        Style::default().fg(Color::Cyan)
+        theme::border_focused()
     } else {
         Style::default()
     };
     frame.render_widget(
         Paragraph::new(value)
             .block(
-                Block::default()
+                theme::block()
                     .title(title)
                     .borders(Borders::ALL)
                     .border_style(border),
@@ -5534,7 +5534,7 @@ fn render_download_text_field(
     focused: bool,
 ) {
     let border = if focused {
-        Style::default().fg(Color::Cyan)
+        theme::border_focused()
     } else {
         Style::default()
     };
@@ -5549,7 +5549,7 @@ fn render_download_text_field(
     frame.render_widget(
         Paragraph::new(buffer.content())
             .block(
-                Block::default()
+                theme::block()
                     .title(title)
                     .borders(Borders::ALL)
                     .border_style(border),
@@ -5807,7 +5807,7 @@ fn gguf_details(file: &GgufFile) -> Text<'static> {
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(
             format!("parse warning: {error}"),
-            Style::default().fg(Color::Yellow),
+            theme::warning(),
         )));
     }
     Text::from(lines)

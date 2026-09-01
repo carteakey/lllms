@@ -192,6 +192,28 @@ serving code is pin-assembled into `base/upstream-*` branches at release
 time, and their MTP tree lacks #28123's rollback. Not a usable base for
 our tier; parked. Unsloth MTP head (non-shared Q4_K_M, 2.79 GB) downloaded
 to `models/unsloth/Qwen3.8-Flash-Next-GGUF/MTP/` for when #28097 lands.
+**ON_DEVICE cherry-pick test (2026-09-01, conclusive negative).** Isolated
+the server fix (`82bacc547 server: keep speculative recurrent-state
+checkpoints on-device`, 8+/8−, from #28118) onto the PROVEN MTP build
+(0b7d6d57d) — branch `mtp-ondevice` @ fbae85cc6, later + #28061 replay fix
+@ 9a85817b7. Result at ncmoe 46/32k, agentionai head: **round 1 completes
+on device (15.6 t/s, acceptance 0.955!), round 2 aborts with
+`llama-context.cpp:2906: ~llama_io_read_device: memory buffer mismatch`**
+— the checkpoint read size disagrees with the previous write. Reproduced
+with plain `--spec-type draft-mtp` (rules out the ngram-mod combo) and
+with #28061's replay fix (rules out replay re-verification). Root cause:
+the ON_DEVICE mechanism (Puleo's c8b681b6f, built for constant-state
+hybrid archs) cannot handle qwen4exp's variable per-round state size;
+needs the arch-specific handling only #28104/#28118's proper port will
+bring. This also explains why the mechanism "works" on big-VRAM
+deepseek-heritage boxes and not here — it's not a VRAM bug, it's a
+state-sizing bug that hits qwen4exp everywhere. Complete MTP blocker
+stack, all named: (1) graph-key fix — in #144/#28104 only, (2) ON_DEVICE
+state-sizing for qwen4exp — #28104/#28118 open, (3) draft-context KV
+sizing on master's hybrid rework — #28104's job. When #28104 (or
+#27836+#28097+#28118) merges, ALL THREE land together and the ladder
+re-runs on plain gold.
+
 **Unsloth release-binary test (2026-09-01, final MTP chapter).** Tested the
 prebuilt `b10715-mix-86bd2d3` release (their shipping assembly): shared-Q8_0
 head LOADS at ncmoe 46/32k (their pin mix handles the draft-KV sizing our

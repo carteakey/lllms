@@ -89,13 +89,29 @@ impl SwapClient {
     }
 
     /// Ask llama-swap to load `model_id` and return a compact HTTP summary.
+    ///
+    /// `GET /upstream/{model}/load` triggers the on-demand startup path and
+    /// holds the connection until the model passes its health check.
     pub fn load_model(&self, model_id: &str) -> Result<String> {
-        self.model_action("/models/load", model_id, LOAD_TIMEOUT)
+        let model_id = model_id.trim();
+        if model_id.is_empty() {
+            bail!("model id cannot be empty");
+        }
+        let url = self.endpoint(&format!("/upstream/{model_id}/load"));
+        let response = self
+            .with_timeout(self.client.get(&url), LOAD_TIMEOUT)
+            .send()
+            .with_context(|| format!("failed to GET {url}"))?;
+        let status = response.status().as_u16();
+        let body = response
+            .text()
+            .with_context(|| format!("failed to read response from {url}"))?;
+        action_result(status, &body)
     }
 
     /// Ask llama-swap to unload `model_id` and return a compact HTTP summary.
     pub fn unload_model(&self, model_id: &str) -> Result<String> {
-        self.model_action("/models/unload", model_id, REQUEST_TIMEOUT)
+        self.model_action("/api/models/unload", model_id, REQUEST_TIMEOUT)
     }
 
     /// Check whether the configured llama-swap endpoint is reachable and healthy.
@@ -234,9 +250,11 @@ fn text_field(entry: &serde_json::Map<String, Value>, key: &str) -> String {
 
 fn normalize_state(entry: &serde_json::Map<String, Value>) -> &'static str {
     let raw = entry
-        .get("state")
-        .or_else(|| entry.get("status"))
+        .get("status")
+        .and_then(|status| status.get("value"))
         .and_then(Value::as_str)
+        .or_else(|| entry.get("state").and_then(Value::as_str))
+        .or_else(|| entry.get("status").and_then(Value::as_str))
         .map(str::trim)
         .filter(|state| !state.is_empty());
 
@@ -311,6 +329,8 @@ mod tests {
                 {"id":"alpha", "state":"starting", "description":"warming"},
                 {"id":"idle", "loaded":false},
                 {"id":"mystery", "state":"surprising"},
+                {"id":"nested", "status":{"value":"loaded"}},
+                {"id":"nested-idle", "status":{"value":"unloaded"}},
                 {"id":"", "loaded":true},
                 null
             ]
@@ -322,13 +342,14 @@ mod tests {
                 .iter()
                 .map(|model| model.id.as_str())
                 .collect::<Vec<_>>(),
-            ["alpha", "idle", "mystery", "zeta"]
+            ["alpha", "idle", "mystery", "nested", "nested-idle", "zeta"]
         );
         assert_eq!(models[0].state, "loading");
         assert_eq!(models[1].state, "unloaded");
         assert_eq!(models[2].state, "unknown");
         assert_eq!(models[3].state, "loaded");
-        assert_eq!(models[3].name, "Zeta");
+        assert_eq!(models[4].state, "unloaded");
+        assert_eq!(models[5].name, "Zeta");
     }
 
     #[test]

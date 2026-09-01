@@ -20,8 +20,8 @@ if [ -z "${LLAMA_BENCH:-}" ]; then
     "${REPO_DIR}/vendor/llama.cpp/llama-bench" \
     "${REPO_DIR}/vendor-forks/llama.cpp-copilot/build/bin/llama-bench" \
     "${REPO_DIR}/vendor-forks/llama.cpp-copilot/llama-bench" \
-    "${REPO_DIR}/vendor/llama.cpp/build-cublas/bin/llama-bench" \
-    "${REPO_DIR}/vendor-forks/llama.cpp-copilot/build-cublas/bin/llama-bench"
+    "${REPO_DIR}/vendor/llama.cpp/build/bin/llama-bench" \
+    "${REPO_DIR}/vendor-forks/llama.cpp-copilot/build/bin/llama-bench"
   do
     if [ -x "${candidate}" ]; then
       LLAMA_BENCH="${candidate}"

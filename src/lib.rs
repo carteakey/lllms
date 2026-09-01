@@ -22,3 +22,4 @@ pub mod settings;
 pub mod state_store;
 pub mod telemetry;
 pub mod text_buffer;
+pub mod theme;
