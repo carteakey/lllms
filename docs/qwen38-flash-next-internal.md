@@ -236,13 +236,15 @@ D6000C36), single-rank, ASRock B760M Steel Legend, i5-12600K, 2DPC.
 Reboot 1 result: 5000 → **5600 MT/s** @ 1.35 V, user-set voltages above the
 suggested ranges (stable across model soak). 
 
-Measured impact (post-reboot, §5 protocol): prose 19.5 → **20.1** (+3%),
-spec-warm 26.3 → 26.1 (flat), spill 0.2 MB/256tok (clean). +12% bandwidth
-bought +3% tg — confirms the workload is random-access LATENCY bound, not
-bandwidth bound. Remaining RAM headroom: the kit's rated 6000 EXPO profile
-(likely Gear 2 on Alder Lake 2DPC — latency tradeoff, expected +2-4% at
-best; optional). Further tg gains must come from algorithmic work (§9.4),
-not memory clocks.
+Measured impact (post-reboot, §5 protocol): prose 19.5 → **19.6-19.7**
+(unique-prefix probes; flat), spec-warm 26.3 → 26.1 (flat), spill 0.2
+MB/256tok (clean). +12% bandwidth bought ≈0-3% tg — confirms the workload
+is random-access LATENCY bound, not bandwidth bound. The initial "20.1"
+reading was a warm-cache sample; unique-prefix re-runs under performance
+governor showed parity. Remaining RAM headroom: the kit's rated 6000 EXPO
+profile (likely Gear 2 on Alder Lake 2DPC — latency tradeoff; given the
+flat result at 5600, NOT worth pursuing for tg). Further tg gains must
+come from algorithmic work (§9.4), not memory clocks.
 
 Reboot 2 candidates (after RAM): re-bench §5 numbers; if tg moves >5%,
 update runbook + AGENTS.md.
