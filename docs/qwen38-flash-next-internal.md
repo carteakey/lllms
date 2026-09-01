@@ -246,6 +246,34 @@ profile (likely Gear 2 on Alder Lake 2DPC — latency tradeoff; given the
 flat result at 5600, NOT worth pursuing for tg). Further tg gains must
 come from algorithmic work (§9.4), not memory clocks.
 
+**Timing analysis (what the user's BIOS change actually bought).**
+Before: 36-44-44-92 @ 5000 MT/s (0.400 ns/cycle). After:
+40-40-40-77 @ 5600 (0.357 ns/cycle). In real nanoseconds:
+
+| timing | before | after | change |
+| --- | --- | --- | --- |
+| CL | 14.4 ns | 14.3 ns | flat (proportional with clock) |
+| tRCD | 17.6 ns | 14.3 ns | **−19%** |
+| tRP | 17.6 ns | 14.3 ns | **−19%** |
+| 4th (tRAS/tRFC-class) | 36.8 ns | 27.5 ns | **−25%** |
+
+Random-access (row-miss) cost = tRP+tRCD+CL: 49.6 → **42.9 ns, −13%
+DRAM-side latency per miss** — the terms that matter for MoE gathers.
+Direct measurement: pointer-chase over 64 MiB (dependent loads, taskset
+P-core, best-of-8) = **86.8 ns/hop**. Decomposition: ~43 ns DRAM-side +
+~44 ns TLB/controller/kernel overhead that no DIMM timing touches; of a
+~50 ms token budget, DRAM-side latency is a small slice — hence −13%
+DRAM latency → 0-3% tg. Latency probe source: /tmp/opencode/lat.c
+(consider promoting to maintenance/). Gains are real and show up in
+gaming 1% lows / desktop feel, not inference.
+
+**Stability ledger since RAM change**: 15+ min uptime, zero WHEA/MCE
+errors, zero segfaults, zero CUDA faults, one benign boot-time proxy
+race (llama-swap vs startup preload, 7 s after boot) and benign EDAC
+"no ECC support" probe lines. Sustained probe 25.1-26.1 t/s post-soak.
+Recommended ongoing check after heavy sessions:
+`journalctl -k -b | grep -iE "whea|machine check|mce:|hardware error"`.
+
 Reboot 2 candidates (after RAM): re-bench §5 numbers; if tg moves >5%,
 update runbook + AGENTS.md.
 
