@@ -192,6 +192,24 @@ serving code is pin-assembled into `base/upstream-*` branches at release
 time, and their MTP tree lacks #28123's rollback. Not a usable base for
 our tier; parked. Unsloth MTP head (non-shared Q4_K_M, 2.79 GB) downloaded
 to `models/unsloth/Qwen3.8-Flash-Next-GGUF/MTP/` for when #28097 lands.
+**Unsloth release-binary test (2026-09-01, final MTP chapter).** Tested the
+prebuilt `b10715-mix-86bd2d3` release (their shipping assembly): shared-Q8_0
+head LOADS at ncmoe 46/32k (their pin mix handles the draft-KV sizing our
+hand-merge choked on) and drafts well (acceptance 0.77, mean 2.24) — but
+generation is **5-7 t/s** (code 6-7, prose 1.2-5.4), both with the
+documented plain `--spec-type draft-mtp` and our combo. Cause: the release
+carries #28123's rollback but NOT the `LLAMA_STATE_SEQ_FLAGS_ON_DEVICE`
+server change (#28118/#28104, still open) — every speculative round pays
+full host serialization, which is catastrophic on this box's PCIe/memory
+situation even though the same code hits 191 t/s on a PRO 6000. Conclusion
+of the whole MTP saga: **the old build (0b7d6d57d, host checkpoints +
+p-min 0.7 gating) remains the best MTP implementation for 12 GB**, full
+stop, until #28118/#28104 land — at which point the unsloth release or a
+gold refresh both become viable and the ladder re-runs. Note: the two
+previously downloaded unsloth heads vanished from
+`models/unsloth/Qwen3.8-Flash-Next-GGUF/MTP/` between runs (cause
+unknown — re-downloaded shared-Q8_0; keep an eye on it).
+
 **Master+#144 merge attempt (2026-09-01, blocked on draft-KV sizing).**
 Merged unsloth #144 (586b15ef8) onto fresh master (9d817213a) — branch
 `unsloth-mtp-onmaster` @ aac87ec23 in the llama.cpp-unsloth worktree.
