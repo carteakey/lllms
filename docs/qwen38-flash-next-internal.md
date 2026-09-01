@@ -196,6 +196,29 @@ to `models/unsloth/Qwen3.8-Flash-Next-GGUF/MTP/` for when #28097 lands.
 → git fetch, rebuild gold, point --spec-draft-model at the unsloth head,
 re-run the ladder.
 
+**Unsloth #144 experiment (2026-09-01, concluded — tier stays on 0b7d6d57d).**
+Built unslothai/llama.cpp PR #144 head (586b15ef8: #27836 cherry-picks +
+#142 borrow + draft-only load + conv-state rollback + **CUDA graph cache
+keyed by shape** — that last one fixes a real upstream bug: qwen4exp's
+verify batch varies 2/3/4 tokens, the shape-blind graph cache reset warmup
+every step and fell back to eager launch, 1.52 → 12.35 ms/verify). Shared
+heads refuse to load standalone by design; shared-Q8_0 (2.79 GB) loads as
+sidecar. Results at 32k, combo spec: static ncmoe 46 + non-shared Q4 →
+CUDA OOM (head carries own embeddings, +1.3 GB); ncmoe 46 + shared-Q8 →
+274 MiB short on compute buffers; **ncmoe 47 + shared-Q8 → works but code
+19.8 t/s vs our old build's 25.0** (acceptance 0.69 ✓). The head's VRAM
+cost forces an extra expert layer to CPU, which costs more than the
+graph-key fix saves on 12 GB. On 80 GB-class cards the same stack gives
+1.78× (ServeurpersoCom: 98.8 → 191 t/s non-shared-Q8, and the non-shared
+borrow-free path is ~8% faster than shared). Known caveats from the PR:
+greedy output is not byte-identical with the head on (coherent, under
+investigation), and #27941's base defect drops the last 1-3 tokens in
+single-slot long context (fix ready, 11 lines). Conclusion: the unsloth
+stack is the best MTP implementation for big-VRAM cards; on 12 GB the
+geometry reverses it. Worktree removed; branch `unsloth-mtp-144` kept in
+the exp clone. Re-evaluate if the graph-key fix lands upstream
+(candidate for standalone upstreaming per the PR) and/or VRAM grows.
+
 **2026-08-31 rollback-stack experiment (concluded, reverted).** Context: PR
 #28123 (recurrent-state rollback, CISC-approved) + the port PR
 (#28118 on-device checkpoints, #28120 rollback enable, #28061 replay fix)
