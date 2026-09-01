@@ -1,0 +1,10 @@
+[Unit]
+Description=L3MS: performance cpufreq policy
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/home/kchauhan/repos/l3ms/maintenance/set-cpufreq-performance.sh
+
+[Install]
+WantedBy=multi-user.target

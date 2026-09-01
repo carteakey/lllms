@@ -229,37 +229,20 @@ imperceptible. If pursued anyway:
 - [ ] Validation: perplexity A/B (wikitext, ctx 4096) AD-native vs grafted;
       only adopt if ΔPPL is outside ±1%. Expect it not to be.
 
-### 9.3 RAM frequency increase (decode is RAM random-access bound)
+### 9.3 RAM frequency increase (decode is RAM random-access bound) — DONE 2026-08-31
 
-Current: 4×16 GB DDR5-4800 spec, running 5000 MT/s, i5-12600K, 2 DIMMs per
-channel (2DPC — the hardest OC config; the IMC/PHY is derated by double
-ranks/2DPC).
+Current: 4×16 GB Corsair Vengeance DDR5-6000C36 (CMK32GX5M2E6000C36/
+D6000C36), single-rank, ASRock B760M Steel Legend, i5-12600K, 2DPC.
+Reboot 1 result: 5000 → **5600 MT/s** @ 1.35 V, user-set voltages above the
+suggested ranges (stable across model soak). 
 
-Expected gain: tg scales with random-access bandwidth; 5000→5600 MT/s ≈
-+12% bandwidth → expect roughly +5-10% tg (19.5 → ~21). Latency-bound
-workload ⇒ prioritize Gear-1 and tight tCL over raw MT/s.
-
-Suggested ladder (reboot 1):
-
-1. **Baseline capture first** (before touching BIOS): `sudo dmidecode -t 17`
-   (exact DIMMs — Samsung/Hynix/Micron matters), `sudo dmidecode -t 16`,
-   current tCL/tRCD/tRP/tRFC if visible. Log into this doc.
-2. **Step 1 — 5400-5600 Gear 1** (Alder Lake G1 ceiling ~5400-5600 on 2DPC):
-   - VDD 1.30-1.35 V, VDDQ 1.30 V, VDDQ TX 1.25-1.30 V
-   - VCCSA 1.15-1.20 V, VCCIO 1.15-1.20 V
-   - tCL 36-38, tRCD/tRP 38-42, tRAS 60+, tRFC 640→~560 (DDR5's big win),
-     tREFI leave auto (or extend only with a stable box)
-   - Gear-Down: enabled (G1 requirement for stability at these clocks)
-   - Memory controller: Gear 1 (1:1) — hold it as high as it will POST
-3. **Step 2 — only if G1 headroom exists**: push to 5600-5800 G1 with
-   VDD 1.35-1.40 V. If BIOS forces Gear 2 above ~5600, prefer 5600 G1 over
-   6400 G2 for this workload (G2 adds latency; our workload is latency-bound).
-4. **Validation**: TestMem5 (1usmus config) or Karhu overnight, THEN a
-   real workload soak: 30 min generation + spill check + tg comparison
-   against §5. The model itself is an excellent stability test (full-RAM
-   random churn for hours).
-5. **Realistic ceiling on 2DPC**: 5600-6000. If chasing more later, 2×32 GB
-   single-rank 1DPC OCs far better than 4-DIMM 2DPC.
+Measured impact (post-reboot, §5 protocol): prose 19.5 → **20.1** (+3%),
+spec-warm 26.3 → 26.1 (flat), spill 0.2 MB/256tok (clean). +12% bandwidth
+bought +3% tg — confirms the workload is random-access LATENCY bound, not
+bandwidth bound. Remaining RAM headroom: the kit's rated 6000 EXPO profile
+(likely Gear 2 on Alder Lake 2DPC — latency tradeoff, expected +2-4% at
+best; optional). Further tg gains must come from algorithmic work (§9.4),
+not memory clocks.
 
 Reboot 2 candidates (after RAM): re-bench §5 numbers; if tg moves >5%,
 update runbook + AGENTS.md.
@@ -292,7 +275,12 @@ spec-warm 26.3 · MTP code 25.0 (32k cap). Gap analysis:
 2. Reboot into the chosen target (GUI or `multi-user.target`).
 3. Verify llama-swap auto-alive (linger): `systemctl --user is-active llama-swap`.
 3b. Verify CPU power profile survived: scaling_governor → `performance`
-   (see §5); re-set via power-profiles-daemon if it reset to balanced.
+   (see §5); if it reset, either re-select Performance in the desktop
+   applet or install the permanent fix once:
+   `sudo cp maintenance/systemd/l3ms-cpufreq.service /etc/systemd/system/ &&
+   sudo systemctl daemon-reload && sudo systemctl enable --now l3ms-cpufreq`
+   (oneshot unit: sets governor+EPP=performance on every boot, survives
+   desktop profile resets).
 4. Load gold via router, run the page-in warm-up (2-3 throwaway gens), then
    the spill check — expect ≤1.5 MB/256tok.
 5. Re-run the §5 quick numbers (counting probe ×2, story gen ×1) and diff
