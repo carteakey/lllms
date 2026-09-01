@@ -192,9 +192,22 @@ serving code is pin-assembled into `base/upstream-*` branches at release
 time, and their MTP tree lacks #28123's rollback. Not a usable base for
 our tier; parked. Unsloth MTP head (non-shared Q4_K_M, 2.79 GB) downloaded
 to `models/unsloth/Qwen3.8-Flash-Next-GGUF/MTP/` for when #28097 lands.
-**Retry conditions for the MTP upgrade**: #27836 + #28097 merged upstream
-→ git fetch, rebuild gold, point --spec-draft-model at the unsloth head,
-re-run the ladder.
+**Master+#144 merge attempt (2026-09-01, blocked on draft-KV sizing).**
+Merged unsloth #144 (586b15ef8) onto fresh master (9d817213a) — branch
+`unsloth-mtp-onmaster` @ aac87ec23 in the llama.cpp-unsloth worktree.
+Two conflicts, both the same conv-state rollback loop (#144's vs upstream
+#28123's canonical version — took upstream's); one duplicate `mem_size`
+declaration removed. Build green, target loads. **Blocked**: the DRAFT
+context fails its KV allocation at every combination (ncmoe 46/47 ×
+16k/32k, draft-KV q8, with and without extra target VRAM freed) — the
+merged tree's draft context sizes its hybrid KV like the full model, not
+like a 1-layer head (the #144 base handled this; master's memory-hybrid
+rework changed the path). This is exactly what open PR **#28104 (port
+NextN/MTP to master)** implements properly — do NOT hand-merge again;
+wait for #28104 or #27836+#28097 to land, then plain gold refresh.
+Also confirmed en route: one CPU expert layer (ncmoe 46→47) costs ~13%
+tg on this box (25.0-class → 17.3-class, same build/prompt), which is
+why every ncmoe-down squeeze is expensive.
 
 **Unsloth #144 experiment (2026-09-01, concluded — tier stays on 0b7d6d57d).**
 Built unslothai/llama.cpp PR #144 head (586b15ef8: #27836 cherry-picks +
