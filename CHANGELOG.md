@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+- Bench docs split (was a 1260-line `docs/bench-runbook.md`, now three docs with verified no-loss migration — all 939 non-blank source lines accounted for, 934 verbatim, 5 justified rewordings: two "section above" → explicit doc reference after the move, three headings re-leveled under the new structure; a stray unclosed ` ``` ` fence artifact at EOF was dropped):
+  - `docs/bench-runbook.md` (639 lines): operational core only — overview, prerequisites, system-state check, CPU power layering, script layout, experiment sequence, reading results, known constraints, adding a new model, generic quick reference.
+  - `docs/bench-results.md` (new, 521 lines): per-model measured results (Qwen3-Coder-Next, Gemma-4-26B-A4B stub, Gemma/Qwen3.6 MTP, Qwen3.6-35B, Qwen3.5-122B, gpt-oss-120b), per-model quickstarts, winner cheatsheet, KV cache quant recommendation. This is where `/add-bench-result` writes now.
+  - `docs/bench-troubleshooting.md` (new, 152 lines): tg-variability root cause, archived 22-item checklist, common troubleshooting table, GGML CUDA memory pools (VMM growth, fit headroom, mid-session OOM fixes).
+  - Cross-references updated in: `llama-swap.yaml` model descriptions (§8 → `docs/bench-results.md`; pre-edit snapshot `llama-swap.yaml.bak-20260831-203159`), `.claude/commands/{add-bench-result,new-model-config,model-status,bench-model,optimize-model}.md`, `docs/model-onboarding-playbook.md`, `docs/qwen38-flash-next-internal.md`. `.bak-*` snapshots and `thread.md` transcript left untouched (historical record).
+- Bench runbook: added a "CPU power layering" section (docs/bench-runbook.md) disentangling governor vs EPP vs HWP vs profile managers — on `intel_pstate` the governor name is mostly a label and EPP is the knob that matters (`powersave` + EPP=performance is a valid high-perf setup); Tuned is not a CachyOS default (PPD is; tuned-ppd is the shim bridging them) and its `throughput-performance` profile is functionally equivalent to the manual setup; I/O scheduler noted as an unrelated block layer. Recorded current box state (2026-08-31): PPD 0.30 active at `performance` profile, tuned/tuned-ppd not installed (tuned-ppd swap reverted), governor/EPP=performance verified live; added a status-update note to the historical root-cause section.
+
 ## [0.7.0] - 2026-08-31
 
 The Rust port remains in progress under `CAR-97`; these entries describe

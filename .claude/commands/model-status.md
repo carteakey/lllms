@@ -91,7 +91,7 @@ Status: loaded | not loaded | service down
 Placement: --fit on | static -ngl=<N> -ot=<pattern>
 Bench scripts: bench-llama-cpp-<key>.sh | strategies | fit
 Bench logs: <most recent log timestamp or "none">
-Bench results in runbook: §8 section exists | not yet documented
+Bench results in bench-results.md: section exists | not yet documented
 VRAM env: GGML_CUDA_GRAPH_OPT=<0|1>
 Context: <ctx_size>
 KV cache: <ctk>/<ctv>

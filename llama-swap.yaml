@@ -79,7 +79,7 @@ models:
 
   "gpt-oss-120b":
     name: "gpt-oss 120B (optimized, bench-derived static placement, reasoning=high)"
-    description: "Production default. pp=427 tg=23.4 t/s. See docs/bench-runbook.md §8."
+    description: "Production default. pp=427 tg=23.4 t/s. See docs/bench-results.md."
     env:
       - "GGML_CUDA_GRAPH_OPT=1"
     cmd: |
@@ -154,7 +154,7 @@ models:
 
   "qwen3-coder-next":
     name: "Qwen3-Coder-Next 80B.A3B (optimized, bench-derived static placement)"
-    description: "Default coder. pp=502 tg=39.6 t/s @ 64k ctx. See bench-runbook.md §8."
+    description: "Default coder. pp=502 tg=39.6 t/s @ 64k ctx. See docs/bench-results.md."
     env:
       # GRAPH_OPT=0: CUDA graph re-capture can OOM with tight VRAM headroom
       - "GGML_CUDA_GRAPH_OPT=0"

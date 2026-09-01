@@ -81,7 +81,7 @@ LLAMA_FIT="${LLAMA_FIT:-${REPO_DIR}/vendor/llama.cpp-pr-test-<pr>/build/bin/llam
 
 ## 5) Update docs
 
-Update `docs/bench-runbook.md`:
+Update `docs/bench-results.md`:
 
 - add model in Script Layout examples (if relevant)
 - add usage snippets in Quick Reference

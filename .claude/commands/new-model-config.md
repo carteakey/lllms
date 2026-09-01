@@ -95,15 +95,15 @@ LLAMA_FIT="${LLAMA_FIT:-${REPO_DIR}/vendor/llama.cpp-pr-test-<N>/build/bin/llama
 Validate syntax: `bash -n bench-models/bench-llama-cpp-<model-family>.sh`
 
 ### Step 5 — Update docs
-In `docs/bench-runbook.md`:
+In `docs/bench-runbook.md` + `docs/bench-results.md`:
 - Add model to the reference hardware table in §1 (with placeholder values: `TBD`)
-- Add a bench results section under §8 with architecture notes
+- Add a bench results section in `docs/bench-results.md` with architecture notes
 
 ### Step 6 — Update CHANGELOG.md
 Under `## [Unreleased]` → `### Added`:
 ```markdown
 - `<model-family>`: llama-swap.yaml entry, bench scripts, downloader config
-- `docs/bench-runbook.md`: §8 stub for <model-family> results
+- `docs/bench-results.md`: stub for <model-family> results
 ```
 
 ### Step 7 — Validate wiring

@@ -2,7 +2,7 @@
 
 Convert raw bench data into a production llama-swap.yaml serving config.
 Replaces `--fit` with a deterministic static `-ngl` + `--override-tensor` derived from `llama-fit-params`.
-Reads `docs/bench-runbook.md` §8 for existing results before proposing changes.
+Reads `docs/bench-results.md` for existing results before proposing changes.
 
 ## Usage
 
@@ -18,7 +18,7 @@ Reads `docs/bench-runbook.md` §8 for existing results before proposing changes.
 ## Workflow
 
 ### Step 1 — Read existing bench results
-Read `docs/bench-runbook.md` §8 for the model's recorded results.
+Read `docs/bench-results.md` for the model's recorded results.
 Read the current `llama-swap.yaml` entry for the model to understand what is already deployed.
 Check `bench-models/logs/` for the most recent `.log` files for the model.
 
@@ -51,7 +51,7 @@ OVERRIDE_TENSOR="<ot-from-fit>" \
 ./bench-models/bench-llama-cpp-<model-key>.sh
 ```
 
-Compare pp and tg against the baseline from `docs/bench-runbook.md` §8.
+Compare pp and tg against the baseline from `docs/bench-results.md`.
 
 ### Step 4 — Confirm VRAM safety at serving context
 Check that the fit placement holds at the full serving context (not just 512-token bench):
@@ -73,7 +73,7 @@ Replace the `--fit` based entry with the static placement. Follow this pattern:
 ```yaml
 "<model-key>":
   name: "<Display name> (<quant>, optimized, bench-derived static placement)"
-  description: "pp=<pp> tg=<tg> t/s @ <ctx> ctx. See bench-runbook.md §8."
+  description: "pp=<pp> tg=<tg> t/s @ <ctx> ctx. See docs/bench-results.md."
   env:
     - "LLAMA_SET_ROWS=1"
     - "GGML_CUDA_GRAPH_OPT=0"   # 0 if context varies; 1 only for fixed-context servers
@@ -136,7 +136,7 @@ curl -s http://localhost:8080/v1/chat/completions \
 
 ### Step 8 — Update docs and CHANGELOG
 
-In `docs/bench-runbook.md` §8:
+In `docs/bench-results.md`:
 - Add or update the "Recommended serving configuration" table
 - Add the static `-ot` placement and context to the results table
 

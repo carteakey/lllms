@@ -4,7 +4,7 @@ Internal record of every decision, measurement, and next step for serving
 `Qwen3.8-Flash-Next` (qwen4exp) on `yeti-cachy`. Companion docs:
 `AGENTS.md` (condensed rules), `CHANGELOG.md` (chronological record),
 `docs/qwen3-8-flash-next-local-post.md` (published writeup),
-`docs/bench-runbook.md §8` (bench numbers).
+`docs/bench-results.md` (bench numbers).
 
 Status: 2026-08-31. Serving live via llama-swap, three tiers, all smoke-tested.
 

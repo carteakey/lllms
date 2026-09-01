@@ -1,6 +1,6 @@
 # /add-bench-result
 
-Record benchmark results into `docs/bench-runbook.md` §8 and update CHANGELOG.md.
+Record benchmark results into `docs/bench-results.md` and update CHANGELOG.md.
 Results are now **also** stored as structured JSONL in `bench-models/results/<model-key>.jsonl`.
 The JSONL file is written automatically by the runner scripts — this skill handles the human-readable runbook update.
 
@@ -102,11 +102,11 @@ From the JSONL, identify the winning strategy per metric:
 
 Note the associated `ngl`, `override_tensor`, `ctk`/`ctv`, `fit_ctx`, `fit_target` for the runbook.
 
-### Step 3 — Read existing §8 section for the model
+### Step 3 — Read existing results section for the model
 
-Read `docs/bench-runbook.md` to find any existing section. If none exists, create it.
+Read `docs/bench-results.md` to find any existing section. If none exists, create it.
 
-### Step 4 — Update bench-runbook.md §8
+### Step 4 — Update bench-results.md
 
 **Format for each model's results:**
 
@@ -148,7 +148,7 @@ Read `docs/bench-runbook.md` to find any existing section. If none exists, creat
 Under `## [Unreleased]` → `### Added` or `### Changed`:
 ```markdown
 - `bench-models/results/<model-key>.jsonl`: bench results record (pp=<pp>, tg=<tg> t/s)
-- `docs/bench-runbook.md`: §8 results for <model-key>
+- `docs/bench-results.md`: results section for <model-key>
 ```
 
 ### Gotcha checklist to document

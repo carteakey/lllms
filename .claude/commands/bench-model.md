@@ -115,5 +115,5 @@ STRATEGY=fused-muge ./bench-models/bench-ik-llama-cpp-<model-key>-strategies.sh
    cat bench-models/results/<model-key>.jsonl | \
      python3 -c "import sys,json; [print(f'{r[\"ts\"][:10]}  {r.get(\"strategy\",\"?\"):20}  pp={r.get(\"pp_ts\",\"?\")}  tg={r.get(\"tg_ts\",\"?\")}') for r in map(json.loads, sys.stdin)]"
    ```
-2. Run `/add-bench-result <model-key>` to update the human-readable table in `docs/bench-runbook.md`
+2. Run `/add-bench-result <model-key>` to update the human-readable results in `docs/bench-results.md`
 3. Run `/optimize-model <model-key>` to derive the production llama-swap.yaml config
