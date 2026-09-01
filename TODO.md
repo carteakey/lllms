@@ -1,62 +1,16 @@
 # TODO
 
-## 🟡 High Priority
+All intentionally committed TODO items were reconciled into the single Linear
+`L3MS` project and its `Operations backlog completion — 2026-08-10` milestone
+on 2026-08-10. See CAR-140 through CAR-146 for the seven grouped issues and
+their acceptance criteria. Linear is the source of truth for committed work;
+this file is reserved for ideas and research that have not been intentionally
+committed.
 
-- **Bench-vs-serve flag drift**: bench scripts carry their own copies of
-  `-ngl` / `--override-tensor`. Consider a later pass where bench scripts
-  source shared args from `llama-swap.yaml` (yq) so tuning stays in sync
-- **Benchmark result browser**: UI to view and compare results from
-  `bench-results/`; parse timing/throughput from existing `.md` files and
-  display in a sortable table — closes the run → bench → compare workflow loop
-- **Run presets**: Named arg bundles per script (e.g. "fast", "low-vram",
-  "debug") stored alongside the script; a preset selector next to
-  `#run_extra_args` injects the bundle at launch time
-- **Script templates**: "New script from template" action in the palette or Run
-  tab; pick a base model family, fill in a few fields, get a ready-to-run `.sh`
-  — removes the copy-and-edit friction for new models
-- **Settings tab** *(currently placeholder)*: minimal config surface —
-  default port, base models dir, binary path, theme; persisted to
-  `~/.l3ms/settings.json`
-- **Fix bare `except Exception:` patterns**: 20+ instances across `app.py`
-  silently swallow errors; replace with specific exception types and route
-  messages to the relevant `activity_log` / `RichLog`
+## Speculative / research
 
-## 🟡 Medium Priority
-
-- **Implement script lint checks**: run `shellcheck` (if available) on save;
-  show warnings inline in the script editor status line before allowing run
-- **Fix datetime timezone consistency**: mix of naive `datetime.now()` and
-  `datetime.now(timezone.utc)` across the codebase — standardise on UTC-aware
-- **Add pagination**: large model lists (>100 entries) cause `DataTable`
-  rendering lag; add virtual scrolling or page controls to the Download tab
-- **Kill detected server action**: `action_quit` only cleans up processes
-  started by the current session; add a "Kill running server" action to the
-  Chat tab's Detect flow for servers started externally
-- **Run telemetry improvements**: VRAM per process, disk I/O, network I/O
-  alongside the existing CPU/RAM resource loop
-- **Download progress estimates**: show ETA / remaining size based on
-  `huggingface_hub` progress callbacks
-
-## 🟢 Low Priority / Enhancements
-
-- **Profile import/export**: save/load full homelab configs (models + scripts +
-  settings) as a single portable bundle
-- **Chat system prompt library**: save/load named system prompts; picker in
-  the Chat params row
-- **Bench result diffing**: side-by-side comparison of two bench runs in the
-  result browser
-
-## Bench / Hardware
-
-- **Catch slow-tg root cause**: run `sudo bash preflight-check.sh` on the next *fast* boot and save output; do the same on a *slow* boot; diff the two — something will differ. All obvious culprits (governor, EPP, freq, PCIe, GPU clocks, RAM speed, THP, C-states) have been ruled out on a single slow boot.
-
-## Repo / Platform
-
-- Rename GitHub repository to `l3ms` (external GitHub action required)
-
-## Long-term
-
-- Consider WebAssembly port for browser-based access
+There are no uncommitted ideas at this time. Add future possibilities here
+only until they are explicitly chosen and promoted to Linear.
 
 ## ✅ Done
 

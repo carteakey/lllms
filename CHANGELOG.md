@@ -33,6 +33,14 @@ verification matrix.
 - Benchmarked Qwen3.8-Flash-Next MTP via llama.cpp PR #27836 (+ detached-head patch): sidecar Q4_K_M draft head (requantized from Q8_0) fits 12 GB VRAM at 32k ctx. Ungated dn=2 is net-negative (prose −12..−22%); with `--spec-draft-p-min 0.7` gating code tg +15..26% at prose parity, acceptance 0.81–0.97. Wired as a separate `qwen38-flash-next-mtp` router entry (32k ctx cap) plus `bench-models/bench-llama-qwen38-flash-next-mtp.sh` A/B harness.
 - Benchmarked Gemma 4 26B QAT (UD-Q4_K_XL) with external MTP drafter: tg 69.1 t/s (vs 45.03 no-MTP fit, ~1.5x). Placement derived via llama-fit-params (fit with external draft loops in 571d0d5). Logged in `bench-models/logs/results/gemma-4-26b-qat-mtp.jsonl`; runbook §8 updated.
 - Benchmarked Qwen3.6-35B-A3B UD-Q6_K with self-drafted MTP (`--spec-type draft-mtp --spec-draft-p-min 0.75 --spec-draft-n-max 2`): tg 51.3 t/s (vs 26.92 no-MTP fit, ~1.9x). Logged in `bench-models/logs/results/qwen3-6-mtp-q6.jsonl`; runbook §8 updated.
+- Added a bounded benchmark result browser with JSONL/Markdown parsing,
+  deterministic sorting, and `--compare-results` metric diffs.
+- Added persisted operator settings, atomic non-secret profile import/export,
+  and a bounded Chat system-prompt library with a TUI picker.
+- Added paged model inventories, Hugging Face progress/ETA feedback, optional
+  shellcheck-on-save diagnostics, serving/bench flag drift checks, and a safe
+  explicit action to stop a freshly detected external llama-server.
+- Added disk-free and network byte counters to runtime telemetry.
 - Added `maintenance/run-l3ms-kpc.sh` to launch the deployed Rust binary with
   the existing KPC llama-swap service and downloader environment.
 - Added the initial Rust `0.7.0` application: a Clap launcher, authenticated

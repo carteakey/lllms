@@ -53,7 +53,7 @@ def _report_download_backend() -> None:
         xet_ver = _meta.version("hf_xet")
         print(f"  download backend: hf_xet {xet_ver} (Xet storage, chunk dedup)")
         return
-    except Exception:
+    except (_meta.PackageNotFoundError, ValueError):
         pass
     # Warn if someone still has HF_HUB_ENABLE_HF_TRANSFER set in environment
     if os.environ.get("HF_HUB_ENABLE_HF_TRANSFER") == "1":
@@ -112,7 +112,7 @@ def download_model(
         )
         print(f"✓ Successfully downloaded to: {downloaded_path}")
         return downloaded_path
-    except Exception as hub_err:
+    except (OSError, RuntimeError, ValueError) as hub_err:
         local = Path(local_dir)
         if local.exists() and any(f for f in local.iterdir() if f.is_file()):
             print(f"  Hub unreachable, keeping existing files in {local_dir}")
@@ -214,7 +214,7 @@ def estimate_model(
             force_download=force_download,
             dry_run=True,
         )
-    except Exception as error:
+    except (OSError, RuntimeError, ValueError) as error:
         raise EstimateError(f"dry-run failed for {repo_id}: {error}") from error
 
     if isinstance(results, (str, bytes)):
@@ -398,7 +398,7 @@ def emit_estimate_json(args: argparse.Namespace, base_models_dir: str) -> int:
                     output = json.dumps(estimate, separators=(",", ":"))
         finally:
             logging.disable(previous_logging_disable)
-    except Exception as error:
+    except (OSError, RuntimeError, TypeError, ValueError) as error:
         print(f"estimate failed: {_bounded_error(error)}", file=sys.stderr)
         return 1
 
@@ -511,7 +511,7 @@ Examples:
                     ),
                     update_only=args.update,
                 )
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 print(f"Failed to download {repo_id}: {e}")
                 continue
 

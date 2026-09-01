@@ -8,7 +8,7 @@ import re
 import shlex
 import shutil
 import struct
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -172,7 +172,7 @@ def _format_parameter_count(param_count: Optional[int]) -> str:
 
 
 def _format_mtime(timestamp: float) -> str:
-    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M")
+    return datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime("%Y-%m-%d %H:%MZ")
 
 
 class ShortcutStrip(Static):
@@ -578,7 +578,7 @@ class DownloadPanel(Static):
                     continue
                 total += size
             return total if total > 0 else None
-        except Exception:
+        except (ImportError, OSError, TypeError, ValueError, RuntimeError):
             return None
 
     def set_status(self, message: str) -> None:
@@ -1128,7 +1128,7 @@ class RunPanel(Static):
     async def _load_swap_models(self) -> None:
         try:
             models = await llama_swap.list_models()
-        except Exception as exc:
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             self.swap_models = []
             self.set_status(
                 f"llama-swap unreachable at {llama_swap.DEFAULT_BASE_URL}: {exc}. "
@@ -1344,7 +1344,7 @@ class RunPanel(Static):
             self.post_message(
                 RunPanel.JobStarted(
                     model_id,
-                    datetime.now().strftime("%H:%M:%S"),
+                    datetime.now(timezone.utc).strftime("%H:%M:%SZ"),
                     self.mode,
                     # for run-mode, script_path carries the model ID so Jobs-tab retries work
                     script_path=model_id,
@@ -1383,7 +1383,7 @@ class RunPanel(Static):
         self.post_message(
             RunPanel.JobStarted(
                 model_name,
-                datetime.now().strftime("%H:%M:%S"),
+                datetime.now(timezone.utc).strftime("%H:%M:%SZ"),
                 self.mode,
                 script_path=str(self.selected_script) if self.selected_script else "",
             )
@@ -1395,7 +1395,7 @@ class RunPanel(Static):
         self.set_status(f"POST {llama_swap.DEFAULT_BASE_URL}/models/load  model={model_id}")
         try:
             result = await llama_swap.load_model(model_id)
-        except Exception as exc:
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             self.set_status(f"load failed: {exc}")
             self.set_runtime_state("Current: idle", "Resources: load failed")
             self.post_message(RunPanel.JobFinished(model_id, "0s", 1, self.mode))
@@ -1421,7 +1421,7 @@ class RunPanel(Static):
         self.set_status(f"POST {llama_swap.DEFAULT_BASE_URL}/models/unload  model={model_id}")
         try:
             result = await llama_swap.unload_model(model_id)
-        except Exception as exc:
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             self.set_status(f"unload failed: {exc}")
             return
         self.set_status(result)
@@ -1442,7 +1442,7 @@ class RunPanel(Static):
             try:
                 snapshot = await _resource_snapshot_for_ppid(swap_pid)
                 self.query_one("#run_resources", Static).update(snapshot)
-            except Exception:
+            except (LookupError, OSError, RuntimeError, ValueError):
                 pass
             await asyncio.sleep(2)
 
@@ -2048,7 +2048,7 @@ async def _find_llama_swap_pid() -> Optional[int]:
             stderr=asyncio.subprocess.DEVNULL,
         )
         out, _ = await proc.communicate()
-    except Exception:
+    except (OSError, RuntimeError, asyncio.TimeoutError):
         return None
     for line in out.decode("utf-8", errors="replace").splitlines():
         line = line.strip()
@@ -2238,7 +2238,7 @@ class ChatPanel(Static):
                         for m in data.get("data", [])
                         if isinstance(m, dict) and m.get("id")
                     ]
-        except Exception:
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError):
             pass
         return []
 
@@ -2411,10 +2411,10 @@ class ChatPanel(Static):
             return
         chats_dir = Path.home() / ".l3ms" / "chats"
         chats_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         # Save human-readable markdown
         md_path = chats_dir / f"{timestamp}.md"
-        lines = [f"# Chat - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"]
+        lines = [f"# Chat - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%SZ')}\n"]
         for msg in self._history:
             role = "You" if msg["role"] == "user" else "Assistant"
             lines.append(f"\n## {role}\n{msg['content']}\n")
@@ -2821,7 +2821,7 @@ class JobsPanel(Static):
         running = self._running_job_index() is not None
         try:
             self.query_one("#jobs_stop", Button).disabled = not running
-        except Exception:
+        except (LookupError, RuntimeError):
             pass
         # Retry is available when a finished job with a known script_path is selected
         can_retry = False
@@ -2830,7 +2830,7 @@ class JobsPanel(Static):
             can_retry = bool(job.get("script_path")) and job.get("exit") != "…"
         try:
             self.query_one("#jobs_retry", Button).disabled = not can_retry
-        except Exception:
+        except (LookupError, RuntimeError):
             pass
 
     def _refresh_table(self) -> None:
@@ -2853,7 +2853,7 @@ class JobsPanel(Static):
         if self._selected_idx is not None and self._selected_idx < len(self._jobs):
             try:
                 table.move_cursor(row=self._selected_idx)
-            except Exception:
+            except (IndexError, LookupError, RuntimeError, ValueError):
                 pass
 
     @on(DataTable.RowHighlighted, "#jobs_table")
@@ -3002,7 +3002,7 @@ class WorkbenchPanel(Static):
     async def _load_models(self) -> None:
         try:
             self.models = await llama_swap.list_models()
-        except Exception as exc:
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             self.models = []
             self.filtered_models = []
             self.selected_model_id = None
@@ -3090,7 +3090,7 @@ class WorkbenchPanel(Static):
         self.write_log(f"Unloading {model.id} via llama-swap")
         try:
             result = await llama_swap.unload_model(model.id)
-        except Exception as exc:
+        except (httpx.HTTPError, OSError, RuntimeError, ValueError) as exc:
             self.write_log(f"Unload failed: {exc}")
             return
         self.write_log(result)
@@ -3102,7 +3102,7 @@ class WorkbenchPanel(Static):
             run_panel.mode = "bench"
             try:
                 run_panel.query_one("#run_mode", Select).value = "bench"
-            except Exception:
+            except (LookupError, RuntimeError):
                 pass
             run_panel.refresh_script_inventory()
         self.app.call_later(self.app.dispatch_nav, "nav_run")
@@ -3304,7 +3304,7 @@ class ChatHistoryScreen(ModalScreen):
                 data = json.loads(path.read_text(encoding="utf-8"))
                 msg_count = str(len(data.get("history", [])))
                 saved = data.get("saved", path.stem)
-            except Exception:
+            except (OSError, json.JSONDecodeError, TypeError, ValueError, AttributeError):
                 msg_count = "?"
                 saved = path.stem
             table.add_row(saved, msg_count, key=str(path))
@@ -3548,7 +3548,7 @@ class L3MSApp(App[None]):
             return
         try:
             bar = self.screen.query_one("#workbench_bar", Static)
-        except Exception:
+        except (LookupError, RuntimeError):
             return
         active = self.active_tab() or "workbench"
         bar.update(WORKBENCH_HINTS.get(active, WORKBENCH_HINTS["workbench"]))
@@ -3610,7 +3610,7 @@ class L3MSApp(App[None]):
             return
         try:
             tabs = self.screen.query_one("#main_tabs", TabbedContent)
-        except Exception:
+        except (LookupError, RuntimeError):
             return
         tabs.active = tab_id
         self.refresh_workbench_bar()
@@ -3620,7 +3620,7 @@ class L3MSApp(App[None]):
             return None
         try:
             return self.screen.query_one("#run_panel", RunPanel)
-        except Exception:
+        except (LookupError, RuntimeError):
             return None
 
     def active_tab(self) -> Optional[str]:
@@ -3628,7 +3628,7 @@ class L3MSApp(App[None]):
             return None
         try:
             tabs = self.screen.query_one("#main_tabs", TabbedContent)
-        except Exception:
+        except (LookupError, RuntimeError):
             return None
         return str(tabs.active) if tabs.active else None
 
@@ -3637,7 +3637,7 @@ class L3MSApp(App[None]):
             return None
         try:
             return self.screen.query_one("#download_panel", DownloadPanel)
-        except Exception:
+        except (LookupError, RuntimeError):
             return None
 
     def get_chat_panel(self) -> Optional[ChatPanel]:
@@ -3645,7 +3645,7 @@ class L3MSApp(App[None]):
             return None
         try:
             return self.screen.query_one("#chat_panel", ChatPanel)
-        except Exception:
+        except (LookupError, RuntimeError):
             return None
 
     def get_maintenance_panel(self) -> Optional[MaintenancePanel]:
@@ -3653,7 +3653,7 @@ class L3MSApp(App[None]):
             return None
         try:
             return self.screen.query_one("#maintenance_panel", MaintenancePanel)
-        except Exception:
+        except (LookupError, RuntimeError):
             return None
 
     def get_model_browser_panel(self) -> Optional[ModelBrowserPanel]:
@@ -3661,7 +3661,7 @@ class L3MSApp(App[None]):
             return None
         try:
             return self.screen.query_one("#model_browser_panel", ModelBrowserPanel)
-        except Exception:
+        except (LookupError, RuntimeError):
             return None
 
     def get_jobs_panel(self) -> Optional[JobsPanel]:
@@ -3669,7 +3669,7 @@ class L3MSApp(App[None]):
             return None
         try:
             return self.screen.query_one("#jobs_panel", JobsPanel)
-        except Exception:
+        except (LookupError, RuntimeError):
             return None
 
     def get_workbench_panel(self) -> Optional[WorkbenchPanel]:
@@ -3677,7 +3677,7 @@ class L3MSApp(App[None]):
             return None
         try:
             return self.screen.query_one("#workbench_panel", WorkbenchPanel)
-        except Exception:
+        except (LookupError, RuntimeError):
             return None
 
     def action_nav_download(self) -> None:
@@ -4062,7 +4062,7 @@ class L3MSApp(App[None]):
         run_panel.mode = "run"
         try:
             run_panel.query_one("#run_mode", Select).value = "run"
-        except Exception:
+        except (LookupError, RuntimeError):
             pass
         run_panel.selected_model_id = event.model_id
         await run_panel.run_script()
