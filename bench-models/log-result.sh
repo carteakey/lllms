@@ -89,7 +89,7 @@ if results["pp_ts"] is None:
                 results["tg_tokens"] = int(test.split()[1]) if len(test.split()) > 1 else None
                 results["tg_ts"]  = ts
                 results["tg_std"] = std
-        except Exception:
+        except (IndexError, KeyError, TypeError, ValueError):
             pass
 
 print(json.dumps(results))

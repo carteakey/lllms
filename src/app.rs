@@ -18,7 +18,10 @@ use std::{
 use std::os::unix::process::CommandExt;
 
 use crate::{
-    chat::{detect_chat_server, ChatClient, ChatCompletion, ChatRequest},
+    chat::{
+        detect_chat_server, detected_servers, terminate_detected_server, ChatClient,
+        ChatCompletion, ChatRequest,
+    },
     chat_history::ChatHistory,
     commands::{command, search_all_commands, visible_commands, CommandContext, CommandId},
     config_store::{load_config, DownloadConfig},
@@ -31,7 +34,9 @@ use crate::{
     gguf::{self, GgufFile},
     job_history::JobHistory,
     llama_swap::{SwapClient, SwapModel, DEFAULT_BASE_URL},
+    prompt_store::{list_prompts, load_prompt, prompts_path},
     script_editor::ScriptEditorState,
+    script_lint::lint_shell_script,
     script_store::{collect_scripts_in, command_for_script, pretty_name, ScriptMode},
     state_store::{self, ChatSession, ChatSessionList, ChatSessionSummary, SavedChatSession},
     telemetry::{find_process_named, snapshot_descendants, snapshot_process_group},
@@ -72,8 +77,17 @@ const EVENTS_PER_TICK: usize = 128;
 const MAX_PROCESS_LINE_BYTES: usize = 16 * 1024;
 const MAX_CHAT_PREVIEW_BYTES: usize = 64 * 1024;
 const TELEMETRY_INTERVAL: Duration = Duration::from_secs(1);
+const MODEL_PAGE_SIZE: usize = 50;
+const DOWNLOAD_PAGE_SIZE: usize = 50;
 const DOWNLOAD_ESTIMATE_TIMEOUT: Duration = Duration::from_secs(180);
 const DOWNLOAD_DISK_TIMEOUT: Duration = Duration::from_secs(3);
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct DownloadProgressSnapshot {
+    downloaded_bytes: u64,
+    total_bytes: u64,
+    speed_bytes_per_second: Option<f64>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
@@ -270,6 +284,7 @@ struct App {
 
     models: Vec<SwapModel>,
     model_filter: String,
+    model_page: usize,
     model_state: TableState,
     loading_models: bool,
     model_action_pending: bool,
@@ -302,6 +317,9 @@ struct App {
     chat_sessions_state: TableState,
     show_chat_sessions: bool,
     chat_session_pending: bool,
+    chat_prompts: Vec<String>,
+    chat_prompts_state: ListState,
+    show_chat_prompts: bool,
 
     browser_path: String,
     browser_filter: String,
@@ -313,6 +331,7 @@ struct App {
     browser_scanning: bool,
 
     download: DownloadUiState,
+    download_page: usize,
     download_state: TableState,
     download_log: VecDeque<String>,
     download_load_error: Option<String>,
@@ -320,6 +339,9 @@ struct App {
     download_disk_request_id: u64,
     download_preflight_request_id: u64,
     download_preflight_pending: Option<PendingDownloadPreflight>,
+    download_estimate_total: Option<u64>,
+    download_progress: Option<DownloadProgressSnapshot>,
+    download_started_at: Option<Instant>,
     download_reload_armed: bool,
     download_restore_armed: bool,
 
@@ -404,6 +426,7 @@ impl App {
             receiver,
             models: Vec::new(),
             model_filter: String::new(),
+            model_page: 0,
             model_state: TableState::default().with_selected(Some(0)),
             loading_models: false,
             model_action_pending: false,
@@ -435,6 +458,9 @@ impl App {
             chat_sessions_state: TableState::default().with_selected(Some(0)),
             show_chat_sessions: false,
             chat_session_pending: false,
+            chat_prompts: Vec::new(),
+            chat_prompts_state: ListState::default().with_selected(Some(0)),
+            show_chat_prompts: false,
             browser_path,
             browser_filter: String::new(),
             browser_recursive: true,
@@ -444,6 +470,7 @@ impl App {
             browser_state: TableState::default().with_selected(Some(0)),
             browser_scanning: false,
             download,
+            download_page: 0,
             download_state: TableState::default().with_selected(Some(0)),
             download_log: VecDeque::new(),
             download_load_error: config_warning.clone(),
@@ -451,6 +478,9 @@ impl App {
             download_disk_request_id: 0,
             download_preflight_request_id: 0,
             download_preflight_pending: None,
+            download_estimate_total: None,
+            download_progress: None,
+            download_started_at: None,
             download_reload_armed: false,
             download_restore_armed: false,
             maintenance_scripts: Vec::new(),
@@ -606,6 +636,27 @@ impl App {
         });
     }
 
+    fn kill_detected_chat_server(&mut self) {
+        let servers = detected_servers();
+        let Some(server) = servers.first() else {
+            self.status = "No externally-started llama-server was detected".into();
+            return;
+        };
+        let pid = server.pid;
+        match terminate_detected_server(pid) {
+            Ok(()) => {
+                self.status = format!("Termination requested for detected llama-server PID {pid}");
+                self.push_log(format!("Stopped externally-started llama-server PID {pid}"));
+                self.chat_client = None;
+                self.chat_models.clear();
+            }
+            Err(error) => {
+                self.status = format!("Could not stop detected server PID {pid}");
+                self.push_log(format!("{error:#}"));
+            }
+        }
+    }
+
     fn refresh_chat_models(&mut self) {
         let Some(client) = self.chat_client.clone() else {
             self.start_chat_connect();
@@ -659,6 +710,9 @@ impl App {
                     match result {
                         Ok(models) => {
                             self.models = models;
+                            self.model_page = self
+                                .model_page
+                                .min(self.model_page_count().saturating_sub(1));
                             if self.loaded_model_id.is_none() {
                                 self.loaded_model_id = self
                                     .models
@@ -877,6 +931,7 @@ impl App {
                         .map(|job| job.kind == "download");
                     if let Some(is_download) = is_download {
                         if is_download {
+                            self.update_download_progress(&line);
                             self.push_download_log(line.clone());
                         }
                         self.push_log(line);
@@ -892,6 +947,7 @@ impl App {
                     if is_download {
                         self.push_download_log(format!("Download exited with code {exit_code}"));
                         self.refresh_download_disk_space();
+                        self.download_started_at = None;
                     }
                     if self
                         .running_process
@@ -1063,6 +1119,10 @@ impl App {
             self.handle_chat_sessions_key(key);
             return Ok(());
         }
+        if self.show_chat_prompts {
+            self.handle_chat_prompts_key(key);
+            return Ok(());
+        }
         if self.script_versions_target.is_some() {
             self.handle_script_versions_key(key);
             return Ok(());
@@ -1145,6 +1205,7 @@ impl App {
         self.script_input_target = None;
         self.script_versions_target = None;
         self.show_chat_sessions = false;
+        self.show_chat_prompts = false;
         self.show_help = false;
         if self.tab == Tab::Chat {
             self.input_mode = InputMode::ChatMessage;
@@ -1328,6 +1389,20 @@ impl App {
         }
     }
 
+    fn handle_chat_prompts_key(&mut self, key: KeyEvent) {
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('l') => self.show_chat_prompts = false,
+            KeyCode::Up | KeyCode::Char('k') => {
+                select_previous_list(&mut self.chat_prompts_state, self.chat_prompts.len())
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                select_next_list(&mut self.chat_prompts_state, self.chat_prompts.len())
+            }
+            KeyCode::Enter => self.load_selected_chat_prompt(),
+            _ => {}
+        }
+    }
+
     fn handle_input_key(&mut self, key: KeyEvent) -> Result<()> {
         match key.code {
             KeyCode::Esc => {
@@ -1351,6 +1426,7 @@ impl App {
             KeyCode::Backspace => match self.input_mode {
                 InputMode::ModelFilter => {
                     self.model_filter.pop();
+                    self.model_page = 0;
                     self.model_state.select(Some(0));
                 }
                 InputMode::BenchFilter => {
@@ -1381,6 +1457,7 @@ impl App {
                 match self.input_mode {
                     InputMode::ModelFilter => {
                         self.model_filter.push(character);
+                        self.model_page = 0;
                         self.model_state.select(Some(0));
                     }
                     InputMode::BenchFilter => {
@@ -1698,6 +1775,10 @@ impl App {
         if self.script_input_target == Some(target) && !self.sync_script_buffer(target) {
             return;
         }
+        let saved_path = self
+            .script_editor(target)
+            .selected_path()
+            .map(PathBuf::from);
         match self.script_editor_mut(target).save("manual-save") {
             Ok(outcome) => {
                 self.script_reload_armed = None;
@@ -1713,6 +1794,29 @@ impl App {
                         "Saved {} script with snapshot · {versions} version(s)",
                         target.label().to_ascii_lowercase()
                     );
+                }
+                if let Some(path) = saved_path {
+                    match lint_shell_script(&path) {
+                        Ok(report) if report.available && !report.diagnostics.is_empty() => {
+                            self.push_log(format!("{}: {}", path.display(), report.summary()));
+                            for diagnostic in report.diagnostics.iter().take(8) {
+                                self.push_log(format!(
+                                    "  {}:{}:{} SC{} {:?}: {}",
+                                    path.display(),
+                                    diagnostic.line,
+                                    diagnostic.column,
+                                    diagnostic.code,
+                                    diagnostic.level,
+                                    diagnostic.message
+                                ));
+                            }
+                        }
+                        Ok(_) => {}
+                        Err(error) => self.push_log(format!(
+                            "shellcheck could not inspect {}: {error:#}",
+                            path.display()
+                        )),
+                    }
                 }
             }
             Err(error) => {
@@ -1987,6 +2091,8 @@ impl App {
             ChatRefreshModels => self.refresh_chat_models(),
             ChatConnect => self.start_chat_connect(),
             ChatDetect => self.start_chat_detect(),
+            ChatKillDetected => self.kill_detected_chat_server(),
+            ChatPrompts => self.open_chat_prompts(),
             ChatClear => {
                 self.cancel_chat_request();
                 self.chat_history.clear();
@@ -2115,6 +2221,8 @@ impl App {
                 select_next_table(&mut self.model_state, visible_count)
             }
             KeyCode::Char('/') => self.input_mode = InputMode::ModelFilter,
+            KeyCode::PageUp | KeyCode::Char('[') => self.previous_model_page(),
+            KeyCode::PageDown | KeyCode::Char(']') => self.next_model_page(),
             KeyCode::Char('r') => self.refresh_models(),
             KeyCode::Enter | KeyCode::Char('l') => self.model_action(true),
             KeyCode::Char('s') => self.model_action(false),
@@ -2167,6 +2275,8 @@ impl App {
             KeyCode::Down | KeyCode::Char('j') => self.select_next_chat_model(),
             KeyCode::Char('o') => self.open_chat_sessions(),
             KeyCode::Char('p') => self.input_mode = InputMode::ChatSystemPrompt,
+            KeyCode::Char('l') => self.open_chat_prompts(),
+            KeyCode::Char('K') => self.kill_detected_chat_server(),
             KeyCode::Char('t') => {
                 self.chat_thinking = !self.chat_thinking;
                 self.status = format!(
@@ -2232,6 +2342,8 @@ impl App {
         match key.code {
             KeyCode::Up | KeyCode::Char('k') => self.select_download_previous(),
             KeyCode::Down | KeyCode::Char('j') => self.select_download_next(),
+            KeyCode::PageUp | KeyCode::Char('[') => self.previous_download_page(),
+            KeyCode::PageDown | KeyCode::Char(']') => self.next_download_page(),
             KeyCode::Tab => {
                 self.download.focus_next();
                 self.describe_download_focus();
@@ -2345,7 +2457,16 @@ impl App {
     }
 
     fn sync_download_table_state(&mut self) {
-        self.download_state.select(self.download.selected_index());
+        let Some(index) = self.download.selected_index() else {
+            self.download_page = 0;
+            self.download_state.select(None);
+            return;
+        };
+        self.download_page =
+            (index / DOWNLOAD_PAGE_SIZE).min(self.download_page_count().saturating_sub(1));
+        self.download_state.select(Some(
+            index.saturating_sub(self.download_page * DOWNLOAD_PAGE_SIZE),
+        ));
     }
 
     fn select_download_previous(&mut self) {
@@ -2358,6 +2479,29 @@ impl App {
         self.download.select_next();
         self.sync_download_table_state();
         self.describe_download_selection();
+    }
+
+    fn download_page_count(&self) -> usize {
+        self.download
+            .models()
+            .len()
+            .div_ceil(DOWNLOAD_PAGE_SIZE)
+            .max(1)
+    }
+
+    fn previous_download_page(&mut self) {
+        self.download_page = self.download_page.saturating_sub(1);
+        let index = self.download_page * DOWNLOAD_PAGE_SIZE;
+        self.download.select(index);
+        self.sync_download_table_state();
+    }
+
+    fn next_download_page(&mut self) {
+        self.download_page =
+            (self.download_page + 1).min(self.download_page_count().saturating_sub(1));
+        let index = self.download_page * DOWNLOAD_PAGE_SIZE;
+        self.download.select(index);
+        self.sync_download_table_state();
     }
 
     fn describe_download_selection(&mut self) {
@@ -2711,6 +2855,8 @@ impl App {
             |disk_space| format_disk_space(target, disk_space),
         );
         let totals = &preflight.estimate.totals;
+        self.download_estimate_total = (totals.download_bytes > 0).then_some(totals.download_bytes);
+        self.download_progress = None;
         self.push_download_log(format!(
             "Estimate: {} to download / {} matched · {} file(s) · {} cached · {} model(s)",
             format_bytes(totals.download_bytes),
@@ -2722,6 +2868,49 @@ impl App {
         if let Some(warning) = &preflight.warning {
             self.push_download_log(format!("Preflight warning: {warning}"));
         }
+    }
+
+    fn update_download_progress(&mut self, line: &str) {
+        let Some(mut progress) = parse_download_progress_line(line) else {
+            return;
+        };
+        if let Some(total) = self.download_estimate_total.filter(|total| *total > 0) {
+            progress.total_bytes = total;
+            if progress.downloaded_bytes <= 100 {
+                progress.downloaded_bytes = total.saturating_mul(progress.downloaded_bytes) / 100;
+            }
+        }
+        self.download_progress = Some(progress);
+    }
+
+    fn download_eta_label(&self) -> Option<String> {
+        let progress = self.download_progress?;
+        let total = self
+            .download_estimate_total
+            .filter(|total| *total > 0)
+            .unwrap_or(progress.total_bytes);
+        let downloaded = progress.downloaded_bytes.min(total);
+        let remaining = total.saturating_sub(downloaded);
+        if remaining == 0 {
+            return Some("ETA done".into());
+        }
+        let speed = progress
+            .speed_bytes_per_second
+            .filter(|speed| *speed > 0.0)
+            .or_else(|| {
+                self.download_started_at.and_then(|started| {
+                    let seconds = started.elapsed().as_secs_f64();
+                    (seconds > 0.0).then(|| downloaded as f64 / seconds)
+                })
+            })?;
+        let seconds = remaining as f64 / speed;
+        if !seconds.is_finite() || seconds < 0.0 {
+            return None;
+        }
+        Some(format!(
+            "ETA {}",
+            format_duration(Duration::from_secs_f64(seconds))
+        ))
     }
 
     fn handle_jobs_key(&mut self, key: KeyEvent) {
@@ -2759,7 +2948,7 @@ impl App {
         }
     }
 
-    fn visible_models(&self) -> Vec<&SwapModel> {
+    fn filtered_models(&self) -> Vec<&SwapModel> {
         let filter = self.model_filter.to_ascii_lowercase();
         self.models
             .iter()
@@ -2767,8 +2956,35 @@ impl App {
             .collect()
     }
 
+    fn visible_models(&self) -> Vec<&SwapModel> {
+        let filtered = self.filtered_models();
+        let start = self.model_page.saturating_mul(MODEL_PAGE_SIZE);
+        filtered
+            .into_iter()
+            .skip(start)
+            .take(MODEL_PAGE_SIZE)
+            .collect()
+    }
+
     fn visible_model_count(&self) -> usize {
         self.visible_models().len()
+    }
+
+    fn model_page_count(&self) -> usize {
+        self.filtered_models()
+            .len()
+            .div_ceil(MODEL_PAGE_SIZE)
+            .max(1)
+    }
+
+    fn previous_model_page(&mut self) {
+        self.model_page = self.model_page.saturating_sub(1);
+        self.model_state.select(Some(0));
+    }
+
+    fn next_model_page(&mut self) {
+        self.model_page = (self.model_page + 1).min(self.model_page_count().saturating_sub(1));
+        self.model_state.select(Some(0));
     }
 
     fn selected_model(&self) -> Option<SwapModel> {
@@ -3086,6 +3302,50 @@ impl App {
         });
     }
 
+    fn open_chat_prompts(&mut self) {
+        match list_prompts(&self.data_root) {
+            Ok(prompts) if prompts.is_empty() => {
+                self.show_chat_prompts = false;
+                self.status = format!(
+                    "No saved prompts; add Markdown files under {}",
+                    prompts_path(&self.data_root).display()
+                );
+            }
+            Ok(prompts) => {
+                self.chat_prompts = prompts;
+                self.chat_prompts_state.select(Some(0));
+                self.show_chat_prompts = true;
+                self.status = "Select a saved system prompt · Enter loads · Esc closes".into();
+            }
+            Err(error) => {
+                self.show_chat_prompts = false;
+                self.status = "Could not list saved prompts".into();
+                self.push_log(format!("{error:#}"));
+            }
+        }
+    }
+
+    fn load_selected_chat_prompt(&mut self) {
+        let Some(index) = self.chat_prompts_state.selected() else {
+            return;
+        };
+        let Some(name) = self.chat_prompts.get(index).cloned() else {
+            return;
+        };
+        match load_prompt(&self.data_root, &name) {
+            Ok(prompt) => {
+                self.chat_system_prompt = prompt.content;
+                self.show_chat_prompts = false;
+                self.input_mode = InputMode::ChatSystemPrompt;
+                self.status = format!("Loaded system prompt {name}; edit or press Enter to keep");
+            }
+            Err(error) => {
+                self.status = format!("Could not load system prompt {name}");
+                self.push_log(format!("{error:#}"));
+            }
+        }
+    }
+
     fn run_selected_bench(&mut self) {
         let Some(path) = self.selected_script_path(ScriptEditorTarget::Bench) else {
             self.status = if self.bench_scripts.is_empty() {
@@ -3295,6 +3555,10 @@ impl App {
             process_group,
             child: Arc::clone(&child),
         });
+        if kind == "download" {
+            self.download_started_at = Some(Instant::now());
+            self.download_progress = None;
+        }
         self.jobs_state.select(Some(0));
         self.persist_jobs("process start");
         self.status = format!("Running {name}");
@@ -3551,6 +3815,8 @@ impl App {
             self.draw_help(frame);
         } else if self.show_chat_sessions {
             self.draw_chat_sessions(frame);
+        } else if self.show_chat_prompts {
+            self.draw_chat_prompts(frame);
         } else if self.script_versions_target.is_some() {
             self.draw_script_versions(frame);
         }
@@ -3788,6 +4054,11 @@ impl App {
         } else {
             format!(" · filter: {}", self.model_filter)
         };
+        let page = format!(
+            " · page {}/{} · [/] page",
+            self.model_page + 1,
+            self.model_page_count()
+        );
         let rows = self
             .visible_models()
             .into_iter()
@@ -3809,7 +4080,7 @@ impl App {
         )
         .block(
             Block::default()
-                .title(format!("{title}{filter}"))
+                .title(format!("{title}{filter}{page}"))
                 .borders(Borders::ALL),
         )
         .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
@@ -3848,7 +4119,7 @@ impl App {
             ))
             .block(
                 Block::default()
-                    .title("Chat · e endpoint · Ctrl+G connect · Ctrl+B detect · ↑/↓ model")
+                    .title("Chat · e endpoint · Ctrl+G connect · Ctrl+B detect · K stop detected · ↑/↓ model")
                     .borders(Borders::ALL),
             ),
             chunks[0],
@@ -4149,11 +4420,14 @@ impl App {
             (Some(sections[1]), None)
         };
 
+        let page_start = self.download_page.saturating_mul(DOWNLOAD_PAGE_SIZE);
         let rows = self
             .download
             .models()
             .iter()
             .enumerate()
+            .skip(page_start)
+            .take(DOWNLOAD_PAGE_SIZE)
             .map(|(index, model)| {
                 if compact {
                     return Row::new(vec![
@@ -4211,9 +4485,17 @@ impl App {
         .yellow()
         .bold();
         let table_title = if compact {
-            format!("Models{state} · Space toggle · Alt+D/E download")
+            format!(
+                "Models{state} · page {}/{} · [/ ] page · Space toggle · Alt+D/E download",
+                self.download_page + 1,
+                self.download_page_count()
+            )
         } else {
-            format!("Models{state} · Space toggle · Alt+N/A/K CRUD · Alt+D/E download")
+            format!(
+                "Models{state} · page {}/{} · [/ ] page · Space toggle · Alt+N/A/K CRUD · Alt+D/E download",
+                self.download_page + 1,
+                self.download_page_count()
+            )
         };
         let table = Table::new(rows, table_widths)
             .header(table_header)
@@ -4244,13 +4526,16 @@ impl App {
             .rev()
             .map(|line| Line::from(line.as_str()))
             .collect::<Vec<_>>();
+        let eta = self
+            .download_eta_label()
+            .map_or_else(String::new, |label| format!(" · {label}"));
         frame.render_widget(
             Paragraph::new(log_lines)
                 .block(
                     Block::default()
                         .title(format!(
-                            "Download activity · Alt+Y clear · {}",
-                            self.download_disk_space
+                            "Download activity · Alt+Y clear · {}{}",
+                            self.download_disk_space, eta
                         ))
                         .borders(Borders::ALL),
                 )
@@ -4474,6 +4759,26 @@ impl App {
         .row_highlight_style(Style::default().bg(Color::DarkGray).fg(Color::White))
         .highlight_symbol("▶ ");
         frame.render_stateful_widget(table, area, &mut self.chat_sessions_state);
+    }
+
+    fn draw_chat_prompts(&mut self, frame: &mut Frame) {
+        let area = centered_rect(66, 58, frame.area());
+        frame.render_widget(Clear, area);
+        let items = self
+            .chat_prompts
+            .iter()
+            .cloned()
+            .map(ListItem::new)
+            .collect::<Vec<_>>();
+        let list = List::new(items)
+            .block(
+                Block::default()
+                    .title(" System prompts · Enter load · l/Esc close ")
+                    .borders(Borders::ALL),
+            )
+            .highlight_symbol("▶ ")
+            .highlight_style(Style::default().fg(Color::Cyan).bold());
+        frame.render_stateful_widget(list, area, &mut self.chat_prompts_state);
     }
 
     fn draw_script_versions(&mut self, frame: &mut Frame) {
@@ -5298,6 +5603,79 @@ fn edit_single_line_buffer(buffer: &mut TextBuffer, key: KeyEvent) -> bool {
     }
 }
 
+fn format_duration(duration: Duration) -> String {
+    let seconds = duration.as_secs();
+    if seconds >= 3600 {
+        format!("{}h {:02}m", seconds / 3600, (seconds / 60) % 60)
+    } else if seconds >= 60 {
+        format!("{}m {:02}s", seconds / 60, seconds % 60)
+    } else {
+        format!("{seconds}s")
+    }
+}
+
+fn parse_download_progress_line(line: &str) -> Option<DownloadProgressSnapshot> {
+    let percent_index = line.find('%')?;
+    let percent_start = line[..percent_index]
+        .char_indices()
+        .rev()
+        .take_while(|(_, character)| character.is_ascii_digit())
+        .last()
+        .map_or(percent_index, |(index, _)| index);
+    let percent = line[percent_start..percent_index].parse::<u64>().ok()?;
+    if percent > 100 {
+        return None;
+    }
+    let progress_part = line[percent_index + 1..].split('[').next()?;
+    let size_token = progress_part
+        .split_whitespace()
+        .find(|token| token.contains('/'))?;
+    let (downloaded, total) = size_token.split_once('/')?;
+    let downloaded_bytes = parse_progress_size(downloaded)?;
+    let total_bytes = parse_progress_size(total)?;
+    let speed_bytes_per_second = line
+        .split_whitespace()
+        .find_map(|token| {
+            token
+                .trim_matches(|character: char| matches!(character, ',' | ']' | ')'))
+                .strip_suffix("/s")
+        })
+        .and_then(parse_progress_size)
+        .map(|bytes| bytes as f64);
+    Some(DownloadProgressSnapshot {
+        downloaded_bytes,
+        total_bytes,
+        speed_bytes_per_second,
+    })
+}
+
+fn parse_progress_size(value: &str) -> Option<u64> {
+    let value = value
+        .trim_matches(|character: char| matches!(character, '|' | ',' | ')' | ']' | '\r' | '\n'));
+    if value.is_empty() {
+        return None;
+    }
+    let split_at = value
+        .char_indices()
+        .find(|(_, character)| !character.is_ascii_digit() && *character != '.')
+        .map_or(value.len(), |(index, _)| index);
+    let number = value[..split_at].parse::<f64>().ok()?;
+    if !number.is_finite() || number < 0.0 {
+        return None;
+    }
+    let suffix = value[split_at..].trim().to_ascii_lowercase();
+    let multiplier = match suffix.as_str() {
+        "" | "b" => 1.0,
+        "k" | "kb" | "kib" => 1024.0,
+        "m" | "mb" | "mib" => 1024.0_f64.powi(2),
+        "g" | "gb" | "gib" => 1024.0_f64.powi(3),
+        "t" | "tb" | "tib" => 1024.0_f64.powi(4),
+        _ => return None,
+    };
+    let bytes = number * multiplier;
+    (bytes <= u64::MAX as f64).then(|| bytes.round() as u64)
+}
+
 fn format_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     let mut value = bytes as f64;
@@ -5532,6 +5910,20 @@ mod tests {
     use crate::config_store::{load_config_strict, ModelConfig};
     use ratatui::backend::TestBackend;
     use tempfile::TempDir;
+
+    #[test]
+    fn parses_huggingface_progress_and_speed() {
+        let progress = parse_download_progress_line(
+            "weights.safetensors:  25%|██▌       | 1.0GiB/4.0GiB [00:10<00:30, 32.0MiB/s]",
+        )
+        .unwrap();
+        assert_eq!(progress.downloaded_bytes, 1 << 30);
+        assert_eq!(progress.total_bytes, 4 << 30);
+        assert_eq!(
+            progress.speed_bytes_per_second,
+            Some(32.0 * (1 << 20) as f64)
+        );
+    }
 
     struct AppFixture {
         _repository: TempDir,

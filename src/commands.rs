@@ -96,6 +96,8 @@ pub enum CommandId {
     ChatRefreshModels,
     ChatConnect,
     ChatDetect,
+    ChatKillDetected,
+    ChatPrompts,
     ChatClear,
     ChatSave,
     ChatSessions,
@@ -151,7 +153,7 @@ pub enum CommandId {
 impl CommandId {
     /// Every command identifier. Kept in declaration order for completeness
     /// checks and integrations which want to validate their dispatch table.
-    pub const ALL: [Self; 84] = [
+    pub const ALL: [Self; 86] = [
         Self::Quit,
         Self::ShowHelp,
         Self::ShowPalette,
@@ -190,6 +192,8 @@ impl CommandId {
         Self::ChatRefreshModels,
         Self::ChatConnect,
         Self::ChatDetect,
+        Self::ChatKillDetected,
+        Self::ChatPrompts,
         Self::ChatClear,
         Self::ChatSave,
         Self::ChatSessions,
@@ -279,6 +283,8 @@ impl CommandId {
             Self::ChatRefreshModels => "chat.refresh-models",
             Self::ChatConnect => "chat.connect",
             Self::ChatDetect => "chat.detect",
+            Self::ChatKillDetected => "chat.kill-detected",
+            Self::ChatPrompts => "chat.prompts",
             Self::ChatClear => "chat.clear",
             Self::ChatSave => "chat.save",
             Self::ChatSessions => "chat.sessions",
@@ -733,6 +739,24 @@ pub static COMMANDS: &[CommandSpec] = &[
         "Chat: auto-detect a local server",
         true,
         ["port", "endpoint", "probe"]
+    ),
+    command!(
+        ChatKillDetected,
+        Chat,
+        "K",
+        "Kill detected server",
+        "Chat: terminate an explicitly detected external llama-server",
+        true,
+        ["stop", "terminate", "external", "server"]
+    ),
+    command!(
+        ChatPrompts,
+        Chat,
+        "l",
+        "Prompt library",
+        "Chat: load a saved system prompt",
+        true,
+        ["system", "instructions", "persona", "library"]
     ),
     command!(
         ChatClear,

@@ -56,7 +56,14 @@ module tree:
 - `src/state_store.rs` owns the bounded legacy-compatible job and chat-session
   file formats.
 - `src/telemetry.rs` owns process-tree CPU/RAM and optional NVIDIA memory
-  sampling.
+  sampling plus disk-free and network byte counters.
+- `src/bench_results.rs` owns bounded JSONL/Markdown result discovery,
+  deterministic sorting, and metric comparison.
+- `src/settings.rs` owns persisted operator settings and validated portable
+  profile import/export bundles.
+- `src/prompt_store.rs` owns bounded local Chat system-prompt files.
+- `src/script_lint.rs` and `src/serve_bench.rs` own optional shellcheck
+  diagnostics and read-only serving/bench flag audits.
 - `src/text_buffer.rs` owns Unicode-safe editing and cursor movement shared by
   the inline terminal editors.
 - `src/app.rs` owns the Ratatui event loop, Workbench and Chat model state,
@@ -89,6 +96,16 @@ executable path or command name, not a shell fragment with flags. The Python
 boundary still owns Hugging Face downloads while Rust supervises the child.
 Runtime worker precedence is global override, then per-model value, then the
 optional slow preset.
+
+Download output is supervised as a bounded stream. The Rust Download view
+parses common Hugging Face progress lines (`downloaded/total` and `rate/s`) to
+derive an advisory ETA; when a backend does not emit those lines, the strict
+preflight total and disk-space report remain available without pretending an
+ETA is known.
+
+Chat detection is read-only until an explicit `K` action. A selected PID must
+still be present in a fresh `pgrep -fa llama-server` result and its command
+basename must be `llama-server` before Rust sends a termination signal.
 
 Before starting a Download job, Rust clones the exact launch argv and appends
 `--estimate-json` only to the preflight copy. The Python boundary uses the same
@@ -157,6 +174,11 @@ available as a fallback for any remaining live-only operational gaps and should
 only be retired after live llama-swap smoke verification passes. `CAR-97` is
 still in progress; this is not a claim of a fully green release matrix.
 
+The headless CLI also exposes a bounded benchmark result browser (`--list
+results` and `--compare-results`) and a prompt library listing. The Chat tab's
+`l` picker loads Markdown prompts from `L3MS_DATA_DIR/prompts`, while settings
+and profile bundles use atomic writes and existing snapshot-aware stores.
+
 ## Rust vs. Textual readiness
 
 The legacy Textual application is `l3ms.py` and `l3ms/app.py` on `main`. The
@@ -174,7 +196,7 @@ second implementation backlog.
 | Jobs | Bounded persistence, stale-run reconciliation, stop/retry, safe reconstruction | Persistence, stop/retry, and history | Rust is ahead on recovery safety |
 | GGUF browser | Bounded v2/v3 parsing, recursive inventory, metadata, symlink and budget protection | Similar browsing features | Rust is ahead on malformed-input safety |
 | Keyboard and navigation | Command palette, contextual help, keyboard-first focus | Better mouse/widget ergonomics | Rust matches the project direction |
-| Automated confidence | Locked toolchain, CI, format/lint gates, and 195 Rust tests | No comparable Textual TUI test suite in `main` | Rust is ahead |
+| Automated confidence | Locked toolchain, CI, format/lint gates, and bounded Rust unit coverage | No comparable Textual TUI test suite in `main` | Rust is ahead |
 | Runtime boundary | Compiled binary plus the intentional Python downloader boundary | Python/Textual runtime | Rust is lighter after build |
 
 The Rust branch is the preferred application for Workbench, model operations,

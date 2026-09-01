@@ -3,6 +3,9 @@ use std::{
     process::{Command, Stdio},
 };
 
+#[cfg(target_os = "linux")]
+use std::fs;
+
 use anyhow::{Context, Result};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -11,6 +14,9 @@ pub struct ResourceSnapshot {
     pub cpu_percent: f64,
     pub rss_kib: u64,
     pub gpu_memory_mib: Option<u64>,
+    pub disk_free_mib: Option<u64>,
+    pub network_rx_bytes: Option<u64>,
+    pub network_tx_bytes: Option<u64>,
 }
 
 impl ResourceSnapshot {
@@ -22,8 +28,15 @@ impl ResourceSnapshot {
         let elapsed = elapsed_seconds.map_or_else(String::new, |seconds| {
             format!(" elapsed={:02}:{:02}", seconds / 60, seconds % 60)
         });
+        let disk = self
+            .disk_free_mib
+            .map_or_else(|| "n/a".to_owned(), |value| format!("{value} MiB"));
+        let network = match (self.network_rx_bytes, self.network_tx_bytes) {
+            (Some(rx), Some(tx)) => format!("rx={rx}B tx={tx}B"),
+            _ => "n/a".to_owned(),
+        };
         format!(
-            "Resources: {subject}={} cpu={:.1}% ram={:.1} MiB gpu={gpu}{elapsed}",
+            "Resources: {subject}={} cpu={:.1}% ram={:.1} MiB gpu={gpu} disk={disk} net={network}{elapsed}",
             self.process_count,
             self.cpu_percent,
             self.rss_kib as f64 / 1024.0,
@@ -135,6 +148,9 @@ fn aggregate(processes: &[ProcessSample], pids: &HashSet<u32>) -> ResourceSnapsh
         cpu_percent,
         rss_kib,
         gpu_memory_mib: gpu_memory_mib(pids),
+        disk_free_mib: disk_free_mib("."),
+        network_rx_bytes: network_bytes().map(|bytes| bytes.0),
+        network_tx_bytes: network_bytes().map(|bytes| bytes.1),
     }
 }
 
@@ -177,6 +193,60 @@ fn command_name(command: &str) -> &str {
     command.rsplit('/').next().unwrap_or(command)
 }
 
+fn disk_free_mib(path: &str) -> Option<u64> {
+    let output = Command::new("df")
+        .args(["-k", path])
+        .env("LC_ALL", "C")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .skip(1)
+        .find_map(|line| line.split_whitespace().nth(3)?.parse::<u64>().ok())
+        .map(|kib| kib / 1024)
+}
+
+fn network_bytes() -> Option<(u64, u64)> {
+    #[cfg(target_os = "linux")]
+    {
+        let text = fs::read_to_string("/proc/net/dev").ok()?;
+        parse_proc_net_dev(&text)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        None
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn parse_proc_net_dev(text: &str) -> Option<(u64, u64)> {
+    let mut rx = 0_u64;
+    let mut tx = 0_u64;
+    let mut found = false;
+    for line in text.lines().skip(2) {
+        let (_, values) = line.split_once(':')?;
+        let fields = values.split_whitespace().collect::<Vec<_>>();
+        if fields.len() < 9 {
+            continue;
+        }
+        let Some(line_rx) = fields[0].parse::<u64>().ok() else {
+            continue;
+        };
+        let Some(line_tx) = fields[8].parse::<u64>().ok() else {
+            continue;
+        };
+        rx = rx.saturating_add(line_rx);
+        tx = tx.saturating_add(line_tx);
+        found = true;
+    }
+    found.then_some((rx, tx))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -215,7 +285,7 @@ mod tests {
         assert_eq!(snapshot.rss_kib, 7168);
         assert_eq!(
             snapshot.render("procs", Some(65)),
-            "Resources: procs=3 cpu=17.0% ram=7.0 MiB gpu=n/a elapsed=01:05"
+            "Resources: procs=3 cpu=17.0% ram=7.0 MiB gpu=n/a disk=n/a net=n/a elapsed=01:05"
         );
     }
 
@@ -234,6 +304,13 @@ mod tests {
         assert_eq!(command_name("llama-swap"), "llama-swap");
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn parses_proc_network_counters() {
+        let text = "Inter-| Receive | Transmit\n face |bytes packets errs drop fifo frame compressed multicast|bytes packets errs drop fifo colls carrier compressed\n eth0: 100 1 0 0 0 0 0 0 200 2 0 0 0 0 0 0\n";
+        assert_eq!(parse_proc_net_dev(text), Some((100, 200)));
+    }
+
     fn aggregate_without_gpu(processes: &[ProcessSample], pids: &HashSet<u32>) -> ResourceSnapshot {
         ResourceSnapshot {
             process_count: pids.len(),
@@ -248,6 +325,9 @@ mod tests {
                 .map(|process| process.rss_kib)
                 .sum(),
             gpu_memory_mib: None,
+            disk_free_mib: None,
+            network_rx_bytes: None,
+            network_tx_bytes: None,
         }
     }
 }
