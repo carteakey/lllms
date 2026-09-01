@@ -231,7 +231,7 @@ Download (active only on Download tab):
 
 Model Ops (active only on Model Ops tab):
 
-- `Ctrl+F`: focus model/script filter
+- `Ctrl+F` / `/` (Bench): focus the model or benchmark-script filter
 - `Ctrl+J`: focus model/script table
 - `Ctrl+U`: focus detail/script editor
 - `Ctrl+M`: toggle run/bench mode

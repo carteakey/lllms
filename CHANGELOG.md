@@ -98,6 +98,8 @@ verification matrix.
   draft acceptance, llama.cpp commit, and benchmark command.
 - Added a validated community-run schema, submission guide, generator tests,
   and a separate unranked dashboard view for non-local hardware.
+- Added keyboard and palette-backed Bench script filtering with stable editor
+  and run selection mapping plus an explicit no-results state.
 
 ### Changed
 - Kept community runs structurally separate from the local RTX 4070 ranking
