@@ -172,6 +172,30 @@ limiter) + 5 KB from SSD. Prefill multiplies PLE reads by batch size →
 
 ### 9.1 MTP implementation (current tier: working, ahead of upstream)
 
+**Upstream refresh + unsloth-fork experiment (2026-09-01, concluded).**
+Upstream merged the big PRs (#27941 fixes, #28123 rollback, #28023 indexer,
+#27978 MoE dispatch, #28011 ngram scan): gold refreshed to 9d817213a, smoke
+clean, prose 19.6-19.7 / spec-warm 26.0 (flat vs prior — the gains are
+MTP-side and pp-side, not base-decode). Attempted to upgrade the MTP tier
+to fresh master + #27836: built clean (the detached-head patch is now
+upstream as mtp_only/trunk_only machinery), but **new master regressed on
+#27836-era sidecar draft heads** — `check_tensor_dims: tensor
+'blk.0.hc_attn_norm.weight' not found` for both the agentionai head and
+unsloth's MTP-Q4_K_M (unsloth layout needs the still-open #28097, which
+also carries the draft-load regression fix). #28097 merge into our branch
+conflicts 5× with #27836 in the same loader region. Reverted MTP tier to
+0b7d6d57d (proven, 25.0 code) until #27836 + #28097 merge upstream — then
+a plain gold refresh delivers MTP + rollback with no vendored builds.
+Also probed **unslothai/llama.cpp**: their `master` is tooling-only
+(downloader, pin scripts) — "unknown model architecture: 'qwen4exp'"; the
+serving code is pin-assembled into `base/upstream-*` branches at release
+time, and their MTP tree lacks #28123's rollback. Not a usable base for
+our tier; parked. Unsloth MTP head (non-shared Q4_K_M, 2.79 GB) downloaded
+to `models/unsloth/Qwen3.8-Flash-Next-GGUF/MTP/` for when #28097 lands.
+**Retry conditions for the MTP upgrade**: #27836 + #28097 merged upstream
+→ git fetch, rebuild gold, point --spec-draft-model at the unsloth head,
+re-run the ladder.
+
 **2026-08-31 rollback-stack experiment (concluded, reverted).** Context: PR
 #28123 (recurrent-state rollback, CISC-approved) + the port PR
 (#28118 on-device checkpoints, #28120 rollback enable, #28061 replay fix)
